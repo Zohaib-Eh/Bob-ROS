@@ -2,6 +2,8 @@ import io
 import zipfile
 import xml.etree.ElementTree as ET
 
+import pytest
+import trimesh
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -70,9 +72,10 @@ def test_import_unsupported_extension_is_400():
     assert r.status_code == 400
 
 
-def _tri_body(bid):
-    return Body(id=bid, name=bid, vertices=[(0, 0, 0), (1, 0, 0), (0, 1, 0)],
-                triangles=[(0, 1, 2)])
+def _box_body(bid):
+    box = trimesh.creation.box(extents=(1, 1, 1))  # closed unit cube at origin
+    return Body(id=bid, name=bid, vertices=[tuple(v) for v in box.vertices.tolist()],
+                triangles=[tuple(t) for t in box.faces.tolist()])
 
 
 def _link(lid):
@@ -89,7 +92,7 @@ def _payload(links, joints):
     return {"robot_name": "r",
             "links": [_link(i).model_dump() for i in links],
             "joints": joints,
-            "bodies_by_link": {i: [_tri_body(i).model_dump()] for i in links}}
+            "bodies_by_link": {i: [_box_body(i).model_dump()] for i in links}}
 
 
 def test_export_cycle_is_422():
@@ -132,3 +135,44 @@ def test_export_zero_length_axis_is_422():
     joint = dict(_joint("a", "b"), type="continuous", axis=[0, 0, 0])
     r = client.post("/export", json=_payload(["a", "b"], [joint]))
     assert r.status_code == 422
+
+
+def _urdf_link(r, name):
+    root = ET.fromstring(zipfile.ZipFile(io.BytesIO(r.content)).read("r/urdf/r.urdf"))
+    return next(el for el in root.findall("link") if el.attrib["name"] == name)
+
+
+def test_export_ignores_client_mass_and_uses_geometry():
+    payload = _payload(["a", "b"], [_joint("a", "b")])
+    payload["links"][0].update(mass_kg=-1.0, center_of_mass=[9, 9, 9],
+                               inertia=[-5, -5, -5, 0, 0, 0])
+    r = client.post("/export", json=payload)
+    assert r.status_code == 200
+    inertial = _urdf_link(r, "a").find("inertial")
+    assert float(inertial.find("mass").attrib["value"]) == pytest.approx(1000.0)
+    i = inertial.find("inertia").attrib
+    # solid unit cube, 1000 kg: I = m (1 + 1) / 12 about each axis
+    for k in ("ixx", "iyy", "izz"):
+        assert float(i[k]) == pytest.approx(1000.0 / 6.0, rel=1e-6)
+    for k in ("ixy", "ixz", "iyz"):
+        assert float(i[k]) == pytest.approx(0.0, abs=1e-9)
+    assert [float(x) for x in inertial.find("origin").attrib["xyz"].split()] == pytest.approx([0, 0, 0], abs=1e-9)
+
+
+@pytest.mark.parametrize("density", [0.0, -1.0])
+def test_export_non_positive_density_is_422_naming_link(density):
+    payload = _payload(["a", "b"], [_joint("a", "b")])
+    payload["links"][1]["density_kg_m3"] = density
+    r = client.post("/export", json=payload)
+    assert r.status_code == 422
+    assert "'b'" in r.json()["detail"] and "density" in r.json()["detail"]
+
+
+def test_export_zero_volume_body_is_422_naming_link():
+    payload = _payload(["a", "b"], [_joint("a", "b")])
+    payload["bodies_by_link"]["b"] = [{"id": "t", "name": "t",
+                                       "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                                       "triangles": [[0, 1, 2]]}]
+    r = client.post("/export", json=payload)
+    assert r.status_code == 422
+    assert "'b'" in r.json()["detail"] and "volume" in r.json()["detail"]

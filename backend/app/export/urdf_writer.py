@@ -9,6 +9,7 @@ import numpy as np
 import trimesh
 from scipy.spatial.transform import Rotation
 
+from app.massprops.link_mass import compute_link_mass_properties
 from app.models import Body, Joint, Link
 from app.validate.structural import validate_structure
 
@@ -156,12 +157,22 @@ def _package_xml(robot_name: str) -> str:
 """
 
 
+def _with_mass_properties(link: Link, bodies: list[Body]) -> Link:
+    """Mass/COM/inertia always come from geometry + density, never the client."""
+    try:
+        mass, com, inertia = compute_link_mass_properties(bodies, link.density_kg_m3)
+    except ValueError as exc:
+        raise ValueError(f"Link '{link.id}': {exc}") from exc
+    return link.model_copy(update={"mass_kg": mass, "center_of_mass": com, "inertia": inertia})
+
+
 def export_package(
     robot_name: str,
     links: list[Link],
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
 ) -> bytes:
+    links = [_with_mass_properties(l, bodies_by_link.get(l.id, [])) for l in links]
     urdf = export_urdf(robot_name, links, joints, bodies_by_link)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:

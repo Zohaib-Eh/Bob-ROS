@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import trimesh
 from app.models import Body
@@ -11,6 +13,8 @@ def compute_link_mass_properties(
     """Combine every Body belonging to a Link into one mesh and compute its
     mass properties via signed-tetrahedra volume integration (trimesh's
     built-in implementation), rather than hand-rolling the integral."""
+    if not (math.isfinite(density_kg_m3) and density_kg_m3 > 0):
+        raise ValueError(f"density must be finite and > 0, got {density_kg_m3}")
     combined: trimesh.Trimesh | None = None
     for body in bodies:
         mesh = trimesh.Trimesh(
