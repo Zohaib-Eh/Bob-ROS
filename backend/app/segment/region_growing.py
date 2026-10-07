@@ -16,6 +16,8 @@ def grow_regions(
     mesh = trimesh.Trimesh(
         vertices=np.array(vertices), faces=np.array(triangles), process=False
     )
+    if not mesh.is_watertight:
+        raise ValueError("mesh must be watertight to grow regions")
     threshold_rad = math.radians(angle_threshold_deg)
 
     adjacency = mesh.face_adjacency
