@@ -56,7 +56,8 @@ def _face_to_model(face, triangle_indices: list[int]) -> Face:
     if t == GeomAbs_Plane:
         pl = adaptor.Plane()
         loc, n = pl.Location(), pl.Axis().Direction()
-        return Face(kind="plane", origin="brep", normal=(n.X(), n.Y(), n.Z()),
+        s = -1.0 if face.Orientation() == TopAbs_REVERSED else 1.0  # outward
+        return Face(kind="plane", origin="brep", normal=(s * n.X(), s * n.Y(), s * n.Z()),
                     center=(loc.X(), loc.Y(), loc.Z()), residual=0.0,
                     triangle_indices=triangle_indices)
     if t == GeomAbs_Cylinder:

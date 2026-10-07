@@ -82,3 +82,13 @@ def test_unknown_extension_raises(tmp_path):
     p.write_text("x")
     with pytest.raises(ValueError):
         import_step(str(p))
+
+
+def test_box_plane_normals_point_outward(box_step_path):
+    body = import_step(box_step_path)[0]
+    verts = trimesh.Trimesh(body.vertices, body.triangles, process=False).triangles_center
+    centroid = (0.5, 1.0, 1.5)
+    for f in body.faces:
+        c = verts[f.triangle_indices].mean(axis=0)
+        d = sum(n * (ci - ci0) for n, ci, ci0 in zip(f.normal, c, centroid))
+        assert d > 0
