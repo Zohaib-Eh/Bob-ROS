@@ -17,11 +17,14 @@ _MESH_EXTENSIONS = {".stl", ".obj"}
 @router.post("/import")
 async def import_file(file: UploadFile, scale: float = 0.001):
     suffix = os.path.splitext(file.filename or "")[1].lower()
+    if suffix not in _STEP_EXTENSIONS | _MESH_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type: {suffix}")
+    content = await file.read()
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await file.read())
         tmp_path = tmp.name
-
     try:
+        with open(tmp_path, "wb") as f:
+            f.write(content)
         if suffix in _STEP_EXTENSIONS:
             bodies = import_step(tmp_path)
             applied_scale = 1.0  # STEP carries its own units; no mm assumption
@@ -30,8 +33,6 @@ async def import_file(file: UploadFile, scale: float = 0.001):
             regions = grow_regions(body.vertices, body.triangles)
             body.faces = [fit_face(body.vertices, body.triangles, r) for r in regions]
             bodies = [body]
-        else:
-            raise HTTPException(400, f"Unsupported file type: {suffix}")
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     finally:

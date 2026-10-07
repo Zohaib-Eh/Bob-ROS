@@ -23,3 +23,9 @@ def test_non_watertight_mesh_raises_clear_error(non_watertight_stl_path):
 def test_non_positive_scale_is_rejected(box_stl_path):
     with pytest.raises(ValueError, match="scale"):
         import_mesh(box_stl_path, scale=0.0)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
+def test_non_finite_or_negative_scale_rejected(box_stl_path, bad):
+    with pytest.raises(ValueError):
+        import_mesh(box_stl_path, scale=bad)

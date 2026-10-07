@@ -1,3 +1,4 @@
+import math
 import uuid
 import trimesh
 
@@ -9,7 +10,7 @@ def import_mesh(file_path: str, scale: float = 0.001) -> tuple[Body, float]:
     hobbyist convention (millimeters) is assumed by default; callers must
     surface `scale` to the user so a wrong assumption is visible, per the
     spec's documented mm/m pitfall."""
-    if scale <= 0:
+    if not (math.isfinite(scale) and scale > 0):
         raise ValueError(f"scale must be positive, got {scale}")
 
     mesh = trimesh.load(file_path, force="mesh")

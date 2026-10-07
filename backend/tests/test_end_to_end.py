@@ -104,3 +104,16 @@ def test_export_valid_model_returns_zip():
     assert r.headers["content-type"] == "application/zip"
     assert 'r.zip' in r.headers["content-disposition"]
     assert zipfile.ZipFile(io.BytesIO(r.content)).testzip() is None
+
+
+def test_import_nan_scale_is_422(box_stl_path):
+    with open(box_stl_path, "rb") as f:
+        r = client.post("/import?scale=nan", files={"file": ("box.stl", f.read())})
+    assert r.status_code == 422
+
+
+def test_import_scale_override(box_stl_path):
+    with open(box_stl_path, "rb") as f:
+        r = client.post("/import?scale=1.0", files={"file": ("box.stl", f.read())})
+    assert r.status_code == 200
+    assert r.json()["applied_scale"] == 1.0
