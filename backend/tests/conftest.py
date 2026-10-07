@@ -1,4 +1,6 @@
+import app  # noqa: F401  (sets BLAS thread cap before numpy loads)
 import pytest
+import trimesh
 from OCC.Core.BRep import BRep_Builder
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
@@ -94,4 +96,23 @@ def peg_in_hole_step_path(tmp_path) -> str:
 
     path = str(tmp_path / "peg_in_hole.step")
     _write_step(compound, path)
+    return path
+
+
+@pytest.fixture
+def box_stl_path(tmp_path) -> str:
+    # Built "in mm" (1000x1000x2000 units) to match the real-world STL
+    # convention this importer must correct for.
+    mesh = trimesh.creation.box(extents=(1000.0, 1000.0, 2000.0))
+    path = str(tmp_path / "box_mm.stl")
+    mesh.export(path)
+    return path
+
+
+@pytest.fixture
+def non_watertight_stl_path(tmp_path) -> str:
+    mesh = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+    mesh.faces = mesh.faces[:-1]  # drop one face -> open mesh
+    path = str(tmp_path / "broken.stl")
+    mesh.export(path)
     return path
