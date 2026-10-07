@@ -43,3 +43,4 @@ class Joint(BaseModel):
     limit_lower: float | None = None
     limit_upper: float | None = None
     source: Literal["suggested", "confirmed", "manual"]
+    ambiguous: bool = False
