@@ -6,6 +6,15 @@ def validate_structure(links: list[Link], joints: list[Joint]) -> list[str]:
     link_ids = {link.id for link in links}
     children_of_joint = {joint.child_link_id for joint in joints}
     parent_by_child = {joint.child_link_id: joint.parent_link_id for joint in joints}
+    joints_by_child: dict[str, list[str]] = {}
+    for joint in joints:
+        joints_by_child.setdefault(joint.child_link_id, []).append(joint.id)
+    for child, joint_ids in joints_by_child.items():
+        if len(joint_ids) > 1:
+            errors.append(
+                f"Link '{child}' has more than one parent joint "
+                f"({', '.join(joint_ids)}); a URDF tree allows exactly one parent per link."
+            )
 
     roots = [link.id for link in links if link.id not in children_of_joint]
     if len(roots) == 0:

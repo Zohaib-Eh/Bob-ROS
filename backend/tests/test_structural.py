@@ -58,3 +58,14 @@ def test_link_with_missing_mass_is_an_error():
     joints = [_joint("j1", "base", "arm")]
     errors = validate_structure(links, joints)
     assert any("mass" in e.lower() and "arm" in e for e in errors)
+
+
+def test_child_with_two_parent_joints_is_an_error():
+    links = [_link("base"), _link("a"), _link("b")]
+    joints = [
+        _joint("j1", "base", "a"),
+        _joint("j2", "base", "b"),
+        _joint("j3", "a", "b"),
+    ]
+    errors = validate_structure(links, joints)
+    assert any("parent" in e.lower() and "'b'" in e for e in errors)
