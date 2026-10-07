@@ -259,3 +259,42 @@ def test_detect_joints_touching_bodies_returns_joint(box_step_path):
     r = _detect(box, _shifted(box, 1.0))
     assert r.status_code == 200
     assert r.json()["type"] == "planar"
+
+
+def _confirm_and_export(block: dict, peg: dict) -> zipfile.ZipFile:
+    r = _detect(block, peg)
+    assert r.status_code == 200
+    joint = r.json()
+    assert joint["type"] == "cylindrical"
+    joint.update(type="continuous", source="confirmed")  # user confirms a URDF type
+    links = [{"id": lid, "name": lid, "body_ids": [b["id"]], "density_kg_m3": 1000.0}
+             for lid, b in (("a", block), ("b", peg))]
+    r = client.post("/export", json={"robot_name": "r", "links": links, "joints": [joint],
+                                     "bodies_by_link": {"a": [block], "b": [peg]}})
+    assert r.status_code == 200
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    assert {"r/urdf/r.urdf", "r/meshes/a.stl", "r/meshes/b.stl"} <= set(z.namelist())
+    root = ET.fromstring(z.read("r/urdf/r.urdf"))
+    assert root.find("joint").attrib["type"] == "continuous"
+    for link_el in root.findall("link"):
+        assert float(link_el.find("inertial").find("mass").attrib["value"]) > 0
+    return z
+
+
+def test_http_step_peg_in_hole_import_detect_confirm_export(peg_in_hole_step_path):
+    r = client.post("/import", files={"file": ("peg.step", open(peg_in_hole_step_path, "rb").read())})
+    assert r.status_code == 200
+    block, peg = r.json()["bodies"]
+    _confirm_and_export(block, peg)
+
+
+def test_http_stl_two_part_import_detect_confirm_export(peg_in_hole_step_path, tmp_path):
+    # one fine mm-unit STL per part, from the STEP tessellation
+    bodies = []
+    for b in import_step(peg_in_hole_step_path):
+        stl = trimesh.Trimesh(b.vertices, b.triangles).apply_scale(1000.0).export(file_type="stl")
+        r = client.post("/import", files={"file": (f"{b.name}.stl", stl)})
+        assert r.status_code == 200
+        assert r.json()["applied_scale"] == 0.001
+        bodies.append(r.json()["bodies"][0])
+    _confirm_and_export(*bodies)
