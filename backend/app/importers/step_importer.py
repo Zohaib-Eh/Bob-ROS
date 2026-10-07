@@ -1,3 +1,4 @@
+import math
 import os
 import uuid
 
@@ -21,15 +22,14 @@ from OCC.Core.TopoDS import TopoDS_Shape
 from app.models import Body, Face
 
 _LINEAR_DEFLECTION = 0.001  # meters
-_MM_TO_M = 0.001
 
 
-def _read_shape(file_path: str):
+def _read_shape(file_path: str, brep_scale: float):
     """Read a CAD file into a shape in meters.
 
     STEP/IGES carry a unit; Interface_Static (process-global, so set on every
-    call) makes OCCT convert to meters. BREP is unitless: assumed OCCT-native
-    millimetres and scaled by 0.001.
+    call) makes OCCT convert to meters. BREP is unitless: scaled by
+    `brep_scale` (default 0.001 = OCCT-native millimetres).
     """
     ext = os.path.splitext(file_path)[1].lower()
     if ext in (".step", ".stp", ".iges", ".igs"):
@@ -48,7 +48,7 @@ def _read_shape(file_path: str):
         if not breptools.Read(shape, file_path, BRep_Builder()):
             raise ValueError("Could not read BREP file")
         trsf = gp_Trsf()
-        trsf.SetScale(gp_Pnt(0, 0, 0), _MM_TO_M)
+        trsf.SetScale(gp_Pnt(0, 0, 0), brep_scale)
         return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
     raise ValueError(f"Unsupported CAD file extension: {ext!r}")
 
@@ -121,9 +121,12 @@ def _extract_mesh(solid):
     return merged, tris, per_face
 
 
-def import_step(file_path: str) -> list[Body]:
-    """Import STEP/IGES/BREP (by extension) as one Body per solid, in meters."""
-    shape = _read_shape(file_path)
+def import_step(file_path: str, brep_scale: float = 0.001) -> list[Body]:
+    """Import STEP/IGES/BREP (by extension) as one Body per solid, in meters.
+    `brep_scale` applies to unitless .brep only; callers surface it like STL scale."""
+    if not (math.isfinite(brep_scale) and brep_scale > 0):
+        raise ValueError(f"brep_scale must be finite and positive, got {brep_scale}")
+    shape = _read_shape(file_path, brep_scale)
     bodies: list[Body] = []
     ex = TopExp_Explorer(shape, TopAbs_SOLID)
     while ex.More():

@@ -92,3 +92,9 @@ def test_box_plane_normals_point_outward(box_step_path):
         c = verts[f.triangle_indices].mean(axis=0)
         d = sum(n * (ci - ci0) for n, ci, ci0 in zip(f.normal, c, centroid))
         assert d > 0
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf")])
+def test_brep_scale_must_be_finite_positive(cylinder_brep_path, bad):
+    with pytest.raises(ValueError, match="scale"):
+        import_step(cylinder_brep_path, brep_scale=bad)

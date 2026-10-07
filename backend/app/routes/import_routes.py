@@ -15,19 +15,21 @@ _MESH_EXTENSIONS = {".stl", ".obj"}
 
 
 @router.post("/import")
-async def import_file(file: UploadFile, scale: float = 0.001):
+def import_file(file: UploadFile, scale: float = 0.001):  # sync: runs in threadpool
     suffix = os.path.splitext(file.filename or "")[1].lower()
     if suffix not in _STEP_EXTENSIONS | _MESH_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type: {suffix}")
-    content = await file.read()
+    content = file.file.read()
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = tmp.name
     try:
         with open(tmp_path, "wb") as f:
             f.write(content)
         if suffix in _STEP_EXTENSIONS:
-            bodies = import_step(tmp_path)
-            applied_scale = 1.0  # STEP carries its own units; no mm assumption
+            if suffix == ".brep":  # unitless: assumed mm unless overridden, like STL
+                bodies, applied_scale = import_step(tmp_path, brep_scale=scale), scale
+            else:
+                bodies, applied_scale = import_step(tmp_path), 1.0  # file carries its unit
         elif suffix in _MESH_EXTENSIONS:
             body, applied_scale = import_mesh(tmp_path, scale=scale)
             regions = grow_regions(body.vertices, body.triangles)

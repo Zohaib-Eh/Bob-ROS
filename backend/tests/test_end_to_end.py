@@ -207,3 +207,29 @@ def test_import_non_watertight_names_upload_not_temp_path(non_watertight_stl_pat
     detail = r.json()["detail"]
     assert "broken.stl" in detail and "watertight" in detail
     assert "temp" not in detail.lower() and "tmp" not in detail.lower()
+
+
+def _cyl_radius(r):
+    return next(f["radius"] for f in r.json()["bodies"][0]["faces"] if f["kind"] == "cylinder")
+
+
+def test_brep_import_reports_and_honors_scale(cylinder_brep_path):
+    data = open(cylinder_brep_path, "rb").read()
+    r = client.post("/import", files={"file": ("cyl.brep", data)})
+    assert r.status_code == 200
+    assert r.json()["applied_scale"] == 0.001
+    assert _cyl_radius(r) == pytest.approx(0.5)
+    r1 = client.post("/import?scale=1.0", files={"file": ("cyl.brep", data)})
+    assert r1.status_code == 200
+    assert r1.json()["applied_scale"] == 1.0
+    assert _cyl_radius(r1) == pytest.approx(500.0)
+    xs = [v[0] for v in r1.json()["bodies"][0]["vertices"]]
+    assert max(xs) - min(xs) == pytest.approx(1000.0, rel=1e-6)
+
+
+def test_step_import_reports_unit_scale_and_ignores_scale_param(cylinder_step_path):
+    r = client.post("/import?scale=5.0",
+                    files={"file": ("cyl.step", open(cylinder_step_path, "rb").read())})
+    assert r.status_code == 200
+    assert r.json()["applied_scale"] == 1.0
+    assert _cyl_radius(r) == pytest.approx(0.5)
