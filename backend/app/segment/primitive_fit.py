@@ -26,6 +26,9 @@ def _try_fit_plane(points: np.ndarray, normals: np.ndarray):
     cov = centered.T @ centered
     eigvals, eigvecs = np.linalg.eigh(cov)
     normal = eigvecs[:, 0]  # smallest eigenvalue direction
+    # eigh's sign is arbitrary; orient along the mean triangle normal (outward for outward-wound meshes)
+    if len(normals) and np.dot(normals.mean(axis=0), normal) < 0:
+        normal = -normal
     residual = float(np.sqrt(max(eigvals[0], 0.0) / max(len(points), 1)))
     if residual > _PLANE_RESIDUAL_TOLERANCE:
         return None
