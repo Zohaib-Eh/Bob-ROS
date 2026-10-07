@@ -20,7 +20,10 @@ def compute_link_mass_properties(
         )
         combined = mesh if combined is None else combined + mesh
 
-    if combined is None or combined.volume <= _MIN_VOLUME_M3:
+    # degenerate meshes divide by ~0 volume inside trimesh; we reject them below
+    with np.errstate(invalid="ignore", divide="ignore"):
+        volume = None if combined is None else combined.volume
+    if volume is None or volume <= _MIN_VOLUME_M3:
         raise ValueError(
             "Link has zero, negative, or negligible volume -- check that its "
             "member bodies form a closed solid with outward-wound faces and "
