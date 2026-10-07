@@ -1,9 +1,20 @@
+import math
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
 
 Vec3 = tuple[float, float, float]
 
-class Face(BaseModel):
+
+class _Model(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+def _check_direction(v: Vec3 | None, what: str) -> None:
+    if v is not None and math.hypot(*v) < 1e-12:
+        raise ValueError(f"{what} must have nonzero length")
+
+
+class Face(_Model):
     kind: Literal["plane", "cylinder", "sphere", "unclassified"]
     origin: Literal["brep", "segmented"]
     normal: Vec3 | None = None
@@ -13,14 +24,37 @@ class Face(BaseModel):
     residual: float
     triangle_indices: list[int]
 
-class Body(BaseModel):
+    @model_validator(mode="after")
+    def _check_shape(self):
+        if self.kind == "plane" and self.normal is None:
+            raise ValueError("plane face requires normal")
+        if self.kind == "cylinder" and self.axis is None:
+            raise ValueError("cylinder face requires axis")
+        if self.kind in ("cylinder", "sphere") and not (self.radius and self.radius > 0):
+            raise ValueError(f"{self.kind} face requires radius > 0")
+        _check_direction(self.normal, "normal")
+        _check_direction(self.axis, "axis")
+        return self
+
+
+class Body(_Model):
     id: str
     name: str
     vertices: list[Vec3]
     triangles: list[tuple[int, int, int]]
     faces: list[Face] = []
 
-class Link(BaseModel):
+    @model_validator(mode="after")
+    def _check_indices(self):
+        n_v, n_t = len(self.vertices), len(self.triangles)
+        if any(not 0 <= i < n_v for t in self.triangles for i in t):
+            raise ValueError(f"triangle vertex index out of range [0, {n_v})")
+        if any(not 0 <= i < n_t for f in self.faces for i in f.triangle_indices):
+            raise ValueError(f"face triangle index out of range [0, {n_t})")
+        return self
+
+
+class Link(_Model):
     id: str
     name: str
     body_ids: list[str]
@@ -29,7 +63,8 @@ class Link(BaseModel):
     center_of_mass: Vec3 | None = None
     inertia: list[float] | None = None  # [ixx, iyy, izz, ixy, ixz, iyz]
 
-class Joint(BaseModel):
+
+class Joint(_Model):
     id: str
     parent_link_id: str
     child_link_id: str
@@ -44,3 +79,11 @@ class Joint(BaseModel):
     limit_upper: float | None = None
     source: Literal["suggested", "confirmed", "manual"]
     ambiguous: bool = False
+
+    @model_validator(mode="after")
+    def _check(self):
+        _check_direction(self.axis, "axis")
+        if (self.limit_lower is not None and self.limit_upper is not None
+                and self.limit_lower > self.limit_upper):
+            raise ValueError("limit_lower must be <= limit_upper")
+        return self

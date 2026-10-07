@@ -106,6 +106,8 @@ def _urdf_errors(robot_name, links, joints, bodies_by_link) -> list[str]:
                 f"Joint {j.id} is {j.type}, which URDF cannot represent; confirm it as "
                 "revolute/continuous/prismatic/fixed/planar."
             )
+        if j.type in ("revolute", "continuous", "prismatic", "planar") and j.axis is None:
+            errors.append(f"Joint {j.id} ({j.type}) requires an axis.")
         if j.type in ("revolute", "prismatic") and (j.limit_lower is None or j.limit_upper is None):
             errors.append(f"Joint {j.id} ({j.type}) requires limit_lower and limit_upper.")
     if bodies_by_link is not None:

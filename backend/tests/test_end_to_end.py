@@ -117,3 +117,18 @@ def test_import_scale_override(box_stl_path):
         r = client.post("/import?scale=1.0", files={"file": ("box.stl", f.read())})
     assert r.status_code == 200
     assert r.json()["applied_scale"] == 1.0
+
+
+def test_detect_joints_cylinder_without_axis_is_422():
+    face = {"kind": "cylinder", "origin": "brep", "center": [0, 0, 0], "radius": 1.0,
+            "residual": 0, "triangle_indices": []}
+    body = {"id": "a", "name": "a", "vertices": [], "triangles": [], "faces": [face]}
+    r = client.post("/detect-joints", json={"body_a": body, "body_b": body,
+                                            "parent_link_id": "a", "child_link_id": "b"})
+    assert r.status_code == 422
+
+
+def test_export_zero_length_axis_is_422():
+    joint = dict(_joint("a", "b"), type="continuous", axis=[0, 0, 0])
+    r = client.post("/export", json=_payload(["a", "b"], [joint]))
+    assert r.status_code == 422

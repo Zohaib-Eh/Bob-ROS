@@ -163,3 +163,11 @@ def test_link_without_mesh_vertices_rejected():
     links = [_link("a")]
     empty = Body(id="a_body", name="a", vertices=[], triangles=[], faces=[])
     assert "'a'" in _export_err(links, [], bodies={"a": [empty]})
+
+
+@pytest.mark.parametrize("t", ["revolute", "continuous", "prismatic", "planar"])
+def test_joint_type_needing_axis_without_axis_rejected(t):
+    j = _joint("j1", "a", "b")
+    j.type, j.axis = t, None
+    msg = _export_err([_link("a"), _link("b")], [j])
+    assert "j1" in msg and "axis" in msg
