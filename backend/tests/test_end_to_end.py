@@ -233,3 +233,29 @@ def test_step_import_reports_unit_scale_and_ignores_scale_param(cylinder_step_pa
     assert r.status_code == 200
     assert r.json()["applied_scale"] == 1.0
     assert _cyl_radius(r) == pytest.approx(0.5)
+
+
+def _shifted(body: dict, dx: float) -> dict:
+    out = dict(body, id=body["id"] + "_shifted")
+    out["vertices"] = [[x + dx, y, z] for x, y, z in body["vertices"]]
+    out["faces"] = [dict(f, center=[f["center"][0] + dx, *f["center"][1:]]) for f in body["faces"]]
+    return out
+
+
+def _detect(a, b):
+    return client.post("/detect-joints", json={"body_a": a, "body_b": b,
+                                               "parent_link_id": "a", "child_link_id": "b"})
+
+
+def test_detect_joints_far_apart_bodies_returns_null(box_step_path):
+    box = import_step(box_step_path)[0].model_dump()
+    r = _detect(box, _shifted(box, 100.0))
+    assert r.status_code == 200
+    assert r.json() is None
+
+
+def test_detect_joints_touching_bodies_returns_joint(box_step_path):
+    box = import_step(box_step_path)[0].model_dump()  # 1 x 2 x 3, x in [0, 1]
+    r = _detect(box, _shifted(box, 1.0))
+    assert r.status_code == 200
+    assert r.json()["type"] == "planar"

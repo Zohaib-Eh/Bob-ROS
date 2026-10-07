@@ -41,6 +41,19 @@ def _aabbs_overlap(box_a, box_b, tol: float) -> bool:
     return bool(np.all(box_a[0] <= box_b[1] + tol) and np.all(box_b[0] <= box_a[1] + tol))
 
 
+def bodies_in_contact(
+    body_a: Body, body_b: Body, tol: float = _PLANE_DISTANCE_TOLERANCE_DEFAULT,
+) -> bool:
+    """Whole-body vertex AABBs overlap within tol (spec 6a.2 pre-filter).
+    A body without vertices gives no constraint."""
+    def box(body):
+        if not body.vertices:
+            return None
+        v = np.asarray(body.vertices, dtype=float)
+        return v.min(axis=0), v.max(axis=0)
+    return _aabbs_overlap(box(body_a), box(body_b), tol)
+
+
 def _planar_match(face_a: Face, face_b: Face, tol: float, has_boxes: bool) -> bool:
     if face_a.kind != "plane" or face_b.kind != "plane":
         return False
