@@ -31,7 +31,9 @@ new endpoints), not a rewrite.
 
 **Must-have (MVP — app is not useful without these):**
 - Import single-file STEP/IGES/BREP assembly, split into separate solids.
-- Import separate per-part files (STL/OBJ/STEP), one per upload.
+- Import separate per-part files (STL/OBJ/STEP), one per upload. For bare
+  mesh formats (STL/OBJ) this includes face reconstruction (§6a-prime) —
+  without it those formats have no faces to detect joints from at all.
 - Group bodies into links (user-driven merge, e.g. bolted brackets into one
   rigid link).
 - Manual joint placement via gizmo — always available, the guaranteed
@@ -91,6 +93,8 @@ session; nothing persists server-side after the response is sent.
   src/api/           typed client for backend endpoints
 /backend
   app/import/        pythonocc-core loader (STEP/IGES/BREP), trimesh loader (STL/OBJ/GLTF)
+  app/segment/       mesh-only face reconstruction: region growing + plane/
+                     cylinder/sphere fitting (STL/OBJ/GLTF input only)
   app/joints/        face classification, face-pair matching, IPV/IMG joint-type lookup
   app/validate/      collision sweep (limit derivation + interference check),
                      headless pybullet/mujoco instability check
@@ -103,8 +107,12 @@ docs/superpowers/specs/   this file and future design docs
 ## 5. Data model
 
 - `Body` — one imported solid: id, name, triangle mesh, source face list (each
-  face tagged with its OCCT analytic type — plane/cylinder/sphere/other —
-  plus the fitted axis/radius/normal/center for that type).
+  face tagged with its analytic type — plane/cylinder/sphere/other — plus the
+  fitted axis/radius/normal/center for that type). Each face also carries an
+  `origin` tag: `brep` (exact, straight from pythonocc-core, STEP/IGES/BREP
+  input) or `segmented` (approximate, reconstructed from a bare mesh — see
+  §6a-prime). Downstream joint detection treats `segmented` faces as lower
+  confidence than `brep` ones.
 - `Link` — one or more `Body` grouped by the user; name, member body ids,
   density or user-entered mass override, computed mass/center-of-mass/inertia.
 - `Joint` — parent link id, child link id, type (revolute / continuous /
@@ -116,6 +124,40 @@ docs/superpowers/specs/   this file and future design docs
   assumed.
 
 ## 6. Joint detection
+
+### 6a-prime. Face reconstruction for mesh-only input (STL/OBJ/GLTF)
+
+STEP/IGES/BREP bodies get exact analytic faces for free from pythonocc-core
+(`GeomAbs_Plane`/`Cylinder`/`Sphere`, with no fitting needed — see §6a). A
+bare mesh has none of that: STL/OBJ/GLTF are triangle soup with no face
+boundaries and no surface-type information at all. Both the single-file and
+separate-file detection paths (§6a, §6b) need faces to operate on, so
+mesh-only bodies go through a reconstruction step first:
+
+1. **Region growing**: build triangle adjacency (free from the mesh's own
+   connectivity — two triangles sharing an edge are adjacent) and grow
+   connected regions where adjacent triangles either (a) have near-identical
+   normals (a planar region), or (b) have normals that stay consistent with a
+   shared candidate cylinder axis as the region grows (a cylindrical region).
+2. **Fit per region**: plane via PCA on vertex positions (smallest eigenvalue
+   ≈ 0 confirms planarity, that eigenvector is the normal); cylinder via PCA
+   on the region's triangle normals (the eigenvector with smallest normal
+   variance is the axis; radius from least-squares distance-to-axis) — the
+   method documented in Wu et al. 2018 (*Math. Problems in Engineering*,
+   DOI 10.1155/2018/8904653); sphere via algebraic least-squares fit.
+3. Each resulting face is tagged `origin: segmented` and carries a fit
+   residual (how well the triangles actually matched the fitted primitive).
+   A region that doesn't fit any primitive within tolerance is left
+   untyped — it contributes no candidate face, it does not get forced into
+   the nearest-fitting type.
+4. Segmented faces feed into §6a/§6b exactly like `brep` faces, but a
+   `segmented` match with poor residual lowers the suggestion's confidence
+   (§6c) and is more readily routed to "no suggestion, place manually"
+   (§9) rather than risk a wrong auto-placed joint.
+
+This is the same primitive-fitting math whether the face came from a region
+grown on a bare mesh or was already isolated by OCCT — one classifier, two
+ways of getting its input.
 
 ### 6a. Single assembled file (parts already touching/mated)
 
@@ -207,7 +249,10 @@ joint origin) to avoid the documented silent-wrong-physics mistake.
 
 - Backend unit tests against analytic primitives (cube, cylinder, sphere)
   with known-correct joint classification and inertia, as a correctness
-  baseline independent of any real CAD file.
+  baseline independent of any real CAD file. Run against both a STEP version
+  (exercises the `brep` face path) and a watertight-STL version of the same
+  shapes (exercises the §6a-prime region-growing/fitting path) — the two
+  input paths are different code and need separate coverage.
 - A small set of real sample assemblies (simple hinge, simple slider) as
   end-to-end fixtures covering import → detect → validate → export.
 - Frontend smoke test: an exported URDF round-trips through a URDF parser
