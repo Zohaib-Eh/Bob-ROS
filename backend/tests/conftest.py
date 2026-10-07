@@ -100,6 +100,22 @@ def peg_in_hole_step_path(tmp_path) -> str:
 
 
 @pytest.fixture
+def holed_plate_step_path(tmp_path) -> str:
+    """1x1x0.1 plate with an 8x8 grid of through-holes: ~70 faces, ~7k triangles."""
+    plate = BRepPrimAPI_MakeBox(1.0, 1.0, 0.1).Shape()
+    for i in range(8):
+        for j in range(8):
+            hole = BRepPrimAPI_MakeCylinder(
+                gp_Ax2(gp_Pnt(0.06 + i * 0.12, 0.06 + j * 0.12, -0.1), gp_Dir(0, 0, 1)),
+                0.02, 0.4,
+            ).Shape()
+            plate = BRepAlgoAPI_Cut(plate, hole).Shape()
+    path = str(tmp_path / "plate.step")
+    _write_step(plate, path)
+    return path
+
+
+@pytest.fixture
 def box_stl_path(tmp_path) -> str:
     # Built "in mm" (1000x1000x2000 units) to match the real-world STL
     # convention this importer must correct for.

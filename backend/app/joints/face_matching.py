@@ -19,13 +19,19 @@ def _dot(a: tuple, b: tuple) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _aabb(body: Body, face: Face):
-    """Tessellation AABB (min, max) of the face, or None if it has no triangles."""
-    if not face.triangle_indices:
-        return None
-    tris = np.asarray(body.triangles)[face.triangle_indices]
-    pts = np.asarray(body.vertices)[np.unique(tris)]
-    return pts.min(axis=0), pts.max(axis=0)
+def _face_aabbs(body: Body) -> list:
+    """Tessellation AABB (min, max) per face, or None if it has no triangles.
+    Arrays are built once per body, not per face pair."""
+    verts = np.asarray(body.vertices, dtype=float).reshape(-1, 3)
+    tris = np.asarray(body.triangles, dtype=int).reshape(-1, 3)
+    boxes = []
+    for face in body.faces:
+        if not face.triangle_indices:
+            boxes.append(None)
+            continue
+        pts = verts[tris[face.triangle_indices].ravel()]
+        boxes.append((pts.min(axis=0), pts.max(axis=0)))
+    return boxes
 
 
 def _aabbs_overlap(box_a, box_b, tol: float) -> bool:
@@ -78,10 +84,9 @@ def find_matching_face_pairs(
     distance_tolerance: float = _PLANE_DISTANCE_TOLERANCE_DEFAULT,
 ) -> list[tuple[Face, Face]]:
     pairs: list[tuple[Face, Face]] = []
-    for face_a in body_a.faces:
-        box_a = _aabb(body_a, face_a)
-        for face_b in body_b.faces:
-            box_b = _aabb(body_b, face_b)
+    boxes_b = _face_aabbs(body_b)
+    for face_a, box_a in zip(body_a.faces, _face_aabbs(body_a)):
+        for face_b, box_b in zip(body_b.faces, boxes_b):
             if not _aabbs_overlap(box_a, box_b, distance_tolerance):
                 continue
             has_boxes = box_a is not None and box_b is not None

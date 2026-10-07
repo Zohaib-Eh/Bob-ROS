@@ -97,3 +97,13 @@ def test_step_peg_in_hole_yields_cylindrical_pair(peg_in_hole_step_path):
     block, peg = bodies[0], bodies[1]
     pairs = find_matching_face_pairs(block, peg)
     assert any(a.kind == "cylinder" and math.isclose(a.radius, 0.1, rel_tol=1e-3) for a, _ in pairs)
+
+
+def test_matching_large_body_against_itself_is_fast(holed_plate_step_path):
+    import time
+    from app.importers.step_importer import import_step
+    body = import_step(holed_plate_step_path)[0]
+    assert len(body.faces) >= 60 and len(body.triangles) >= 5000
+    t = time.perf_counter()
+    find_matching_face_pairs(body, body)
+    assert time.perf_counter() - t < 1.0
