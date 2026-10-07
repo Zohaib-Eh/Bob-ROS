@@ -28,7 +28,10 @@ def _joint(id_, parent, child, xyz=(0.0, 0.0, 0.2), rpy=(0.0, 0.0, 0.0)):
 
 
 def _body(link_id):
-    return Body(id=f"{link_id}_body", name=link_id, vertices=[], triangles=[], faces=[])
+    box = trimesh.creation.box(extents=(1, 1, 1))
+    return Body(id=f"{link_id}_body", name=link_id,
+                vertices=[tuple(v) for v in box.vertices],
+                triangles=[tuple(t) for t in box.faces], faces=[])
 
 
 def _vec(el, attr="xyz"):
@@ -89,7 +92,9 @@ def test_rotated_joint_expresses_inertial_in_rotated_frame():
     links = [_link("base"), _link("arm", com=(1.0, 0.0, 0.0),
                                   inertia=[1.0, 2.0, 3.0, 0.0, 0.0, 0.0])]
     joints = [_joint("j1", "base", "arm", xyz=(0, 0, 0), rpy=(0, 0, math.pi / 2))]
+    joints[0].axis = (1.0, 0.0, 0.0)
     root = _export(links, joints)
+    assert _vec(root.find("joint").find("axis")) == pytest.approx([0, -1, 0], abs=1e-9)
     inertial = _link_el(root, "arm").find("inertial")
     # world x axis is the link's -y axis after a +90deg yaw
     assert _vec(inertial.find("origin")) == pytest.approx([0, -1, 0], abs=1e-9)
@@ -118,3 +123,43 @@ def test_export_package_zip_layout_and_meshes():
     assert ET.fromstring(z.read("bot/package.xml")).find("name").text == "bot"
     m = trimesh.load(io.BytesIO(z.read("bot/meshes/base.stl")), file_type="stl")
     assert m.extents == pytest.approx([1, 2, 3])
+
+
+def _export_err(links, joints, name="bot", bodies=None):
+    bodies = {l.id: [_body(l.id)] for l in links} if bodies is None else bodies
+    with pytest.raises(ValueError) as e:
+        export_urdf(name, links, joints, bodies)
+    return str(e.value)
+
+
+def test_bad_robot_name_rejected():
+    assert "../evil" in _export_err([_link("a")], [], name="../evil")
+
+
+def test_bad_or_duplicate_link_names_rejected():
+    a, b = _link("a"), _link("b")
+    b.name = "a"
+    assert "Duplicate" in _export_err([a, b], [_joint("j1", "a", "b")])
+    c = _link("c")
+    c.name = "x/y"
+    assert "x/y" in _export_err([c], [])
+
+
+@pytest.mark.parametrize("t", ["cylindrical", "spherical"])
+def test_unrepresentable_joint_type_rejected(t):
+    j = _joint("j1", "a", "b")
+    j.type = t
+    assert "j1" in _export_err([_link("a"), _link("b")], [j])
+
+
+def test_missing_limits_rejected():
+    j = _joint("j1", "a", "b")
+    j.limit_upper = None
+    msg = _export_err([_link("a"), _link("b")], [j])
+    assert "j1" in msg and "limit" in msg
+
+
+def test_link_without_mesh_vertices_rejected():
+    links = [_link("a")]
+    empty = Body(id="a_body", name="a", vertices=[], triangles=[], faces=[])
+    assert "'a'" in _export_err(links, [], bodies={"a": [empty]})

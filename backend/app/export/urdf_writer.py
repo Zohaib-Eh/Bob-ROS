@@ -1,6 +1,8 @@
 import io
+import re
 import zipfile
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 from xml.dom import minidom
 
 import numpy as np
@@ -74,12 +76,43 @@ def _add_joint_element(robot, joint: Joint, links_by_id, frames) -> None:
     xyz, rpy = _xyz_rpy(rel)
     ET.SubElement(joint_el, "origin", {"xyz": xyz, "rpy": rpy})
     if joint.axis is not None:
-        ET.SubElement(joint_el, "axis", {"xyz": _fmt(joint.axis)})
+        # URDF reads the axis in the joint (child link) frame; ours is world.
+        ax = frames[joint.child_link_id][:3, :3].T @ np.array(joint.axis)
+        ET.SubElement(joint_el, "axis", {"xyz": _fmt(ax / np.linalg.norm(ax))})
     if joint.type in ("revolute", "prismatic") and joint.limit_lower is not None:
         ET.SubElement(joint_el, "limit", {
             "lower": str(joint.limit_lower), "upper": str(joint.limit_upper),
             "effort": "100", "velocity": "1.0",
         })
+
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
+
+
+def _urdf_errors(robot_name, links, joints, bodies_by_link) -> list[str]:
+    errors = []
+    if not _NAME_RE.match(robot_name):
+        errors.append(f"Invalid robot name '{robot_name}'.")
+    seen = set()
+    for l in links:
+        if not _NAME_RE.match(l.name):
+            errors.append(f"Invalid link name '{l.name}'.")
+        if l.name in seen:
+            errors.append(f"Duplicate link name '{l.name}'.")
+        seen.add(l.name)
+    for j in joints:
+        if j.type in ("cylindrical", "spherical"):
+            errors.append(
+                f"Joint {j.id} is {j.type}, which URDF cannot represent; confirm it as "
+                "revolute/continuous/prismatic/fixed/planar."
+            )
+        if j.type in ("revolute", "prismatic") and (j.limit_lower is None or j.limit_upper is None):
+            errors.append(f"Joint {j.id} ({j.type}) requires limit_lower and limit_upper.")
+    if bodies_by_link is not None:
+        for l in links:
+            if not any(b.vertices for b in bodies_by_link.get(l.id, [])):
+                errors.append(f"Link '{l.id}' has no mesh geometry.")
+    return errors
 
 
 def export_urdf(
@@ -88,7 +121,9 @@ def export_urdf(
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
 ) -> str:
-    errors = validate_structure(links, joints)
+    errors = validate_structure(links, joints) + _urdf_errors(
+        robot_name, links, joints, bodies_by_link
+    )
     if errors:
         raise ValueError(
             "Cannot export URDF -- structural validation failed: " + "; ".join(errors)
@@ -109,9 +144,9 @@ def export_urdf(
 def _package_xml(robot_name: str) -> str:
     return f"""<?xml version="1.0"?>
 <package format="2">
-  <name>{robot_name}</name>
+  <name>{escape(robot_name)}</name>
   <version>0.1.0</version>
-  <description>URDF package for {robot_name}</description>
+  <description>URDF package for {escape(robot_name)}</description>
   <maintainer email="none@example.com">cad-to-urdf</maintainer>
   <license>BSD</license>
   <buildtool_depend>catkin</buildtool_depend>
