@@ -29,3 +29,10 @@ def test_non_positive_scale_is_rejected(box_stl_path):
 def test_non_finite_or_negative_scale_rejected(box_stl_path, bad):
     with pytest.raises(ValueError):
         import_mesh(box_stl_path, scale=bad)
+
+
+def test_empty_mesh_raises_could_not_read(tmp_path):
+    p = tmp_path / "empty.stl"
+    p.write_bytes(b"")
+    with pytest.raises(ValueError, match="could not read mesh"):
+        import_mesh(str(p))

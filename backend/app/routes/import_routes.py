@@ -33,8 +33,13 @@ async def import_file(file: UploadFile, scale: float = 0.001):
             regions = grow_regions(body.vertices, body.triangles)
             body.faces = [fit_face(body.vertices, body.triangles, r) for r in regions]
             bodies = [body]
+    except HTTPException:
+        raise
     except ValueError as exc:
-        raise HTTPException(422, str(exc))
+        raise HTTPException(422, f"{file.filename}: {exc}")
+    except Exception as exc:  # corrupt uploads can fail anywhere in OCCT/trimesh;
+        # library messages may carry the temp path, so name only the error type
+        raise HTTPException(422, f"{file.filename}: could not import file ({type(exc).__name__})")
     finally:
         os.unlink(tmp_path)
 

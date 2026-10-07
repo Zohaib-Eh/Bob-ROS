@@ -176,3 +176,34 @@ def test_export_zero_volume_body_is_422_naming_link():
     r = client.post("/export", json=payload)
     assert r.status_code == 422
     assert "'b'" in r.json()["detail"] and "volume" in r.json()["detail"]
+
+
+_raising_client = TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize("name, data", [
+    ("junk.iges", b"junk"), ("junk.step", b"garbage"), ("junk.brep", b"junk"),
+    ("junk.stl", b"garbage"), ("junk.obj", b"v 0 0 0\n"),
+])
+def test_import_corrupt_file_is_422_naming_upload(name, data):
+    r = _raising_client.post("/import", files={"file": (name, data)})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert name in detail
+    assert "tmp" not in detail.lower() and "temp" not in detail.lower()
+
+
+def test_import_empty_stl_is_422_could_not_read():
+    r = _raising_client.post("/import", files={"file": ("empty.stl", b"")})
+    assert r.status_code == 422
+    assert "could not read" in r.json()["detail"].lower()
+    assert "empty.stl" in r.json()["detail"]
+
+
+def test_import_non_watertight_names_upload_not_temp_path(non_watertight_stl_path):
+    with open(non_watertight_stl_path, "rb") as f:
+        r = client.post("/import", files={"file": ("broken.stl", f.read())})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "broken.stl" in detail and "watertight" in detail
+    assert "temp" not in detail.lower() and "tmp" not in detail.lower()

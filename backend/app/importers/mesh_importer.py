@@ -13,11 +13,16 @@ def import_mesh(file_path: str, scale: float = 0.001) -> tuple[Body, float]:
     if not (math.isfinite(scale) and scale > 0):
         raise ValueError(f"scale must be positive, got {scale}")
 
-    mesh = trimesh.load(file_path, force="mesh")
+    try:
+        mesh = trimesh.load(file_path, force="mesh")
+    except Exception as exc:
+        raise ValueError(f"could not read mesh ({type(exc).__name__})") from exc
+    if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
+        raise ValueError("could not read mesh (no triangles found)")
 
     if not mesh.is_watertight:
         raise ValueError(
-            f"Mesh in {file_path} is not watertight (has holes or "
+            "Mesh is not watertight (has holes or "
             "non-manifold edges) -- cannot reliably compute volume/inertia "
             "or segment faces from it."
         )

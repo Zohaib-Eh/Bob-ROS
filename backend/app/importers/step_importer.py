@@ -37,13 +37,16 @@ def _read_shape(file_path: str):
         # statics only exist once a reader has been constructed
         Interface_Static.SetCVal("xstep.cascade.unit", "M")
         if reader.ReadFile(file_path) != IFSelect_RetDone:
-            raise ValueError(f"Could not read CAD file: {file_path}")
+            raise ValueError("Could not read CAD file")
         reader.TransferRoots()
-        return reader.OneShape()
+        shape = reader.OneShape()
+        if shape is None or shape.IsNull():  # e.g. IGES "reads" junk as 0 entities
+            raise ValueError("Could not read CAD file")
+        return shape
     if ext == ".brep":
         shape = TopoDS_Shape()
         if not breptools.Read(shape, file_path, BRep_Builder()):
-            raise ValueError(f"Could not read BREP file: {file_path}")
+            raise ValueError("Could not read BREP file")
         trsf = gp_Trsf()
         trsf.SetScale(gp_Pnt(0, 0, 0), _MM_TO_M)
         return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
@@ -130,5 +133,5 @@ def import_step(file_path: str) -> list[Body]:
                            vertices=vertices, triangles=triangles, faces=faces))
         ex.Next()
     if not bodies:
-        raise ValueError(f"No solids found in {file_path}")
+        raise ValueError("No solids found in CAD file")
     return bodies
