@@ -36,3 +36,20 @@ def test_empty_mesh_raises_could_not_read(tmp_path):
     p.write_bytes(b"")
     with pytest.raises(ValueError, match="could not read mesh"):
         import_mesh(str(p))
+
+
+def test_inverted_stl_is_reoriented_outward(tmp_path):
+    import numpy as np
+    import trimesh
+    from app.massprops.link_mass import compute_link_mass_properties
+    inv = trimesh.creation.box(extents=(10.0, 10.0, 10.0))
+    inv.invert()
+    p = tmp_path / "inv.stl"
+    inv.export(str(p))
+    body, _ = import_mesh(str(p))
+    m = trimesh.Trimesh(body.vertices, body.triangles, process=False)
+    assert m.volume == pytest.approx(1e-6, rel=1e-6)  # 10 mm cube in m^3
+    # every face normal points away from the centroid
+    assert np.all(np.einsum("ij,ij->i", m.face_normals, m.triangles_center - m.centroid) > 0)
+    mass, _, _ = compute_link_mass_properties([body], 1000.0)
+    assert mass == pytest.approx(1e-3, rel=1e-6)

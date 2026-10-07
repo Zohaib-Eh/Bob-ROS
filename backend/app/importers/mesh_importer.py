@@ -27,6 +27,9 @@ def import_mesh(file_path: str, scale: float = 0.001) -> tuple[Body, float]:
             "or segment faces from it."
         )
 
+    if mesh.volume < 0:  # inward-wound file: flip so normals/volume are outward
+        mesh.invert()
+
     mesh.apply_scale(scale)
 
     vertices = [tuple(v) for v in mesh.vertices.tolist()]
