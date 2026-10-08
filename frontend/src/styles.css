@@ -1,0 +1,13 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px system-ui, sans-serif; color: #222; }
+.app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+.workspace { display: grid; grid-template-columns: 280px 1fr 340px; min-height: 0; }
+.panel { overflow: auto; padding: 8px; border-right: 1px solid #ddd; }
+.panel.right { border-right: none; border-left: 1px solid #ddd; }
+.topbar, .statusbar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid #ddd; flex-wrap: wrap; }
+.statusbar { border-top: 1px solid #ddd; border-bottom: none; }
+.banner { background: #fdecea; color: #611; padding: 6px 8px; display: flex; justify-content: space-between; }
+.status-approximate { color: #b26a00; } .status-failed { color: #c62828; } .status-repaired { color: #2e7d32; }
+.selected { background: #e3f2fd; }
+.error { color: #c62828; }
+.viewer { position: relative; min-height: 0; }
