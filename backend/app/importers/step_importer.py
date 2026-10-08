@@ -153,12 +153,11 @@ def _sew_to_solids(shapes) -> list:
     sew.Perform()
     sewn = sew.SewedShape()
     shells = _subshapes(sewn, TopAbs_SHELL)
-    if not shells:  # a single sewn face comes back as a face, not a shell
+    for f in _subshapes(sewn, TopAbs_FACE, TopAbs_SHELL):  # faces sewing left unattached
         shell = TopoDS_Shell()
         BRep_Builder().MakeShell(shell)
-        for f in _subshapes(sewn, TopAbs_FACE):
-            BRep_Builder().Add(shell, f)
-        shells = [shell]
+        BRep_Builder().Add(shell, f)
+        shells.append(shell)
     solids = []
     for sh in shells:
         fix = ShapeFix_Solid(BRepBuilderAPI_MakeSolid(topods.Shell(sh)).Solid())
@@ -172,24 +171,33 @@ def _open_edge_count(vertices, triangles) -> int:
     return len(trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1))
 
 
+def _is_watertight(vertices, triangles) -> bool:
+    return trimesh.Trimesh(np.asarray(vertices), np.asarray(triangles), process=False).is_watertight
+
+
+def _failed_body(name: str, reason: str) -> Body:
+    return Body(id=str(uuid.uuid4()), name=name, vertices=[], triangles=[], status="failed",
+                warnings=[PartWarning(code="degenerate", fixes=["replace", "ignore"],
+                                      message=f"{name}: {reason}")])
+
+
 def _make_body(solid, name: str, repaired: bool) -> Body:
     vertices, triangles, per_face = _extract_mesh(solid)
     if not triangles:
-        return Body(id=str(uuid.uuid4()), name=name, vertices=[], triangles=[], status="failed",
-                    warnings=[PartWarning(code="degenerate", fixes=["replace", "ignore"],
-                                          message=f"{name}: could not be meshed")])
+        return _failed_body(name, "could not be meshed")
     faces = [_face_to_model(f, ids) for f, ids in per_face if ids]
     status, warnings = "ok", []
     if repaired:
         n_open = _open_edge_count(vertices, triangles)
-        if n_open == 0:
+        if n_open == 0 and _is_watertight(vertices, triangles):
             status = "repaired"
             warnings = [PartWarning(code="shell_repaired", fixes=[],
                                     message=f"{name}: surface shell sewn into a closed solid")]
         else:
             status = "approximate"
             warnings = [PartWarning(code="open_geometry", fixes=["set_mass", "replace", "ignore"],
-                                    message=f"{name}: {n_open} open edges remain after repair; "
+                                    message=f"{name}: {n_open} open edges remain after repair"
+                                            f"{' (non-manifold)' if n_open == 0 else ''}; "
                                             "mass is approximate")]
     return Body(id=str(uuid.uuid4()), name=name, vertices=vertices, triangles=triangles,
                 faces=faces, status=status, warnings=warnings)
@@ -225,15 +233,23 @@ def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], l
     shape = _read_shape(file_path, brep_scale)
     total_faces = len(_subshapes(shape, TopAbs_FACE))
 
-    parts = [(s, "solid", False) for s in _subshapes(shape, TopAbs_SOLID)]
-    for sh in _subshapes(shape, TopAbs_SHELL, TopAbs_SOLID):
-        parts += [(s, "shell", True) for s in _sew_to_solids([sh])]
+    groups = [([s], "solid", False) for s in _subshapes(shape, TopAbs_SOLID)]
+    groups += [([sh], "shell", True) for sh in _subshapes(shape, TopAbs_SHELL, TopAbs_SOLID)]
     loose = _loose_faces(shape)
     if loose:
-        parts += [(s, "surface", True) for s in _sew_to_solids(loose)]
+        groups.append((loose, "surface", True))
 
-    bodies = [_make_body(s, f"{prefix}_{i}", repaired) for i, (s, prefix, repaired) in enumerate(parts)]
-    accounted = sum(len(_subshapes(s, TopAbs_FACE)) for s, _, _ in parts)
+    bodies: list[Body] = []
+    accounted = 0
+    for sources, prefix, repaired in groups:
+        try:
+            solids = _sew_to_solids(sources) if repaired else sources
+            new = [_make_body(s, f"{prefix}_{len(bodies) + i}", repaired) for i, s in enumerate(solids)]
+            accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in solids)
+        except Exception as e:  # one bad part must not fail the import
+            new = [_failed_body(f"{prefix}_{len(bodies)}", f"import failed ({type(e).__name__})")]
+            accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in sources)
+        bodies += new
     warnings = []
     if accounted < total_faces:
         missing = total_faces - accounted

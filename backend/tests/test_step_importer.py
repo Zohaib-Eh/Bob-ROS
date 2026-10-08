@@ -186,3 +186,53 @@ def test_reexport_advice_names_exporter(tmp_path, system, expected):
     p = tmp_path / "x.step"
     p.write_text(f"ISO-10303-21;\nHEADER;\nFILE_NAME('x','t',(''),(''),'{system}','{system}','');\nENDSEC;\n")
     assert expected in step_importer._reexport_advice(str(p))
+
+
+def test_failing_part_becomes_failed_body_not_exception(mixed_topology_brep_path, monkeypatch):
+    real = step_importer._sew_to_solids
+    calls = []
+
+    def flaky(shapes):
+        calls.append(1)
+        if len(calls) == 2:  # the open shell (second shell group)
+            raise RuntimeError("boom")
+        return real(shapes)
+
+    monkeypatch.setattr(step_importer, "_sew_to_solids", flaky)
+    bodies, warnings = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    assert len(bodies) == 4
+    failed = [b for b in bodies if b.status == "failed"]
+    assert len(failed) == 1 and failed[0].vertices == []
+    assert failed[0].warnings[0].code == "degenerate"
+    assert "RuntimeError" in failed[0].warnings[0].message
+    assert failed[0].warnings[0].fixes == ["replace", "ignore"]
+    assert warnings == []  # failed part's faces still count as accounted
+
+
+def test_unmeshable_part_is_failed_body(mixed_topology_brep_path, monkeypatch):
+    monkeypatch.setattr(step_importer, "_extract_mesh", lambda s: ([], [], []))
+    bodies, _ = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    assert {b.status for b in bodies} == {"failed"}
+
+
+def test_loose_faces_sewn_per_connected_group(tmp_path):
+    from app.importers.step_importer import _subshapes
+    from OCC.Core.TopAbs import TopAbs_FACE
+    f = _subshapes(BRepPrimAPI_MakeBox(1, 1, 1).Shape(), TopAbs_FACE)
+    far = _subshapes(BRepPrimAPI_MakeBox(gp_Pnt(9, 0, 0), 1, 1, 1).Shape(), TopAbs_FACE)[0]
+    adjacent = next(x for x in f[1:] if _shares_edge(f[0], x))
+    b = BRep_Builder(); comp = TopoDS_Compound(); b.MakeCompound(comp)
+    for x in (f[0], adjacent, far):
+        b.Add(comp, x)
+    path = str(tmp_path / "loose.brep"); breptools.Write(comp, path)
+    bodies, warnings = import_cad(path, brep_scale=1.0)
+    assert sorted(len(x.faces) for x in bodies) == [1, 2]
+    assert all(x.name.startswith("surface_") for x in bodies)
+    assert warnings == []
+
+
+def _shares_edge(a, b):
+    from OCC.Core.TopAbs import TopAbs_EDGE
+    from app.importers.step_importer import _subshapes
+    ea = _subshapes(a, TopAbs_EDGE)
+    return any(e.IsSame(g) for e in ea for g in _subshapes(b, TopAbs_EDGE))
