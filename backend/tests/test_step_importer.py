@@ -7,7 +7,9 @@ from OCC.Core.BRep import BRep_Builder
 from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
 from OCC.Core.BRepTools import breptools
 from OCC.Core.gp import gp_Pnt
+from OCC.Core.Interface import Interface_Static
 from OCC.Core.TopAbs import TopAbs_SHELL
+from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopoDS import TopoDS_Compound
 
@@ -236,3 +238,35 @@ def _shares_edge(a, b):
     from app.importers.step_importer import _subshapes
     ea = _subshapes(a, TopAbs_EDGE)
     return any(e.IsSame(g) for e in ea for g in _subshapes(b, TopAbs_EDGE))
+
+
+def test_step_product_names_become_body_names(tmp_path):
+    from OCC.Core.STEPCAFControl import STEPCAFControl_Writer
+    from OCC.Core.TDocStd import TDocStd_Document
+    from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool
+    from OCC.Core.TDataStd import TDataStd_Name
+    from OCC.Core.STEPControl import STEPControl_AsIs
+
+    from OCC.Core.XCAFApp import XCAFApp_Application
+
+    doc = TDocStd_Document("MDTV-XCAF")
+    XCAFApp_Application.GetApplication().NewDocument("MDTV-XCAF", doc)
+    tool = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+    asm = tool.NewShape()
+    TDataStd_Name.Set(asm, "ASSEMBLY")
+    for nm, x in (("BASE_PLATE", 0.0), ("ARM_LINK", 3.0)):
+        part = tool.AddShape(BRepPrimAPI_MakeBox(gp_Pnt(x, 0, 0), 1, 1, 1).Shape(), False)
+        TDataStd_Name.Set(part, nm)
+        tool.AddComponent(asm, part, TopLoc_Location())
+    tool.UpdateAssemblies()
+    w = STEPCAFControl_Writer()
+    Interface_Static.SetCVal("xstep.cascade.unit", "MM")
+    Interface_Static.SetCVal("write.step.unit", "M")
+    w.Transfer(doc, STEPControl_AsIs)
+    path = str(tmp_path / "named.step"); w.Write(path)
+
+    bodies, warnings = import_cad(path)
+    assert [b.name for b in bodies] == ["BASE_PLATE", "ARM_LINK"]
+    assert warnings == []
+    xs = [min(v[0] for v in b.vertices) for b in bodies]
+    assert abs(xs[0] - 0.0) < 1e-6 and abs(xs[1] - 3.0) < 1e-6   # meters, placed

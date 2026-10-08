@@ -17,11 +17,17 @@ from OCC.Core.IFSelect import IFSelect_RetDone
 from OCC.Core.IGESControl import IGESControl_Reader
 from OCC.Core.Interface import Interface_Static
 from OCC.Core.ShapeFix import ShapeFix_Solid
+from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
 from OCC.Core.STEPControl import STEPControl_Reader
+from OCC.Core.TDF import TDF_Label, TDF_LabelSequence
+from OCC.Core.TDocStd import TDocStd_Document
 from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SHELL, TopAbs_SOLID
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Shell, topods
+
+from OCC.Core.XCAFApp import XCAFApp_Application
+from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool
 
 from app.models import Body, Face, PartWarning
 
@@ -55,6 +61,43 @@ def _read_shape(file_path: str, brep_scale: float):
         trsf.SetScale(gp_Pnt(0, 0, 0), brep_scale)
         return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
     raise ValueError(f"Unsupported CAD file extension: {ext!r}")
+
+
+def _label_name(label) -> str | None:
+    return (label.GetLabelName() or "").strip() or None
+
+
+def _read_step_named(file_path: str) -> list[tuple[str | None, object]]:
+    """[(product name, located shape)] per leaf part of a STEP file, in assembly order, meters."""
+    doc = TDocStd_Document("MDTV-XCAF")
+    XCAFApp_Application.GetApplication().NewDocument("MDTV-XCAF", doc)
+    reader = STEPCAFControl_Reader()
+    reader.SetNameMode(True)
+    Interface_Static.SetCVal("xstep.cascade.unit", "M")  # statics exist once a reader exists
+    if reader.ReadFile(file_path) != IFSelect_RetDone or not reader.Transfer(doc):
+        raise ValueError("Could not read CAD file")
+    tool = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+    roots = TDF_LabelSequence()
+    tool.GetFreeShapes(roots)
+    parts = []
+
+    def walk(label, loc):
+        if tool.IsAssembly(label):
+            comps = TDF_LabelSequence()
+            tool.GetComponents(label, comps)
+            for i in range(1, comps.Length() + 1):
+                comp = comps.Value(i)
+                ref = TDF_Label()
+                tool.GetReferredShape(comp, ref)
+                walk(ref, loc.Multiplied(tool.GetLocation(comp)))
+        else:
+            parts.append((_label_name(label), tool.GetShape(label).Moved(loc)))
+
+    for i in range(1, roots.Length() + 1):
+        walk(roots.Value(i), TopLoc_Location())
+    if not parts:
+        raise ValueError("Could not read CAD file")
+    return parts
 
 
 def _face_to_model(face, triangle_indices: list[int]) -> Face:
@@ -230,26 +273,38 @@ def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], l
     in no body. `brep_scale` applies to unitless .brep only."""
     if not (math.isfinite(brep_scale) and brep_scale > 0):
         raise ValueError(f"brep_scale must be finite and positive, got {brep_scale}")
-    shape = _read_shape(file_path, brep_scale)
-    total_faces = len(_subshapes(shape, TopAbs_FACE))
-
-    groups = [([s], "solid", False) for s in _subshapes(shape, TopAbs_SOLID)]
-    groups += [([sh], "shell", True) for sh in _subshapes(shape, TopAbs_SHELL, TopAbs_SOLID)]
-    loose = _loose_faces(shape)
-    if loose:
-        groups.append((loose, "surface", True))
+    ext = os.path.splitext(file_path)[1].lower()
+    named = (_read_step_named(file_path) if ext in (".step", ".stp")
+             else [(None, _read_shape(file_path, brep_scale))])
 
     bodies: list[Body] = []
-    accounted = 0
-    for sources, prefix, repaired in groups:
-        try:
-            solids = _sew_to_solids(sources) if repaired else sources
-            new = [_make_body(s, f"{prefix}_{len(bodies) + i}", repaired) for i, s in enumerate(solids)]
-            accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in solids)
-        except Exception as e:  # one bad part must not fail the import
-            new = [_failed_body(f"{prefix}_{len(bodies)}", f"import failed ({type(e).__name__})")]
-            accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in sources)
-        bodies += new
+    total_faces = accounted = 0
+    for product, shape in named:
+        total_faces += len(_subshapes(shape, TopAbs_FACE))
+        groups = [([s], "solid", False) for s in _subshapes(shape, TopAbs_SOLID)]
+        groups += [([sh], "shell", True) for sh in _subshapes(shape, TopAbs_SHELL, TopAbs_SOLID)]
+        loose = _loose_faces(shape)
+        if loose:
+            groups.append((loose, "surface", True))
+
+        mine: list[Body] = []
+        for sources, prefix, repaired in groups:
+            n = len(bodies) + len(mine)
+            try:
+                solids = _sew_to_solids(sources) if repaired else sources
+                new = [_make_body(s, f"{prefix}_{n + i}", repaired) for i, s in enumerate(solids)]
+                accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in solids)
+            except Exception as e:  # one bad part must not fail the import
+                new = [_failed_body(f"{prefix}_{n}", f"import failed ({type(e).__name__})")]
+                accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in sources)
+            mine += new
+        if product:  # bare name for one body, name_k for several
+            for k, b in enumerate(mine):
+                new_name = product if len(mine) == 1 else f"{product}_{k}"
+                for w in b.warnings:
+                    w.message = w.message.replace(f"{b.name}: ", f"{new_name}: ", 1)
+                b.name = new_name
+        bodies += mine
     warnings = []
     if accounted < total_faces:
         missing = total_faces - accounted
