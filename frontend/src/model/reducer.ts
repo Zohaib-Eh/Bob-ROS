@@ -1,5 +1,6 @@
 import type { Body, Joint, Link, PartWarning } from "../api/types";
 import { boxVolume, linkBox } from "./geometry";
+import { membership } from "./pairs";
 import { DEFAULT_DENSITY, emptyModel, type ModelState, type Suggestion } from "./types";
 
 export type LinkProps = Partial<Pick<Link, "density_kg_m3" | "mass_override_kg" | "accept_approximate_mass">>;
@@ -132,10 +133,19 @@ export function modelReducer(s: ModelState, a: Action): ModelState {
     case "setLinkProps":
       if (!s.links.some((l) => l.id === a.linkId)) return s;
       return { ...s, links: s.links.map((l) => (l.id === a.linkId ? { ...l, ...a.props } : l)) };
-    case "replaceBody":
-      return s.bodies[a.body.id] ? { ...s, bodies: { ...s.bodies, [a.body.id]: a.body } } : s;
-    case "setSuggestion":
+    case "replaceBody": {
+      if (!s.bodies[a.body.id]) return s;
+      const lid = s.links.find((l) => l.body_ids.includes(a.body.id))?.id;   // geometry changed, membership didn't: re-detect
+      const suggestions = Object.fromEntries(Object.entries(s.suggestions)
+        .filter(([, g]) => g.linkA !== lid && g.linkB !== lid));
+      return { ...s, bodies: { ...s.bodies, [a.body.id]: a.body }, suggestions };
+    }
+    case "setSuggestion": {
+      const la = s.links.find((l) => l.id === a.suggestion.linkA);
+      const lb = s.links.find((l) => l.id === a.suggestion.linkB);
+      if (!la || !lb || membership(la, lb) !== a.suggestion.membership) return s;   // stale result
       return { ...s, suggestions: { ...s.suggestions, [a.suggestion.key]: a.suggestion } };
+    }
     case "acceptSuggestion": {
       const g = s.suggestions[a.key];
       if (!g) return s;

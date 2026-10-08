@@ -69,19 +69,22 @@ export class DetectionRunner {
     const ctrl = new AbortController();
     this.current = { pair, ctrl };
     this.report();
+    let result: DetectResponse;
     try {
-      const result = await this.detect(this.bodiesOf(pair.linkA), this.bodiesOf(pair.linkB), pair.linkA, pair.linkB, ctrl.signal);
-      if (this.current?.ctrl !== ctrl) return;   // superseded while running
-      this.current = null;
-      this.done++;
-      this.handlers.onResult(pair, result);
+      result = await this.detect(this.bodiesOf(pair.linkA), this.bodiesOf(pair.linkB), pair.linkA, pair.linkB, ctrl.signal);
     } catch (e) {
       if (ctrl.signal.aborted) return;
       if (this.current?.ctrl === ctrl) this.current = null;
       this.pending.unshift(pair);
       this.paused = true;
-      this.handlers.onError((e as Error).message);
+      this.handlers.onError(e instanceof Error ? e.message : String(e));
+      this.report();
+      return;
     }
+    if (this.current?.ctrl !== ctrl) return;   // superseded while running
+    this.current = null;
+    this.done++;
+    try { this.handlers.onResult(pair, result); } catch (e) { console.error("onResult handler failed", e); }   // a handler bug is not a detection failure
     this.report();
     void this.kick();
   }

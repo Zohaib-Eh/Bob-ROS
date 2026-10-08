@@ -70,4 +70,18 @@ describe("DetectionRunner", () => {
     r.resume();
     await vi.waitFor(() => expect(results).toEqual(["x"]));
   });
+
+  it("a throwing onResult is not a detection failure and is not retried", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const detect = vi.fn().mockResolvedValue(NONE);
+    const onError = vi.fn();
+    const r = new DetectionRunner(detect, { onResult: () => { throw new Error("handler bug"); }, onProgress: vi.fn(), onError });
+    r.update([pair("x")], () => []);
+    await vi.waitFor(() => expect(detect).toHaveBeenCalled());
+    await tick(); await tick();
+    expect(onError).not.toHaveBeenCalled();
+    expect(detect).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
 });

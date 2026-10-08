@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Joint } from "../api/types";
 import { modelReducer, sanitizeName } from "./reducer";
+import { membership } from "./pairs";
 import { emptyModel, type ModelState } from "./types";
 import { boxBody } from "./testBodies";
 
@@ -135,7 +136,7 @@ describe("modelReducer", () => {
   it("accepting a suggestion stores a confirmed joint; removing it returns the suggestion to review", () => {
     let s = imported();
     const [b, a] = [linkOf(s, "big").id, linkOf(s, "arm").id];
-    const sug = { key: "k", linkA: b, linkB: a, membership: "m", status: "review" as const,
+    const sug = { key: "k", linkA: b, linkB: a, membership: membership(linkOf(s, "big"), linkOf(s, "arm")), status: "review" as const,
       result: { joint: { ...joint("j", b, a), source: "suggested" as const }, reason: null, evidence: null } };
     s = modelReducer(s, { type: "setSuggestion", suggestion: sug });
     s = modelReducer(s, { type: "acceptSuggestion", key: "k", joint: { ...sug.result.joint, type: "continuous" } });
@@ -152,6 +153,30 @@ describe("modelReducer", () => {
     s = modelReducer(s, { type: "replaceBody", body: { ...arm, status: "ok", name: "arm2" } });
     expect(s.bodies.arm.name).toBe("arm2");
     expect(linkOf(s, "arm").id).toBe(lid);
+  });
+
+  it("ignores a suggestion whose membership is stale; stores a current one", () => {
+    const s = imported();
+    const [a, b] = [linkOf(s, "big"), linkOf(s, "arm")];
+    const sug = { key: "k", linkA: a.id, linkB: b.id, membership: membership(a, b), status: "review" as const,
+      result: { joint: null, reason: "no_contact_faces" as const, evidence: null } };
+    expect(modelReducer(s, { type: "setSuggestion", suggestion: { ...sug, membership: "stale" } })).toBe(s);
+    expect(modelReducer(s, { type: "setSuggestion", suggestion: { ...sug, linkB: "gone" } })).toBe(s);
+    expect(modelReducer(s, { type: "setSuggestion", suggestion: sug }).suggestions.k).toEqual(sug);
+  });
+
+  it("replaceBody drops suggestions involving its link", () => {
+    let s = imported();
+    const [a, b, c] = [linkOf(s, "big"), linkOf(s, "arm"), linkOf(s, "screw")];
+    const mk = (key: string, x: typeof a, y: typeof a) => ({ key, linkA: x.id, linkB: y.id, membership: membership(x, y),
+      status: "review" as const, result: { joint: null, reason: "no_contact_faces" as const, evidence: null } });
+    s = modelReducer(s, { type: "setSuggestion", suggestion: mk("ab", a, b) });
+    s = modelReducer(s, { type: "setSuggestion", suggestion: mk("bc", b, c) });
+    s = modelReducer(s, { type: "replaceBody", body: { ...arm, name: "arm2" } });
+    expect(Object.keys(s.suggestions)).toEqual([]);
+    s = modelReducer(s, { type: "setSuggestion", suggestion: mk("ab", a, b) });
+    s = modelReducer(s, { type: "replaceBody", body: { ...screw, name: "s2" } });
+    expect(Object.keys(s.suggestions)).toEqual(["ab"]);
   });
 
   it("unchanged state is returned by identity for unknown links", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Joint } from "../api/types";
 import { HISTORY_CAP, historyReducer, initialHistory } from "./history";
+import { membership } from "./pairs";
 import { loadProject, saveProject } from "./project";
 import { boxBody } from "./testBodies";
 
@@ -35,8 +36,9 @@ describe("history", () => {
   it("detection results are not undo steps; a new edit clears redo", () => {
     let h = imported();
     const pastLen = h.past.length;
-    h = historyReducer(h, { type: "setSuggestion", suggestion: { key: "k", linkA: "x", linkB: "y",
-      membership: "m", status: "review", result: { joint: null, reason: "no_contact_faces", evidence: null } } });
+    const [la, lb] = h.present.links;
+    h = historyReducer(h, { type: "setSuggestion", suggestion: { key: "k", linkA: la.id, linkB: lb.id,
+      membership: membership(la, lb), status: "review", result: { joint: null, reason: "no_contact_faces", evidence: null } } });
     expect(h.past.length).toBe(pastLen);
     h = historyReducer(h, { type: "undo" });
     h = historyReducer(h, { type: "redo" });
