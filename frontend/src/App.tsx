@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Matrix4 } from "three";
-import { detectJoints } from "./api/client";
+import { detectJoints, exportRobot } from "./api/client";
 import { DetectionRunner, pairsToDetect, type Progress } from "./model/detection";
+import { splitExportError } from "./model/errors";
+import { buildExportRequest } from "./model/exportRequest";
 import { historyReducer, initialHistory } from "./model/history";
 import Banner from "./ui/Banner";
 import DetailsPanel from "./ui/DetailsPanel";
+import { downloadBlob } from "./ui/download";
 import PartsTree from "./ui/PartsTree";
 import type { Selection } from "./ui/selection";
 import StatusBar from "./ui/StatusBar";
@@ -57,6 +60,38 @@ export default function App() {
       return { kind: "bodies", ids: additive ? [...new Set([...prev, hit.bodyId])] : [hit.bodyId] };
     });
   }, []);
+  const exportReq = useMemo(() => buildExportRequest(model), [model]);
+  const [serverErrors, setServerErrors] = useState<Record<string, string[]>>({});
+  useEffect(() => setServerErrors({}), [model]);
+  const treeErrors = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const e of exportReq.errors) for (const id of e.linkIds) (out[id] ??= []).push(e.message);
+    return out;
+  }, [exportReq]);
+  const pinned = useMemo(() => {
+    const out: Record<string, string[]> = { ...treeErrors };
+    for (const [id, msgs] of Object.entries(serverErrors)) (out[id] ??= []).push(...msgs);
+    return out;
+  }, [treeErrors, serverErrors]);
+
+  const onExport = async () => {
+    try {
+      const { blob, warnings } = await exportRobot(robotName, exportReq.links, exportReq.joints, exportReq.bodiesByLink);
+      downloadBlob(blob, `${robotName}.zip`);
+      setBanner(warnings.length ? `Exported. ${warnings.map((w) => w.message).join(" ")}` : null);
+    } catch (e) {
+      const { byLink, byJoint, general } = splitExportError((e as Error).message);
+      setServerErrors(byLink);
+      const linkName = (id: string) => model.links.find((l) => l.id === id)?.name ?? id;
+      const jointMsgs = Object.entries(byJoint).flatMap(([id, msgs]) => {
+        const j = exportReq.joints.find((x) => x.id === id);
+        const label = j ? `${linkName(j.parent_link_id)} ↔ ${linkName(j.child_link_id)}: ` : "";
+        return msgs.map((m) => label + m);
+      });
+      setBanner(["Export failed.", ...jointMsgs, ...general].join(" "));
+    }
+  };
+
   const jointArrows = useMemo(() => [
     ...model.joints.map((joint) => ({ joint, dashed: false })),
     ...Object.values(model.suggestions).filter((g) => g.status === "review" && g.result.joint)
@@ -68,12 +103,13 @@ export default function App() {
       <div>
         <TopBar model={model} dispatch={dispatch} canUndo={history.past.length > 0} canRedo={history.future.length > 0}
           setBanner={setBanner} robotName={robotName} setRobotName={setRobotName}
-          onExport={() => setBanner("Export is added in Task 11.")} exportDisabledReason={null} />
+          onExport={() => void onExport()}
+          exportDisabledReason={exportReq.errors[0]?.message ?? (model.links.length ? null : "Import a model first.")} />
         <Banner message={banner} onClose={() => setBanner(null)} />
       </div>
       <div className="workspace">
         <div className="panel">
-          <PartsTree model={model} dispatch={dispatch} selection={selection} setSelection={setSelection} errors={{}} />
+          <PartsTree model={model} dispatch={dispatch} selection={selection} setSelection={setSelection} errors={pinned} />
         </div>
         <ViewerPane bodies={bodies} ignored={model.ignored}
           selectedBodyIds={selection?.kind === "bodies" ? selection.ids : []}

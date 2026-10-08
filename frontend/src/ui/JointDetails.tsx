@@ -89,7 +89,7 @@ export default function JointDetails(p: DetailsProps) {
 
       {lo !== hi && (
         <label>Preview{" "}
-          <input data-testid="preview-slider" type="range" min={lo} max={hi} step={(hi - lo) / 100}
+          <input data-testid="preview-slider" type="range" min={lo} max={hi} step="any"
             value={preview} data-preview-value={preview}
             onChange={(e) => onPreview(Number(e.target.value))}
             onMouseUp={() => { setPreviewValue(0); setPreview(null); }} />
