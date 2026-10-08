@@ -160,7 +160,8 @@ describe("JointTool", () => {
   });
 
   it("Animate moves the moving link's parts through the viewer", async () => {
-    const viewer = { setPreview: vi.fn(), focus: vi.fn() } as unknown as Viewer;
+    const viewer = { setPreview: vi.fn(), focus: vi.fn(), onDrive: vi.fn(), setWarning: vi.fn(),
+      screenPoint: () => null, onCameraChange: () => () => {} } as unknown as Viewer;
     both(withSuggestion(base(), J({})), viewer);
     fireEvent.click(screen.getByTestId("next-joint"));
     fireEvent.click(screen.getByTestId("animate"));

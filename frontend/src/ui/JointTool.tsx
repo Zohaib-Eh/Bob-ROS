@@ -1,5 +1,5 @@
-import { ArrowLeftRight, Check, Crosshair, Lock, MoveHorizontal, Pause, Play, RotateCw, Square, Trash2, X, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowLeftRight, Check, Crosshair, Loader2, Lock, MoveHorizontal, Pause, Play, Radar, RotateCw, Square, Trash2, X, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Vec3 } from "../api/types";
 import {
   draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, setMotion, type JointDraft, type Motion,
@@ -9,7 +9,9 @@ import { jointMotion, previewRange } from "../viewer/preview";
 import type { Ctx, PickMode } from "./ctx";
 import { deg, rad, shortName } from "./format";
 import type { Term } from "./glossary";
-import { movingBodies } from "./drive";
+import { sweepLimits } from "../api/client";
+import type { SweepResult } from "../api/types";
+import { beyondSide, driveRange, fmtJointValue, movingBodies, sweepRequest, sweepSummary } from "./drive";
 import Info from "./Info";
 
 const MOTIONS: { id: Motion; label: string; term: Term; icon: LucideIcon }[] = [
@@ -35,6 +37,54 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
     setJointDraft(stored ? draftFromJoint(stored) : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stored, d?.id]);
+
+  type Sweep = { state: "idle" } | { state: "running" } | { state: "done"; result: SweepResult } | { state: "error"; message: string };
+  const [drive, setDrive] = useState(0);
+  const [sweep, setSweep] = useState<Sweep>({ state: "idle" });
+  const [, relayout] = useReducer((n: number) => n + 1, 0);
+  // what the pose and a sweep result depend on; when it changes both are stale
+  const shape = d ? JSON.stringify([d.id, d.fixed, d.moving, d.origin, d.axis, d.motion]) : "";
+  const live = useRef({ d, shape });
+  live.current = { d, shape };
+  useEffect(() => { setDrive(0); setSweep({ state: "idle" }); }, [shape]);
+
+  const pj = d ? draftPreviewJoint(d) : null;
+  const canDrive = !!pj?.axis && (d?.motion === "revolute" || d?.motion === "slider");
+  const bodyIds = useMemo(() => (d && canDrive ? movingBodies(model, d) : []), [model, d, canDrive]);
+  const side = d ? beyondSide(d, drive) : null;
+
+  // the drive pose is the preview, except while Animate runs
+  useEffect(() => {
+    if (!viewer || animating) return;
+    if (!canDrive || !pj || drive === 0) viewer.setPreview([], null);
+    else viewer.setPreview(bodyIds, jointMotion(pj, drive));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, animating, drive, canDrive, bodyIds, shape]);
+  useEffect(() => {
+    viewer?.onDrive(canDrive && pj ? { joint: pj, bodyIds, value: drive, onChange: setDrive } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, canDrive, bodyIds, drive, shape]);
+  useEffect(() => { viewer?.setWarning(side ? bodyIds : []); }, [viewer, side, bodyIds]);
+  useEffect(() => () => { viewer?.onDrive(null); viewer?.setWarning([]); viewer?.setPreview([], null); }, [viewer]);
+  useEffect(() => viewer?.onCameraChange(relayout), [viewer]);
+
+  const runSweep = async () => {
+    const req = d ? sweepRequest(model, d) : null;
+    if (!req || sweep.state === "running") return;
+    const asked = shape;
+    setSweep({ state: "running" });
+    try {
+      const result = await sweepLimits(req.joint, req.moving, req.obstacles);
+      if (live.current.shape !== asked) return;   // the joint changed while sweeping
+      setSweep({ state: "done", result });
+      const cur = live.current.d;
+      if (cur && !result.free && !result.at_rest_overlap.length && result.lower !== null && result.upper !== null) {
+        setJointDraft({ ...cur, lower: result.lower, upper: result.upper });
+      }
+    } catch (e) {
+      if (live.current.shape === asked) setSweep({ state: "error", message: (e as Error).message });
+    }
+  };
 
   useEffect(() => {
     const toggle = () => setAnimating((a) => !a);
@@ -83,8 +133,13 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
   const parsed = (s: string) => (s === "" ? null : slider ? Number(s) / 1000 : rad(Number(s)));
   const movingLink = d.moving ? model.links.find((l) => l.id === d.moving) : undefined;
   const canAnimate = !!d.axis && !!d.origin && (d.motion === "revolute" || d.motion === "slider");
+  const [driveLo, driveHi] = driveRange(model, d);
+  const blocker = sweep.state === "done" && side ? sweep.result.blocked_by[side] : null;
+  const label = `${fmtJointValue(drive, slider)}${side ? ` · beyond ${side} limit${blocker ? ` (hits ${linkName(blocker)})` : ""}` : ""}`;
+  const labelAt = pj && drive !== 0 ? viewer?.screenPoint(pj.origin_xyz) : null;
 
   return (
+    <>
     <div className="floating jointtool" data-testid="joint-tool" onPointerDown={(e) => e.stopPropagation()}>
       <div className="row"><strong>Joint</strong><Info term="joint" /><span className="spacer" />
         <button className="btn btn-ghost btn-icon" aria-label="Close joint tool" onClick={close}><X size={14} /></button></div>
@@ -135,6 +190,41 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
           No limits — spins freely <Info term="continuous" />
         </label>
       )}
+      {canDrive && (
+        <div className="drive">
+          <div className="row">
+            <button className="btn" data-testid="find-limits" disabled={sweep.state === "running"} onClick={() => void runSweep()}>
+              {sweep.state === "running" ? <><Loader2 size={14} className="spin" />Sweeping…</> : <><Radar size={14} />Find limits from geometry</>}
+            </button>
+            <Info term="sweep" />
+          </div>
+          {sweep.state === "done" && (
+            <div className="small" data-testid="sweep-status">
+              {sweepSummary(sweep.result, slider, (id) => model.links.find((l) => l.id === id)?.name ?? id)}
+              {sweep.result.free && !d.noLimits && (
+                <button className="btn" data-testid="use-no-limits" onClick={() => set({ noLimits: true })}>Use No limits</button>
+              )}
+            </div>
+          )}
+          {sweep.state === "error" && <div className="error-text" data-testid="sweep-status">{sweep.message}</div>}
+          <div className="label">Drive <Info term="drive" /></div>
+          <div className="row">
+            <input type="range" data-testid="drive-slider" min={driveLo} max={driveHi} step="any" value={drive}
+              style={{ flex: 1 }} onChange={(e) => setDrive(Number(e.target.value))} />
+            <input className="field" data-testid="drive-value" type="number" step="any" style={{ width: 72 }}
+              value={shown(drive)} onChange={(e) => setDrive(parsed(e.target.value) ?? 0)} />
+          </div>
+          {limited && (
+            <div className="row">
+              <button className="btn" data-testid="set-lower-here" disabled={d.upper !== null && drive > d.upper}
+                onClick={() => set({ lower: drive })}>Set lower here</button>
+              <button className="btn" data-testid="set-upper-here" disabled={d.lower !== null && drive < d.lower}
+                onClick={() => set({ upper: drive })}>Set upper here</button>
+              <button className="btn btn-ghost" data-testid="reset-drive" disabled={drive === 0} onClick={() => setDrive(0)}>Reset</button>
+            </div>
+          )}
+        </div>
+      )}
       {movingLink && (
         <label className="row small">Name this link
           <input className="field" data-testid="moving-name" key={movingLink.id + movingLink.name} defaultValue={movingLink.name}
@@ -162,5 +252,7 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
         <button className="btn btn-primary" data-testid="ok" disabled={!!problem} onClick={ok}><Check size={14} />OK</button>
       </div>
     </div>
+    {labelAt && <div className="drive-label" data-testid="drive-label" style={{ left: labelAt.x, top: labelAt.y }}>{label}</div>}
+    </>
   );
 }
