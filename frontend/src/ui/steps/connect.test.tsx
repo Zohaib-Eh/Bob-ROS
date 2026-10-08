@@ -113,6 +113,15 @@ describe("JointTool", () => {
     expect(state().pick).toBe("origin");
   });
 
+  it("motion buttons hold no nested buttons, so a click never lands on the ⓘ", () => {
+    both(base());
+    fireEvent.click(screen.getByTestId("next-joint"));
+    for (const m of ["rigid", "revolute", "slider", "planar"]) {
+      expect(screen.getByTestId(`motion-${m}`).querySelector("button")).toBeNull();
+      expect(screen.getByRole("button", { name: new RegExp(`What is ${m}`, "i") })).toBeTruthy();
+    }
+  });
+
   it("removes an existing joint", () => {
     const h = base();
     const { block, peg } = ids(h);

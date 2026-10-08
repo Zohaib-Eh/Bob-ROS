@@ -215,7 +215,7 @@ export class Viewer {
   private rebuildOverlay() {
     disposeTree(this.overlay);
     this.overlay.clear();
-    const size = Math.max(this.bounds.radius * 0.35, 1e-3);
+    const size = Math.max(this.bounds.radius * 0.2, 1e-3);
     for (const g of this.glyphs) this.overlay.add(buildGlyph(g, size));
     for (const [a, b] of this.loose) this.overlay.add(buildLooseLine(a, b, size));
     if (this.snap) this.overlay.add(buildSnap(this.snap, size));

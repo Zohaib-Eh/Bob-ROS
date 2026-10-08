@@ -120,10 +120,13 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
       <div className="label">Motion</div>
       <div className="motion-grid">
         {MOTIONS.map((m) => (
-          <button key={m.id} className={`btn motion${d.motion === m.id ? " active" : ""}`} data-testid={`motion-${m.id}`}
-            onClick={() => setJointDraft(setMotion(d, m.id))}>
-            <m.icon size={14} />{m.label}<Info term={m.term} />
-          </button>
+          <span key={m.id} className="motion-cell">
+            <button className={`btn motion${d.motion === m.id ? " active" : ""}`} data-testid={`motion-${m.id}`}
+              onClick={() => setJointDraft(setMotion(d, m.id))}>
+              <m.icon size={14} />{m.label}
+            </button>
+            <Info term={m.term} />
+          </span>
         ))}
       </div>
       <div className="row small muted">
