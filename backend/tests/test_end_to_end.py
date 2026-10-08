@@ -446,3 +446,73 @@ def test_export_closed_box_with_override_and_zero_density_is_422():
     r = client.post("/export", json=payload)
     assert r.status_code == 422
     assert "'a'" in r.json()["detail"] and "density" in r.json()["detail"]
+
+
+def _split_by_faces(body: Body) -> list[Body]:
+    """Two bodies holding the first and second half of `body`'s faces."""
+    half = len(body.faces) // 2
+    out = []
+    for k, faces in enumerate((body.faces[:half], body.faces[half:])):
+        tri_ids = [i for f in faces for i in f.triangle_indices]
+        remap = {old: new for new, old in enumerate(tri_ids)}
+        out.append(Body(
+            id=f"{body.id}-{k}", name=f"{body.name}_{k}", vertices=body.vertices,
+            triangles=[body.triangles[i] for i in tri_ids],
+            faces=[f.model_copy(update={"triangle_indices": [remap[i] for i in f.triangle_indices]})
+                   for f in faces]))
+    return out
+
+
+def test_detect_joints_accepts_body_lists(peg_in_hole_step_path):
+    block, peg = import_step(peg_in_hole_step_path)
+    parts = [b.model_dump() for b in _split_by_faces(block)]
+    r = client.post("/detect-joints", json={
+        "bodies_a": parts, "bodies_b": [peg.model_dump()],
+        "parent_link_id": "a", "child_link_id": "b"})
+    assert r.status_code == 200
+    assert r.json()["joint"]["type"] == "cylindrical"
+    assert r.json()["evidence"]["pairs"][0]["radius"] == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("sides", [
+    {"body_a": "X", "bodies_a": ["X"], "body_b": "X"},   # both forms for side a
+    {"body_b": "X"},                                       # neither form for side a
+])
+def test_detect_joints_requires_exactly_one_form_per_side(box_step_path, sides):
+    box = import_step(box_step_path)[0].model_dump()
+    payload = {k: ([box] if v == ["X"] else box) for k, v in sides.items()}
+    r = client.post("/detect-joints", json={**payload, "parent_link_id": "a", "child_link_id": "b"})
+    assert r.status_code == 422
+
+
+def _unit_box_json(bid="b", status="ok"):
+    m = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    return {"id": bid, "name": bid, "vertices": m.vertices.tolist(),
+            "triangles": m.faces.tolist(), "status": status}
+
+
+def test_link_mass_matches_unit_box():
+    r = client.post("/link-mass", json={
+        "link": {"id": "a", "name": "a", "body_ids": ["b"], "density_kg_m3": 1000.0},
+        "bodies": [_unit_box_json()]})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["mass_kg"] == pytest.approx(1000.0)
+    assert out["inertia"][0] == pytest.approx(1000.0 / 6.0)
+    assert out["center_of_mass"] == pytest.approx([0.0, 0.0, 0.0], abs=1e-9)
+
+
+def test_link_mass_returns_export_errors():
+    r = client.post("/link-mass", json={
+        "link": {"id": "a", "name": "a", "body_ids": ["b"], "density_kg_m3": 1000.0},
+        "bodies": [_unit_box_json(status="approximate")]})
+    assert r.status_code == 422
+    assert "Link 'a'" in r.json()["detail"] and "approximate" in r.json()["detail"]
+
+
+def test_link_mass_ignores_bodies_not_in_body_ids():
+    r = client.post("/link-mass", json={
+        "link": {"id": "a", "name": "a", "body_ids": ["other"], "density_kg_m3": 1000.0},
+        "bodies": [_unit_box_json()]})
+    assert r.status_code == 422
+    assert "Link 'a'" in r.json()["detail"]

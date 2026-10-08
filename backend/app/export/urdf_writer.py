@@ -220,6 +220,15 @@ def unused_body_warnings(links: list[Link], bodies_by_link: dict[str, list[Body]
     ]
 
 
+def link_mass_properties(link: Link, bodies: list[Body]) -> Link:
+    """Mass/COM/inertia for one link exactly as export computes them."""
+    used = _used_bodies([link], {link.id: bodies})
+    errors = _part_status_errors([link], used)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return _with_mass_properties(link, used[link.id])
+
+
 def export_package(
     robot_name: str,
     links: list[Link],
