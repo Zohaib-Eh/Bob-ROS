@@ -12,7 +12,9 @@ from OCC.Core.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 from OCC.Core.IGESControl import IGESControl_Writer
 from OCC.Core.Interface import Interface_Static
 from OCC.Core.STEPControl import STEPControl_AsIs, STEPControl_Writer
-from OCC.Core.TopoDS import TopoDS_Compound
+from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_SHELL
+from OCC.Core.TopExp import TopExp_Explorer
+from OCC.Core.TopoDS import TopoDS_Compound, TopoDS_Shell
 
 
 def _write_step(shape, path: str, unit: str = "M") -> None:
@@ -131,4 +133,34 @@ def non_watertight_stl_path(tmp_path) -> str:
     mesh.faces = mesh.faces[:-1]  # drop one face -> open mesh
     path = str(tmp_path / "broken.stl")
     mesh.export(path)
+    return path
+
+
+def _faces(shape):
+    ex, out = TopExp_Explorer(shape, TopAbs_FACE), []
+    while ex.More():
+        out.append(ex.Current()); ex.Next()
+    return out
+
+
+@pytest.fixture
+def mixed_topology_brep_path(tmp_path) -> str:
+    """1 m units (import with brep_scale=1.0). Contains, left to right along x:
+    a solid box at x=0, a closed shell (box at x=3, not a solid), an open shell
+    (box at x=6 with its 6th face missing), and one loose face (a box face at x=9)."""
+    b = BRep_Builder()
+    solid = BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape()
+    closed_shell = TopExp_Explorer(
+        BRepPrimAPI_MakeBox(gp_Pnt(3, 0, 0), 1.0, 1.0, 1.0).Shape(), TopAbs_SHELL).Current()
+    open_shell = TopoDS_Shell()
+    b.MakeShell(open_shell)
+    for f in _faces(BRepPrimAPI_MakeBox(gp_Pnt(6, 0, 0), 1.0, 1.0, 1.0).Shape())[:5]:
+        b.Add(open_shell, f)
+    loose_face = _faces(BRepPrimAPI_MakeBox(gp_Pnt(9, 0, 0), 1.0, 1.0, 1.0).Shape())[0]
+    comp = TopoDS_Compound()
+    b.MakeCompound(comp)
+    for s in (solid, closed_shell, open_shell, loose_face):
+        b.Add(comp, s)
+    path = str(tmp_path / "mixed.brep")
+    breptools.Write(comp, path)
     return path

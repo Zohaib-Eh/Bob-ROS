@@ -1,9 +1,18 @@
 import math
 
+import numpy as np
 import pytest
 import trimesh
+from OCC.Core.BRep import BRep_Builder
+from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
+from OCC.Core.BRepTools import breptools
+from OCC.Core.gp import gp_Pnt
+from OCC.Core.TopAbs import TopAbs_SHELL
+from OCC.Core.TopExp import TopExp_Explorer
+from OCC.Core.TopoDS import TopoDS_Compound
 
-from app.importers.step_importer import import_step
+from app.importers import step_importer
+from app.importers.step_importer import import_cad, import_step
 
 
 def _mesh(body):
@@ -98,3 +107,82 @@ def test_box_plane_normals_point_outward(box_step_path):
 def test_brep_scale_must_be_finite_positive(cylinder_brep_path, bad):
     with pytest.raises(ValueError, match="scale"):
         import_step(cylinder_brep_path, brep_scale=bad)
+
+
+def _by_x(bodies):
+    return sorted(bodies, key=lambda b: min(v[0] for v in b.vertices) if b.vertices else 1e9)
+
+
+def test_mixed_topology_imports_every_part(mixed_topology_brep_path):
+    bodies, warnings = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    assert len(bodies) == 4
+    solid, closed, open_, loose = _by_x(bodies)
+    assert solid.status == "ok" and solid.warnings == []
+    assert closed.status == "repaired"
+    assert [w.code for w in closed.warnings] == ["shell_repaired"]
+    assert open_.status == "approximate"
+    assert open_.warnings[0].code == "open_geometry"
+    assert "4 open edges" in open_.warnings[0].message      # a 1x1 box missing one face
+    assert open_.warnings[0].fixes == ["set_mass", "replace", "ignore"]
+    assert loose.status == "approximate"
+    assert warnings == []                                    # every face accounted for
+
+
+def test_repaired_shell_has_analytic_volume(mixed_topology_brep_path):
+    bodies, _ = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    closed = _by_x(bodies)[1]
+    m = trimesh.Trimesh(np.array(closed.vertices), np.array(closed.triangles), process=False)
+    assert m.is_watertight
+    assert abs(m.volume - 1.0) < 1e-6
+
+
+def test_repaired_shell_faces_are_brep_planes_with_outward_normals(mixed_topology_brep_path):
+    bodies, _ = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    closed = _by_x(bodies)[1]
+    assert {f.kind for f in closed.faces} == {"plane"}
+    assert {f.origin for f in closed.faces} == {"brep"}
+    centroid = np.array([3.5, 0.5, 0.5])
+    verts, tris = np.array(closed.vertices), np.array(closed.triangles)
+    for f in closed.faces:
+        center = verts[tris[f.triangle_indices].ravel()].mean(axis=0)
+        assert np.dot(f.normal, center - centroid) > 0
+
+
+def test_dropped_faces_produce_unaccounted_warning(mixed_topology_brep_path, monkeypatch):
+    monkeypatch.setattr(step_importer, "_loose_faces", lambda shape: [])
+    bodies, warnings = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    assert len(bodies) == 3
+    assert [w.code for w in warnings] == ["unaccounted_faces"]
+    assert "1 face" in warnings[0].message
+    assert warnings[0].fixes == ["reexport"]
+
+
+def test_import_step_keeps_list_signature(box_step_path):
+    bodies = import_step(box_step_path)
+    assert isinstance(bodies, list) and len(bodies) == 1
+
+
+def test_compound_with_solid_and_shell_in_one_part(tmp_path):
+    """Review Focus: a product mixing a solid and a loose shell keeps both."""
+    b = BRep_Builder()
+    shell = TopExp_Explorer(BRepPrimAPI_MakeBox(gp_Pnt(3, 0, 0), 1, 1, 1).Shape(), TopAbs_SHELL).Current()
+    inner = TopoDS_Compound(); b.MakeCompound(inner)
+    b.Add(inner, BRepPrimAPI_MakeBox(1, 1, 1).Shape()); b.Add(inner, shell)
+    outer = TopoDS_Compound(); b.MakeCompound(outer); b.Add(outer, inner)
+    path = str(tmp_path / "nested.brep"); breptools.Write(outer, path)
+    bodies, warnings = import_cad(path, brep_scale=1.0)
+    assert sorted(x.status for x in bodies) == ["ok", "repaired"]
+    assert warnings == []
+
+
+@pytest.mark.parametrize("system,expected", [
+    ("CREO PARAMETRIC BY PTC INC", "Creo"),
+    ("SOLIDWORKS 2024", "SOLIDWORKS"),
+    ("Autodesk Fusion", "Fusion"),
+    ("Onshape", "Onshape"),
+    ("Some Unknown CAD", "solid bodies"),
+])
+def test_reexport_advice_names_exporter(tmp_path, system, expected):
+    p = tmp_path / "x.step"
+    p.write_text(f"ISO-10303-21;\nHEADER;\nFILE_NAME('x','t',(''),(''),'{system}','{system}','');\nENDSEC;\n")
+    assert expected in step_importer._reexport_advice(str(p))

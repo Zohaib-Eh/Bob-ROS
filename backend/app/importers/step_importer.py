@@ -3,9 +3,12 @@ import os
 import uuid
 
 import numpy as np
+import trimesh
 from OCC.Core.BRep import BRep_Builder, BRep_Tool
 from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCC.Core.BRepBuilderAPI import (
+    BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing, BRepBuilderAPI_Transform,
+)
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepTools import breptools
 from OCC.Core.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Sphere
@@ -13,13 +16,14 @@ from OCC.Core.gp import gp_Pnt, gp_Trsf
 from OCC.Core.IFSelect import IFSelect_RetDone
 from OCC.Core.IGESControl import IGESControl_Reader
 from OCC.Core.Interface import Interface_Static
+from OCC.Core.ShapeFix import ShapeFix_Solid
 from OCC.Core.STEPControl import STEPControl_Reader
-from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SOLID
+from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SHELL, TopAbs_SOLID
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
-from OCC.Core.TopoDS import TopoDS_Shape
+from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Shell, topods
 
-from app.models import Body, Face
+from app.models import Body, Face, PartWarning
 
 _LINEAR_DEFLECTION = 0.001  # meters
 
@@ -109,6 +113,9 @@ def _extract_mesh(solid):
         per_face.append((face, ids))
         ex.Next()
 
+    if not verts:
+        return [], [], per_face
+
     # Merge coincident vertices (1e-9 m grid); triangle order/count unchanged.
     arr = np.asarray(verts, dtype=float).reshape(-1, 3)
     _, first, inverse = np.unique(
@@ -121,20 +128,124 @@ def _extract_mesh(solid):
     return merged, tris, per_face
 
 
-def import_step(file_path: str, brep_scale: float = 0.001) -> list[Body]:
-    """Import STEP/IGES/BREP (by extension) as one Body per solid, in meters.
-    `brep_scale` applies to unitless .brep only; callers surface it like STL scale."""
+_SEW_TOLERANCE = 1e-5  # meters
+
+
+def _subshapes(shape, kind, avoid=None) -> list:
+    ex = TopExp_Explorer(shape, kind) if avoid is None else TopExp_Explorer(shape, kind, avoid)
+    out = []
+    while ex.More():
+        out.append(ex.Current()); ex.Next()
+    return out
+
+
+def _loose_faces(shape) -> list:
+    """Faces that are in no shell (shells inside solids are shells too)."""
+    return _subshapes(shape, TopAbs_FACE, TopAbs_SHELL)
+
+
+def _sew_to_solids(shapes) -> list:
+    """Sew shells/faces together and turn each resulting shell into a solid.
+    Open shells still become (open) solids; the mesh check decides the status."""
+    sew = BRepBuilderAPI_Sewing(_SEW_TOLERANCE)
+    for s in shapes:
+        sew.Add(s)
+    sew.Perform()
+    sewn = sew.SewedShape()
+    shells = _subshapes(sewn, TopAbs_SHELL)
+    if not shells:  # a single sewn face comes back as a face, not a shell
+        shell = TopoDS_Shell()
+        BRep_Builder().MakeShell(shell)
+        for f in _subshapes(sewn, TopAbs_FACE):
+            BRep_Builder().Add(shell, f)
+        shells = [shell]
+    solids = []
+    for sh in shells:
+        fix = ShapeFix_Solid(BRepBuilderAPI_MakeSolid(topods.Shell(sh)).Solid())
+        fix.Perform()
+        solids.append(fix.Solid())
+    return solids
+
+
+def _open_edge_count(vertices, triangles) -> int:
+    mesh = trimesh.Trimesh(np.asarray(vertices), np.asarray(triangles), process=False)
+    return len(trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1))
+
+
+def _make_body(solid, name: str, repaired: bool) -> Body:
+    vertices, triangles, per_face = _extract_mesh(solid)
+    if not triangles:
+        return Body(id=str(uuid.uuid4()), name=name, vertices=[], triangles=[], status="failed",
+                    warnings=[PartWarning(code="degenerate", fixes=["replace", "ignore"],
+                                          message=f"{name}: could not be meshed")])
+    faces = [_face_to_model(f, ids) for f, ids in per_face if ids]
+    status, warnings = "ok", []
+    if repaired:
+        n_open = _open_edge_count(vertices, triangles)
+        if n_open == 0:
+            status = "repaired"
+            warnings = [PartWarning(code="shell_repaired", fixes=[],
+                                    message=f"{name}: surface shell sewn into a closed solid")]
+        else:
+            status = "approximate"
+            warnings = [PartWarning(code="open_geometry", fixes=["set_mass", "replace", "ignore"],
+                                    message=f"{name}: {n_open} open edges remain after repair; "
+                                            "mass is approximate")]
+    return Body(id=str(uuid.uuid4()), name=name, vertices=vertices, triangles=triangles,
+                faces=faces, status=status, warnings=warnings)
+
+
+_EXPORTER_ADVICE = [
+    (("CREO", "PRO/ENGINEER"), "Creo: export STEP AP214 or AP242 with 'Solids' enabled."),
+    (("SOLIDWORKS",), "SOLIDWORKS: Save As STEP AP214, with 'Export as solid/surface geometry' set to solid."),
+    (("FUSION", "AUTODESK"), "Fusion: export the design as STEP from File > Export (bodies, not meshes)."),
+    (("ONSHAPE",), "Onshape: export as STEP AP242 and leave 'Export as single part' off."),
+    (("FREECAD",), "FreeCAD: export solids (Part objects), not mesh or surface objects, to STEP."),
+]
+
+
+def _reexport_advice(file_path: str) -> str:
+    try:
+        with open(file_path, "r", errors="ignore") as f:
+            header = f.read(8192).upper()
+    except OSError:
+        header = ""
+    for keys, advice in _EXPORTER_ADVICE:
+        if any(k in header for k in keys):
+            return advice
+    return "Re-export the model from your CAD tool as STEP with solid bodies."
+
+
+def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], list[PartWarning]]:
+    """Import STEP/IGES/BREP (by extension) in meters: every solid, plus loose shells
+    and loose faces sewn into solids. File-level warnings report faces that ended up
+    in no body. `brep_scale` applies to unitless .brep only."""
     if not (math.isfinite(brep_scale) and brep_scale > 0):
         raise ValueError(f"brep_scale must be finite and positive, got {brep_scale}")
     shape = _read_shape(file_path, brep_scale)
-    bodies: list[Body] = []
-    ex = TopExp_Explorer(shape, TopAbs_SOLID)
-    while ex.More():
-        vertices, triangles, per_face = _extract_mesh(ex.Current())
-        faces = [_face_to_model(f, ids) for f, ids in per_face if ids]
-        bodies.append(Body(id=str(uuid.uuid4()), name=f"solid_{len(bodies)}",
-                           vertices=vertices, triangles=triangles, faces=faces))
-        ex.Next()
+    total_faces = len(_subshapes(shape, TopAbs_FACE))
+
+    parts = [(s, "solid", False) for s in _subshapes(shape, TopAbs_SOLID)]
+    for sh in _subshapes(shape, TopAbs_SHELL, TopAbs_SOLID):
+        parts += [(s, "shell", True) for s in _sew_to_solids([sh])]
+    loose = _loose_faces(shape)
+    if loose:
+        parts += [(s, "surface", True) for s in _sew_to_solids(loose)]
+
+    bodies = [_make_body(s, f"{prefix}_{i}", repaired) for i, (s, prefix, repaired) in enumerate(parts)]
+    accounted = sum(len(_subshapes(s, TopAbs_FACE)) for s, _, _ in parts)
+    warnings = []
+    if accounted < total_faces:
+        missing = total_faces - accounted
+        warnings.append(PartWarning(
+            code="unaccounted_faces", fixes=["reexport"],
+            message=f"{missing} face{'s' if missing != 1 else ''} in the file did not end up "
+                    f"in any part. {_reexport_advice(file_path)}"))
     if not bodies:
-        raise ValueError("No solids found in CAD file")
-    return bodies
+        raise ValueError("No geometry found in CAD file")
+    return bodies, warnings
+
+
+def import_step(file_path: str, brep_scale: float = 0.001) -> list[Body]:
+    """Bodies only; see import_cad for file-level warnings."""
+    return import_cad(file_path, brep_scale)[0]
