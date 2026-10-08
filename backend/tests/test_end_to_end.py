@@ -360,3 +360,44 @@ def test_export_approximate_part_is_422_naming_link_and_part():
         "joints": [], "bodies_by_link": {"a": [body]}})
     assert r.status_code == 422
     assert "'a'" in r.json()["detail"] and "'b'" in r.json()["detail"]
+
+
+def _replace(data: bytes, filename: str, **form):
+    return client.post("/replace-part", files={"file": (filename, data)},
+                       data={"body_id": "orig", "name": "part", **form})
+
+
+def test_replace_part_keeps_original_id_and_places(box_stl_path):
+    # box_mm.stl is 1000x1000x2000 mm centred at origin -> 1x1x2 m; original sat at x=10
+    r = _replace(open(box_stl_path, "rb").read(), "box.stl",
+                 bbox_min="9.5,-0.5,-1.0", bbox_max="10.5,0.5,1.0")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == "orig" and body["name"] == "part"
+    xs = [v[0] for v in body["vertices"]]
+    assert abs((min(xs) + max(xs)) / 2 - 10.0) < 1e-9
+    assert [w["code"] for w in body["warnings"]] == ["placed_by_bbox"]
+
+
+def test_replace_part_malformed_bbox_is_422(box_stl_path):
+    """Review Focus: malformed form fields are 422, not 500."""
+    data = open(box_stl_path, "rb").read()
+    for bad in ({"bbox_min": "a,b", "bbox_max": "1,1,1"},
+                {"bbox_min": "nan,0,0", "bbox_max": "1,1,1"},
+                {"bbox_min": "0,0,0"}):
+        assert _replace(data, "box.stl", **bad).status_code == 422
+
+
+def test_replace_part_with_unmeshable_file_returns_failed_body(tmp_path):
+    """Review Focus: a replacement that itself fails comes back as `failed`, not 500."""
+    from OCC.Core.BRep import BRep_Builder
+    from OCC.Core.BRepTools import breptools
+    from OCC.Core.TopoDS import TopoDS_Compound
+    comp = TopoDS_Compound(); BRep_Builder().MakeCompound(comp)
+    p = str(tmp_path / "empty.brep"); breptools.Write(comp, p)
+    r = _replace(open(p, "rb").read(), "empty.brep")
+    assert r.status_code in (200, 422)
+    if r.status_code == 200:
+        assert r.json()["status"] == "failed" and r.json()["id"] == "orig"
+    else:
+        assert "empty.brep" in r.json()["detail"]
