@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 import xml.etree.ElementTree as ET
 
@@ -321,3 +322,41 @@ def test_import_mesh_names_body_after_upload_filename(non_watertight_stl_path):
     body = r.json()["bodies"][0]
     assert body["name"] == "broken"
     assert "broken" in body["warnings"][0]["message"]
+
+
+def _box_json(bid, name=None):
+    m = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    return {"id": bid, "name": name or bid, "vertices": m.vertices.tolist(), "triangles": m.faces.tolist()}
+
+
+def test_export_warning_header_lists_unused_bodies():
+    r = client.post("/export", json={
+        "robot_name": "r",
+        "links": [{"id": "a", "name": "a", "body_ids": ["b"], "density_kg_m3": 1000.0}],
+        "joints": [],
+        "bodies_by_link": {"a": [_box_json("b")], "spare": [_box_json("s")]}})
+    assert r.status_code == 200
+    ws = json.loads(r.headers["X-Export-Warnings"])
+    assert [w["code"] for w in ws] == ["unused_body"]
+
+
+def test_export_warning_header_is_ascii_safe():
+    """Review Focus: non-ASCII part names must not break the response header."""
+    r = client.post("/export", json={
+        "robot_name": "r",
+        "links": [{"id": "a", "name": "a", "body_ids": ["b"], "density_kg_m3": 1000.0}],
+        "joints": [],
+        "bodies_by_link": {"a": [_box_json("b")], "spare": [_box_json("s", "Ünterteil")]}})
+    assert r.status_code == 200
+    r.headers["X-Export-Warnings"].encode("ascii")
+    assert "Ünterteil" in json.loads(r.headers["X-Export-Warnings"])[0]["message"]
+
+
+def test_export_approximate_part_is_422_naming_link_and_part():
+    body = dict(_box_json("b"), status="approximate")
+    r = client.post("/export", json={
+        "robot_name": "r",
+        "links": [{"id": "a", "name": "a", "body_ids": ["b"], "density_kg_m3": 1000.0}],
+        "joints": [], "bodies_by_link": {"a": [body]}})
+    assert r.status_code == 422
+    assert "'a'" in r.json()["detail"] and "'b'" in r.json()["detail"]

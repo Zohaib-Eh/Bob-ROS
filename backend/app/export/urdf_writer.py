@@ -10,7 +10,7 @@ import trimesh
 from scipy.spatial.transform import Rotation
 
 from app.massprops.link_mass import compute_link_mass_properties
-from app.models import Body, Joint, Link
+from app.models import Body, Joint, Link, PartWarning
 from app.validate.structural import validate_structure
 
 
@@ -157,13 +157,57 @@ def _package_xml(robot_name: str) -> str:
 """
 
 
+def _bbox_mass_properties(bodies: list[Body], mass: float):
+    """Fallback when the user set a mass but the geometry has no measurable
+    volume: uniform solid box over the vertex bounding box."""
+    v = np.array([p for b in bodies for p in b.vertices], dtype=float)
+    lo, hi = v.min(axis=0), v.max(axis=0)
+    dx, dy, dz = hi - lo
+    inertia = [mass / 12 * (dy**2 + dz**2), mass / 12 * (dx**2 + dz**2),
+               mass / 12 * (dx**2 + dy**2), 0.0, 0.0, 0.0]
+    return tuple(((lo + hi) / 2).tolist()), inertia
+
+
 def _with_mass_properties(link: Link, bodies: list[Body]) -> Link:
-    """Mass/COM/inertia always come from geometry + density, never the client."""
+    """Mass/COM/inertia always come from geometry + density, never the client.
+    A user mass override rescales the computed inertia (uniform density)."""
+    override = link.mass_override_kg
     try:
         mass, com, inertia = compute_link_mass_properties(bodies, link.density_kg_m3)
     except ValueError as exc:
-        raise ValueError(f"Link '{link.id}': {exc}") from exc
+        if override is None or not any(b.vertices for b in bodies):
+            raise ValueError(f"Link '{link.id}': {exc}") from exc
+        com, inertia = _bbox_mass_properties(bodies, override)
+        mass = override
+    else:
+        if override is not None:
+            ratio = override / mass
+            mass, inertia = override, [x * ratio for x in inertia]
     return link.model_copy(update={"mass_kg": mass, "center_of_mass": com, "inertia": inertia})
+
+
+def _part_status_errors(links: list[Link], bodies_by_link: dict[str, list[Body]]) -> list[str]:
+    errors = []
+    for l in links:
+        for b in bodies_by_link.get(l.id, []):
+            if b.status == "failed":
+                errors.append(f"Link '{l.id}' contains part '{b.name}' that failed to import; "
+                              "replace it or remove it from the link.")
+            elif (b.status == "approximate" and l.mass_override_kg is None
+                  and not l.accept_approximate_mass):
+                errors.append(f"Link '{l.id}' contains approximate part '{b.name}'; set "
+                              "mass_override_kg or accept_approximate_mass.")
+    return errors
+
+
+def unused_body_warnings(links: list[Link], bodies_by_link: dict[str, list[Body]]) -> list[PartWarning]:
+    link_ids = {l.id for l in links}
+    return [
+        PartWarning(code="unused_body", fixes=[],
+                    message=f"Part '{b.name}' is in no link and was not exported.")
+        for key, bodies in bodies_by_link.items() if key not in link_ids
+        for b in bodies
+    ]
 
 
 def export_package(
@@ -172,6 +216,9 @@ def export_package(
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
 ) -> bytes:
+    errors = _part_status_errors(links, bodies_by_link)
+    if errors:
+        raise ValueError("Cannot export URDF -- " + "; ".join(errors))
     links = [_with_mass_properties(l, bodies_by_link.get(l.id, [])) for l in links]
     urdf = export_urdf(robot_name, links, joints, bodies_by_link)
     buf = io.BytesIO()

@@ -1,4 +1,5 @@
 import io
+import json
 import math
 import zipfile
 import xml.etree.ElementTree as ET
@@ -7,7 +8,7 @@ import numpy as np
 import pytest
 import trimesh
 
-from app.export.urdf_writer import export_package, export_urdf
+from app.export.urdf_writer import export_package, export_urdf, unused_body_warnings
 from app.models import Body, Joint, Link
 
 
@@ -171,3 +172,66 @@ def test_joint_type_needing_axis_without_axis_rejected(t):
     j.type, j.axis = t, None
     msg = _export_err([_link("a"), _link("b")], [j])
     assert "j1" in msg and "axis" in msg
+
+
+def _box_body(bid, status="ok", extents=(1.0, 1.0, 1.0)):
+    m = trimesh.creation.box(extents=extents)
+    return Body(id=bid, name=bid, vertices=[tuple(v) for v in m.vertices.tolist()],
+                triangles=[tuple(t) for t in m.faces.tolist()], status=status)
+
+
+def _single_link_inertial(override=None, accept=False, status="ok"):
+    link = Link(id="a", name="a", body_ids=["b"], density_kg_m3=1000.0,
+                mass_override_kg=override, accept_approximate_mass=accept)
+    data = export_package("r", [link], [], {"a": [_box_body("b", status)]})
+    urdf = zipfile.ZipFile(io.BytesIO(data)).read("r/urdf/r.urdf")
+    return ET.fromstring(urdf).find("link").find("inertial")
+
+
+def test_mass_override_scales_inertia():
+    el = _single_link_inertial(override=5.0)
+    assert float(el.find("mass").attrib["value"]) == pytest.approx(5.0)
+    # unit cube: I = m/6 * s^2 -> 5/6 at 5 kg (computed was 1000 kg -> 1000/6, ratio 1/200)
+    assert float(el.find("inertia").attrib["ixx"]) == pytest.approx(5.0 / 6.0)
+    com = [float(x) for x in el.find("origin").attrib["xyz"].split()]
+    assert np.allclose(com, 0.0, atol=1e-9)                  # COM unchanged by the override
+
+
+def test_approximate_part_without_override_or_accept_is_rejected():
+    with pytest.raises(ValueError, match=r"Link 'a'.*approximate.*'b'"):
+        _single_link_inertial(status="approximate")
+
+
+@pytest.mark.parametrize("kw", [{"override": 2.0}, {"accept": True}])
+def test_approximate_part_with_override_or_accept_exports(kw):
+    el = _single_link_inertial(status="approximate", **kw)
+    assert float(el.find("mass").attrib["value"]) > 0
+
+
+def test_failed_part_is_rejected():
+    link = Link(id="a", name="a", body_ids=["b"], density_kg_m3=1000.0, accept_approximate_mass=True)
+    failed = Body(id="b", name="b", vertices=[], triangles=[], status="failed")
+    with pytest.raises(ValueError, match=r"Link 'a'.*'b'.*failed"):
+        export_package("r", [link], [], {"a": [failed]})
+
+
+def test_mass_override_on_unmeasurable_geometry_uses_bbox():
+    """Review Focus: user set the mass on an open part whose volume is <= 0."""
+    # a flat 2 x 1 quad in the z=0 plane: signed volume is exactly 0
+    body = Body(id="b", name="b", status="approximate",
+                vertices=[(0, 0, 0), (2, 0, 0), (2, 1, 0), (0, 1, 0)],
+                triangles=[(0, 1, 2), (0, 2, 3)])
+    link = Link(id="a", name="a", body_ids=["b"], density_kg_m3=1000.0, mass_override_kg=6.0)
+    data = export_package("r", [link], [], {"a": [body]})
+    el = ET.fromstring(zipfile.ZipFile(io.BytesIO(data)).read("r/urdf/r.urdf")).find("link").find("inertial")
+    assert float(el.find("mass").attrib["value"]) == pytest.approx(6.0)
+    # bbox of the remaining quad; box inertia ixx = m/12 * (dy^2 + dz^2) over the vertex bbox
+    v = np.array(body.vertices); d = v.max(0) - v.min(0)
+    assert float(el.find("inertia").attrib["izz"]) == pytest.approx(6.0 / 12 * (d[0] ** 2 + d[1] ** 2))
+
+
+def test_unused_body_warnings_name_bodies_under_unknown_keys():
+    link = Link(id="a", name="a", body_ids=["b"], density_kg_m3=1000.0)
+    ws = unused_body_warnings([link], {"a": [_box_body("b")], "spare": [_box_body("screw")]})
+    assert [w.code for w in ws] == ["unused_body"]
+    assert "screw" in ws[0].message
