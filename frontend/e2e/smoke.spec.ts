@@ -13,6 +13,11 @@ test("peg-in-hole: import → connect (suggested) → undo/redo → export", asy
   await page.getByTestId("next-joint").click();
   await expect(page.getByTestId("suggested")).toContainText("cylindrical");
   await expect(page.getByTestId("motion-revolute")).toHaveClass(/active/);
+  await page.getByTestId("find-limits").click();
+  await expect(page.getByTestId("sweep-status")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sweep-status")).not.toHaveClass(/error-text/);
+  await page.getByTestId("drive-slider").fill("0.5");
+  await expect(page.getByTestId("drive-label")).toContainText("°");
   await page.getByTestId("animate").click();
   await page.getByTestId("animate").click();
   await page.getByTestId("ok").click();

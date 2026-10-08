@@ -25,6 +25,16 @@ describe("sweepRequest", () => {
     expect(r.moving.map((b) => b.id).sort()).toEqual(["arm", "tip"]);
     expect(r.obstacles.map((o) => o.link_id)).toEqual([base]);
   });
+  it("only links already joined to the fixed side are obstacles; loose links ride along later", () => {
+    const h = imported([boxBody("base", [0, 0, 0], [1, 1, 1]), boxBody("arm", [1, 0, 0], [2, 1, 1]),
+      boxBody("tip", [2, 0, 0], [3, 1, 1]), boxBody("stand", [0, -1, 0], [1, 0, 1])]);
+    const [base, arm, , stand] = h.present.links.map((l) => l.id);
+    const m = historyReducer(h, { type: "addJoint", joint: { id: "js", parent_link_id: base, child_link_id: stand, type: "fixed",
+      origin_xyz: [0.5, 0, 0.5], origin_rpy: [0, 0, 0], axis: null, limit_lower: null, limit_upper: null, source: "manual" } }).present;
+    const r = sweepRequest(m, draft(base, arm))!;
+    expect(r.obstacles.map((o) => o.link_id).sort()).toEqual([base, stand].sort());   // tip isn't joined yet: not an obstacle
+  });
+
   it("sweeps a no-limits revolute as revolute, a slider as prismatic, and nothing for rigid or no axis", () => {
     const { m, base, arm } = model();
     expect(sweepRequest(m, draft(base, arm, { noLimits: true }))!.joint.type).toBe("revolute");

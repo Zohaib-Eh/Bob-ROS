@@ -36,10 +36,23 @@ export function sweepRequest(m: ModelState, d: JointDraft): SweepRequest | null 
   const j = draftPreviewJoint(d);
   if (!j || !j.axis || (d.motion !== "revolute" && d.motion !== "slider")) return null;
   const moving = new Set(movingBodies(m, d));
+  const movingLinks = new Set(m.links.filter((l) => l.body_ids.some((b) => moving.has(b))).map((l) => l.id));
+  // obstacles: the links joined to the fixed side. Links not joined yet have no settled position
+  // (they usually ride along with the moving part once connected), so they are not walls.
+  const fixedSide = new Set([j.parent_link_id]);
+  const queue = [j.parent_link_id];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const x of m.joints) {
+      if (x.id === j.id) continue;
+      const next = x.parent_link_id === cur ? x.child_link_id : x.child_link_id === cur ? x.parent_link_id : null;
+      if (next && !fixedSide.has(next) && !movingLinks.has(next)) { fixedSide.add(next); queue.push(next); }
+    }
+  }
   return {
     joint: { type: d.motion === "slider" ? "prismatic" : "revolute", origin_xyz: j.origin_xyz, axis: j.axis },
     moving: [...moving].map((id) => m.bodies[id]),
-    obstacles: m.links.filter((l) => !l.body_ids.some((b) => moving.has(b)))
+    obstacles: m.links.filter((l) => fixedSide.has(l.id) && !movingLinks.has(l.id))
       .map((l) => ({ link_id: l.id, bodies: l.body_ids.map((id) => m.bodies[id]) })),
   };
 }
