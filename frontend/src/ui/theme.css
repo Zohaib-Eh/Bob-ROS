@@ -107,3 +107,5 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .step { display: flex; flex-direction: column; gap: 8px; }
 .empty { padding: 32px 12px; text-align: center; color: var(--text); }
 .floating { position: absolute; z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.step .card { cursor: default; }
+.step .card[data-testid^="problem-"] { cursor: pointer; }
