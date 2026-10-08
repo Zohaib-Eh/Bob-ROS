@@ -182,8 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         baseline_path.write_text(json.dumps(baseline, indent=2, sort_keys=True))
         print(f"baseline updated: {baseline_path}")
         for line in problems:
-            if line.split(":")[0] in refused:
-                print("REFUSED " + line)
+            print(("REFUSED " if line.split(":")[0] in refused else "REGRESSION ") + line)
         return 1 if refused else 0
     for line in problems:
         print("REGRESSION " + line)

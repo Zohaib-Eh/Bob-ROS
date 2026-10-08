@@ -190,7 +190,7 @@ def test_reexport_advice_names_exporter(tmp_path, system, expected):
     assert expected in step_importer._reexport_advice(str(p))
 
 
-def test_failing_part_becomes_failed_body_not_exception(mixed_topology_brep_path, monkeypatch):
+def test_failing_part_becomes_failed_body_not_exception(mixed_topology_brep_path, monkeypatch, caplog):
     real = step_importer._sew_to_solids
     calls = []
 
@@ -201,7 +201,9 @@ def test_failing_part_becomes_failed_body_not_exception(mixed_topology_brep_path
         return real(shapes)
 
     monkeypatch.setattr(step_importer, "_sew_to_solids", flaky)
-    bodies, warnings = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    with caplog.at_level("ERROR", logger="app.importers.step_importer"):
+        bodies, warnings = import_cad(mixed_topology_brep_path, brep_scale=1.0)
+    assert any(r.exc_info for r in caplog.records)
     assert len(bodies) == 4
     failed = [b for b in bodies if b.status == "failed"]
     assert len(failed) == 1 and failed[0].vertices == []
@@ -270,3 +272,34 @@ def test_step_product_names_become_body_names(tmp_path):
     assert warnings == []
     xs = [min(v[0] for v in b.vertices) for b in bodies]
     assert abs(xs[0] - 0.0) < 1e-6 and abs(xs[1] - 3.0) < 1e-6   # meters, placed
+
+
+def test_empty_step_product_becomes_failed_body(tmp_path):
+    from OCC.Core.STEPCAFControl import STEPCAFControl_Writer
+    from OCC.Core.TDocStd import TDocStd_Document
+    from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool
+    from OCC.Core.TDataStd import TDataStd_Name
+    from OCC.Core.STEPControl import STEPControl_AsIs
+    from OCC.Core.XCAFApp import XCAFApp_Application
+
+    doc = TDocStd_Document("MDTV-XCAF")
+    XCAFApp_Application.GetApplication().NewDocument("MDTV-XCAF", doc)
+    tool = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+    asm = tool.NewShape()
+    TDataStd_Name.Set(asm, "ASSEMBLY")
+    empty = TopoDS_Compound(); BRep_Builder().MakeCompound(empty)
+    for nm, shape in (("REAL_BOX", BRepPrimAPI_MakeBox(1, 1, 1).Shape()), ("EMPTY_PART", empty)):
+        part = tool.AddShape(shape, False)
+        TDataStd_Name.Set(part, nm)
+        tool.AddComponent(asm, part, TopLoc_Location())
+    tool.UpdateAssemblies()
+    w = STEPCAFControl_Writer()
+    Interface_Static.SetCVal("write.step.unit", "M")
+    w.Transfer(doc, STEPControl_AsIs)
+    path = str(tmp_path / "empty_product.step"); w.Write(path)
+
+    bodies, _ = import_cad(path)
+    assert [b.name for b in bodies] == ["REAL_BOX", "EMPTY_PART"]
+    assert bodies[1].status == "failed"
+    assert bodies[1].warnings[0].code == "degenerate"
+    assert bodies[1].warnings[0].fixes == ["replace", "ignore"]

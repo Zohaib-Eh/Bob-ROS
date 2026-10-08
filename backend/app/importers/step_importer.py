@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import uuid
@@ -32,6 +33,7 @@ from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool
 from app.models import Body, Face, PartWarning
 
 _LINEAR_DEFLECTION = 0.001  # meters
+log = logging.getLogger(__name__)
 
 
 def _read_shape(file_path: str, brep_scale: float):
@@ -288,6 +290,8 @@ def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], l
             groups.append((loose, "surface", True))
 
         mine: list[Body] = []
+        if not groups:
+            mine.append(_failed_body(product or f"part_{len(bodies)}", "no geometry was transferred"))
         for sources, prefix, repaired in groups:
             n = len(bodies) + len(mine)
             try:
@@ -295,6 +299,7 @@ def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], l
                 new = [_make_body(s, f"{prefix}_{n + i}", repaired) for i, s in enumerate(solids)]
                 accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in solids)
             except Exception as e:  # one bad part must not fail the import
+                log.exception("part %s_%d failed to import", prefix, n)
                 new = [_failed_body(f"{prefix}_{n}", f"import failed ({type(e).__name__})")]
                 accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in sources)
             mine += new

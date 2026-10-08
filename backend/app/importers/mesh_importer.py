@@ -28,7 +28,8 @@ def import_mesh(file_path: str, scale: float = 0.001, display_name: str | None =
         status = "approximate"
         warnings.append(PartWarning(
             code="open_geometry", fixes=["set_mass", "replace", "ignore"],
-            message=f"{name}: mesh is not closed ({n_open} open edges); mass is approximate"))
+            message=f"{name}: mesh is not closed "
+                    f"({f'{n_open} open edges' if n_open else 'non-manifold edges'}); mass is approximate"))
     elif mesh.volume < 0:  # inward-wound file: flip so normals/volume are outward
         mesh.invert()
         warnings.append(PartWarning(

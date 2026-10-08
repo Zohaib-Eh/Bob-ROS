@@ -78,3 +78,18 @@ def test_update_baseline_refuses_bad_models(tmp_path, capsys):
     assert run.main(args + ["--update-baseline"]) == 1
     assert "parts 2 < min 5" in capsys.readouterr().out
     assert "m" not in json.loads((tmp_path / "b.json").read_text())
+
+
+def test_update_baseline_still_prints_regressions(tmp_path, capsys):
+    corpus, exp = tmp_path / "corpus", tmp_path / "expected"
+    generate.main([str(corpus)]); exp.mkdir()
+    (exp / "m.yaml").write_text("file: box_coarse.stl\ngenerated: true\nparts: {min: 1}\n")
+    baseline = tmp_path / "b.json"
+    args = ["--corpus-dir", str(corpus), "--expected-dir", str(exp),
+            "--baseline", str(baseline), "--report", str(tmp_path / "r.json")]
+    assert run.main(args + ["--update-baseline"]) == 0
+    b = json.loads(baseline.read_text()); b["m"]["parts"] = 5
+    baseline.write_text(json.dumps(b))
+    capsys.readouterr()
+    assert run.main(args + ["--update-baseline"]) == 0
+    assert "REGRESSION m: parts 5 -> 1" in capsys.readouterr().out

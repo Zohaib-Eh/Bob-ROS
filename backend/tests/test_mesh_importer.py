@@ -75,3 +75,16 @@ def test_inverted_stl_is_reoriented_outward(tmp_path):
     assert np.all(np.einsum("ij,ij->i", m.face_normals, m.triangles_center - m.centroid) > 0)
     mass, _, _ = compute_link_mass_properties([body], 1000.0)
     assert mass == pytest.approx(1e-3, rel=1e-6)
+
+
+def test_non_manifold_edge_message_is_honest(tmp_path):
+    import trimesh
+    from app.importers.mesh_importer import import_mesh
+    a = trimesh.creation.box(extents=(1, 1, 1))
+    b = trimesh.creation.box(extents=(1, 1, 1)); b.apply_translation((1, 1, 0))  # share one edge
+    m = trimesh.util.concatenate([a, b]); m.merge_vertices()
+    p = str(tmp_path / "nm.stl"); m.export(p)
+    body, _ = import_mesh(p, 1.0)
+    assert body.status == "approximate"
+    assert "non-manifold" in body.warnings[0].message
+    assert "0 open edges" not in body.warnings[0].message
