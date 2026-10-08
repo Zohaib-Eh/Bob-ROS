@@ -46,3 +46,13 @@ def test_unwelded_triangle_soup_raises_watertight_error():
         soup_triangles.append((3 * i, 3 * i + 1, 3 * i + 2))
     with pytest.raises(ValueError, match="watertight"):
         grow_regions(soup_vertices, soup_triangles)
+
+
+def test_open_mesh_grows_regions_when_allowed():
+    mesh = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    mesh.update_faces(mesh.face_normals[:, 2] < 0.5)   # remove the +z side (2 triangles)
+    vertices = [tuple(v) for v in mesh.vertices.tolist()]
+    triangles = [tuple(t) for t in mesh.faces.tolist()]
+    regions = grow_regions(vertices, triangles, allow_open=True)
+    assert len(regions) == 5
+    assert sorted(i for r in regions for i in r) == list(range(10))

@@ -7,6 +7,7 @@ def grow_regions(
     vertices: list[tuple[float, float, float]],
     triangles: list[tuple[int, int, int]],
     angle_threshold_deg: float = 15.0,
+    allow_open: bool = False,
 ) -> list[list[int]]:
     """Flood-fill triangles into regions, merging across an edge only when
     the dihedral angle between the two adjacent faces is below threshold.
@@ -16,7 +17,7 @@ def grow_regions(
     mesh = trimesh.Trimesh(
         vertices=np.array(vertices), faces=np.array(triangles), process=False
     )
-    if not mesh.is_watertight:
+    if not allow_open and not mesh.is_watertight:
         raise ValueError("mesh must be watertight to grow regions")
     threshold_rad = math.radians(angle_threshold_deg)
 

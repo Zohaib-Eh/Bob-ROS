@@ -1,8 +1,9 @@
 import math
+import os
 import uuid
 import trimesh
 
-from app.models import Body
+from app.models import Body, PartWarning
 
 
 def import_mesh(file_path: str, scale: float = 0.001) -> tuple[Body, float]:
@@ -20,26 +21,29 @@ def import_mesh(file_path: str, scale: float = 0.001) -> tuple[Body, float]:
     if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
         raise ValueError("could not read mesh (no triangles found)")
 
+    name = os.path.splitext(os.path.basename(file_path))[0] or "mesh"
+    status, warnings = "ok", []
     if not mesh.is_watertight:
-        raise ValueError(
-            "Mesh is not watertight (has holes or "
-            "non-manifold edges) -- cannot reliably compute volume/inertia "
-            "or segment faces from it."
-        )
-
-    if mesh.volume < 0:  # inward-wound file: flip so normals/volume are outward
+        n_open = len(trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1))
+        status = "approximate"
+        warnings.append(PartWarning(
+            code="open_geometry", fixes=["set_mass", "replace", "ignore"],
+            message=f"{name}: mesh is not closed ({n_open} open edges); mass is approximate"))
+    elif mesh.volume < 0:  # inward-wound file: flip so normals/volume are outward
         mesh.invert()
+        warnings.append(PartWarning(
+            code="inverted_mesh", fixes=[],
+            message=f"{name}: mesh was inside-out and has been flipped"))
 
     mesh.apply_scale(scale)
 
-    vertices = [tuple(v) for v in mesh.vertices.tolist()]
-    triangles = [tuple(t) for t in mesh.faces.tolist()]
-
     body = Body(
         id=str(uuid.uuid4()),
-        name="imported_mesh",
-        vertices=vertices,
-        triangles=triangles,
+        name=name,
+        vertices=[tuple(v) for v in mesh.vertices.tolist()],
+        triangles=[tuple(t) for t in mesh.faces.tolist()],
         faces=[],
+        status=status,
+        warnings=warnings,
     )
     return body, scale

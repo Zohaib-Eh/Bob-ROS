@@ -16,9 +16,31 @@ def test_scale_override_is_respected(box_stl_path):
     span_x = max(xs) - min(xs)
     assert math.isclose(span_x, 1000.0, rel_tol=1e-6)
 
-def test_non_watertight_mesh_raises_clear_error(non_watertight_stl_path):
-    with pytest.raises(ValueError, match="watertight"):
-        import_mesh(non_watertight_stl_path)
+def test_non_watertight_mesh_imports_as_approximate(non_watertight_stl_path):
+    body, scale = import_mesh(non_watertight_stl_path)
+    assert body.status == "approximate"
+    assert body.name == "broken"
+    w = body.warnings[0]
+    assert w.code == "open_geometry"
+    assert "3 open edges" in w.message          # fixture drops one triangle -> 3 boundary edges
+    assert w.fixes == ["set_mass", "replace", "ignore"]
+    assert len(body.triangles) == 11
+
+
+def test_inverted_mesh_is_flipped_with_warning(tmp_path):
+    import trimesh
+    m = trimesh.creation.box(extents=(1000.0, 1000.0, 1000.0))
+    m.invert()
+    p = str(tmp_path / "inside_out.stl"); m.export(p)
+    body, _ = import_mesh(p)
+    assert body.status == "ok"
+    assert [w.code for w in body.warnings] == ["inverted_mesh"]
+    assert body.warnings[0].fixes == []
+
+
+def test_clean_mesh_has_no_warnings(box_stl_path):
+    body, _ = import_mesh(box_stl_path)
+    assert body.status == "ok" and body.warnings == []
 
 def test_non_positive_scale_is_rejected(box_stl_path):
     with pytest.raises(ValueError, match="scale"):

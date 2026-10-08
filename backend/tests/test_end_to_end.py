@@ -200,13 +200,15 @@ def test_import_empty_stl_is_422_could_not_read():
     assert "empty.stl" in r.json()["detail"]
 
 
-def test_import_non_watertight_names_upload_not_temp_path(non_watertight_stl_path):
+@pytest.mark.xfail(reason="wired in Task 4", strict=True)
+def test_import_non_watertight_is_approximate_not_422(non_watertight_stl_path):
     with open(non_watertight_stl_path, "rb") as f:
         r = client.post("/import", files={"file": ("broken.stl", f.read())})
-    assert r.status_code == 422
-    detail = r.json()["detail"]
-    assert "broken.stl" in detail and "watertight" in detail
-    assert "temp" not in detail.lower() and "tmp" not in detail.lower()
+    assert r.status_code == 200
+    body = r.json()["bodies"][0]
+    assert body["status"] == "approximate"
+    assert body["warnings"][0]["code"] == "open_geometry"
+    assert "tmp" not in body["warnings"][0]["message"].lower()
 
 
 def _cyl_radius(r):
