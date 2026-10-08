@@ -126,7 +126,7 @@ export default function App() {
     if (mk.kind === "problem") goTo("parts");
   };
 
-  const ctx: Ctx = { model, dispatch, canUndo: history.past.length > 0, canRedo: history.future.length > 0, step,
+  const ctx: Ctx = { model, dispatch, canUndo: history.past.length > 0, canRedo: history.future.length > 0, undoDepth: history.past.length, step,
     goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, viewer, notify, scale, setScale,
     robotName, setRobotName, autoGrouped, setAutoGrouped, detecting: progress.running };
 

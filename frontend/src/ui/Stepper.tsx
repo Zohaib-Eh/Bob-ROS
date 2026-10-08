@@ -49,6 +49,7 @@ export default function Stepper({ ctx, progress, onCancel, onResume }: Props) {
   const onOpen = async (file: File) => {
     try {
       dispatch({ type: "load", model: loadProject(await file.text()) });
+      ctx.setAutoGrouped(true);   // an opened project is already arranged
     } catch (e) {
       notify((e as Error).message);
     }

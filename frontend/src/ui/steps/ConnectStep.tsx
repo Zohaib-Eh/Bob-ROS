@@ -37,6 +37,7 @@ export default function ConnectStep({ ctx }: { ctx: Ctx }) {
           <h3>Next: {shortName(name(next.fixed), 18)} <ArrowRight size={12} /> {shortName(name(next.moving), 18)}</h3>
           <p className="muted small">{next.suggestion
             ? <>✨ Suggested from contact faces <Info term="suggested" /></>
+            : detecting && !g ? "Checking this pair for contact faces…"
             : "No joint detected here — set it up by hand."}</p>
           <div className="row">
             <button className="btn btn-primary" data-testid="next-joint" onClick={() => setJointDraft(draftForPair(model, next))}>

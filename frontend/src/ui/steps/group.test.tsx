@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
+import { historyReducer } from "../../model/history";
+import { membership, pairKey } from "../../model/pairs";
 import { boxBody } from "../../model/testBodies";
 import { Harness, imported, state } from "../testing";
 import GroupStep from "./GroupStep";
@@ -32,6 +34,41 @@ describe("GroupStep", () => {
     expect(state().links).toHaveLength(3);
     expect(screen.queryByTestId("auto-merged")).toBeNull();
     expect(screen.getByTestId("merge-small")).toBeTruthy();
+  });
+
+  it("does not auto-group once joints exist", () => {
+    const s0 = start();
+    const [b0, , sc0] = s0.present.links.map((l) => l.id);
+    const s1 = historyReducer(s0, { type: "addJoint", joint: { id: "j", parent_link_id: b0, child_link_id: sc0, type: "fixed",
+      origin_xyz: [0, 0, 0], origin_rpy: [0, 0, 0], axis: null, limit_lower: null, limit_upper: null, source: "manual" } });
+    render(<Harness start={s1} ui={(ctx) => <GroupStep ctx={ctx} />} />);
+    expect(screen.queryByTestId("auto-merged")).toBeNull();
+    expect(state().links).toHaveLength(3);
+    expect(state().joints).toHaveLength(1);
+  });
+
+  it("the auto-group notice disappears after any later edit, so its Undo can't undo something else", () => {
+    ui();
+    const id = linkOf("arm").id;
+    fireEvent.change(screen.getByTestId(`name-${id}`), { target: { value: "shoulder" } });
+    fireEvent.blur(screen.getByTestId(`name-${id}`));
+    expect(screen.queryByTestId("auto-merged")).toBeNull();
+  });
+
+  it("detection results (not undo steps) keep the auto-group notice", () => {
+    render(<Harness start={start()} ui={(ctx) => (
+      <>
+        <button data-testid="detect" onClick={() => {
+          const [a, b] = ctx.model.links;
+          ctx.dispatch({ type: "setSuggestion", suggestion: { key: pairKey(a.id, b.id), linkA: a.id, linkB: b.id,
+            membership: membership(a, b), status: "review", result: { joint: null, reason: "no_contact_faces", evidence: null } } });
+        }} />
+        <GroupStep ctx={ctx} />
+      </>
+    )} />);
+    fireEvent.click(screen.getByTestId("detect"));
+    expect(Object.keys(state().suggestions)).toHaveLength(1);
+    expect(screen.getByTestId("auto-merged")).toBeTruthy();
   });
 
   it("renames a link on blur", () => {

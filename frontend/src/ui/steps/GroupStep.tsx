@@ -1,5 +1,5 @@
 import { Group as GroupIcon, Merge, Undo2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { smallLinks } from "../../model/smallParts";
 import { DENSITY_PRESETS, NAME_RE, type ModelState } from "../../model/types";
 import { hex, LINK_HUES } from "../colors";
@@ -20,11 +20,18 @@ export default function GroupStep({ ctx }: { ctx: Ctx }) {
   useEffect(() => {
     if (autoGrouped) return;
     setAutoGrouped(true);
+    if (model.joints.length) return;   // merging now could fold a joined link into its neighbour
     const pairs = smallLinks(model.links, model.bodies);
     if (pairs.length) { dispatch({ type: "mergeSmall", pairs }); setMerged(pairs.length); }
     // first visit only
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const depthAtMerge = useRef<number | null>(null);
+  useEffect(() => {
+    if (merged === null) { depthAtMerge.current = null; return; }
+    if (depthAtMerge.current === null) depthAtMerge.current = ctx.undoDepth;
+    else if (ctx.undoDepth !== depthAtMerge.current) setMerged(null);   // Undo would now undo something else
+  }, [ctx.undoDepth, merged]);
   const small = smallLinks(model.links, model.bodies);
   const selLinks = linksOfSelection(model, selection);
 

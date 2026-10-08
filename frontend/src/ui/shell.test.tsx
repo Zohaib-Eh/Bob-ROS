@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import * as client from "../api/client";
 import type { Body, Joint } from "../api/types";
 import { historyReducer } from "../model/history";
 import { emptyDraft } from "../model/jointDraft";
+import { saveProject } from "../model/project";
 import { boxBody } from "../model/testBodies";
 import { emptyModel } from "../model/types";
 import Browser from "./Browser";
@@ -111,6 +112,17 @@ describe("Stepper", () => {
     expect(spy).toHaveBeenCalledWith(file, 0.001);
     expect(state().links).toHaveLength(1);
     spy.mockRestore();
+  });
+});
+
+describe("Open project", () => {
+  it("an opened project is never auto-grouped", async () => {
+    render(<Harness start={imported([])} ui={(ctx) => <Stepper ctx={ctx} progress={idle} onCancel={vi.fn()} onResume={vi.fn()} />} />);
+    const json = saveProject(two().present);
+    const file = Object.assign(new File([json], "p.json"), { text: async () => json });   // jsdom's File has no text()
+    await act(async () => { fireEvent.change(screen.getByTestId("open-input"), { target: { files: [file] } }); });
+    await waitFor(() => expect(state().links).toHaveLength(2));
+    expect(state().autoGrouped).toBe(true);
   });
 });
 

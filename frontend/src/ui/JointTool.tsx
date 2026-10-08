@@ -43,15 +43,18 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
   const { model, dispatch, jointDraft: d, setJointDraft, pick, setPick, viewer } = ctx;
   const [animating, setAnimating] = useState(false);
   const stored = d ? model.joints.find((j) => j.id === d.id) ?? null : null;
-  const opened = useRef(stored);
+  const opened = useRef({ id: d?.id ?? null, stored });
 
-  // undo/redo changed or removed the joint being edited: follow the stored joint, or close
+  // undo/redo changed or removed the joint being edited: follow the stored joint, or close.
+  // A different draft (New joint, another pair) is not an undo: just start tracking it.
   useEffect(() => {
-    if (!d || stored === opened.current) return;
-    opened.current = stored;
+    if (!d) return;
+    if (opened.current.id !== d.id) { opened.current = { id: d.id, stored }; return; }
+    if (stored === opened.current.stored) return;
+    opened.current = { id: d.id, stored };
     setJointDraft(stored ? draftFromJoint(stored) : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stored]);
+  }, [stored, d?.id]);
 
   useEffect(() => {
     const toggle = () => setAnimating((a) => !a);

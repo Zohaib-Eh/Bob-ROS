@@ -65,6 +65,12 @@ describe("ConnectStep", () => {
     expect(screen.queryByTestId("not-connected")).toBeNull();
   });
 
+  it("while detection runs, an unchecked pair says it is being checked", () => {
+    both(base(), null, true);
+    expect(screen.getByTestId("next-card").textContent).toMatch(/Checking this pair/);
+    expect(screen.getByTestId("next-card").textContent).not.toMatch(/No joint detected/);
+  });
+
   it("says when everything is connected", () => {
     const h = base();
     const { block, peg } = ids(h);
@@ -120,6 +126,17 @@ describe("JointTool", () => {
       expect(screen.getByTestId(`motion-${m}`).querySelector("button")).toBeNull();
       expect(screen.getByRole("button", { name: new RegExp(`What is ${m}`, "i") })).toBeTruthy();
     }
+  });
+
+  it("New joint while editing a stored joint opens an empty tool", () => {
+    const h = base();
+    const { block, peg } = ids(h);
+    both(historyReducer(h, { type: "addJoint", joint: J({ id: "j", type: "fixed", parent_link_id: block, child_link_id: peg, source: "manual" }) }));
+    fireEvent.click(screen.getByTestId("h-open"));
+    fireEvent.click(screen.getByTestId("new-joint"));
+    expect(screen.getByTestId("joint-tool")).toBeTruthy();
+    expect(state().jointDraft).toMatchObject({ fixed: null, moving: null });
+    expect(state().pick).toBe("fixed");
   });
 
   it("removes an existing joint", () => {

@@ -14,6 +14,7 @@ export interface Ctx {
   dispatch: Dispatch<HistoryAction>;
   canUndo: boolean;
   canRedo: boolean;
+  undoDepth: number;
   step: StepId;
   goTo: (s: StepId) => void;
   selection: Selection;

@@ -24,7 +24,7 @@ export function Harness({ start, step = "parts", viewer = null, detecting = fals
   const [robotName, setRobotName] = useState("robot");
   const [autoGrouped, setAutoGrouped] = useState(false);
   const [notify] = useState(() => vi.fn());
-  const ctx: Ctx = { model: h.present, dispatch, canUndo: h.past.length > 0, canRedo: h.future.length > 0,
+  const ctx: Ctx = { model: h.present, dispatch, canUndo: h.past.length > 0, canRedo: h.future.length > 0, undoDepth: h.past.length,
     step: s, goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, viewer, notify, scale,
     setScale, robotName, setRobotName, autoGrouped, setAutoGrouped, detecting };
   return (
@@ -32,7 +32,7 @@ export function Harness({ start, step = "parts", viewer = null, detecting = fals
       {ui(ctx)}
       <pre data-testid="state">{JSON.stringify({ links: h.present.links, joints: h.present.joints,
         suggestions: h.present.suggestions, ignored: h.present.ignored, rootLinkId: h.present.rootLinkId, step: s,
-        selection, pick, jointDraft, scale, robotName, past: h.past.length })}</pre>
+        selection, pick, jointDraft, scale, robotName, autoGrouped, past: h.past.length })}</pre>
     </>
   );
 }
