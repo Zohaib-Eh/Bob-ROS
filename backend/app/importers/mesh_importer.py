@@ -6,7 +6,7 @@ import trimesh
 from app.models import Body, PartWarning
 
 
-def import_mesh(file_path: str, scale: float = 0.001) -> tuple[Body, float]:
+def import_mesh(file_path: str, scale: float = 0.001, display_name: str | None = None) -> tuple[Body, float]:
     """Load an STL/OBJ/GLTF file. STL/OBJ carry no unit metadata, so the
     hobbyist convention (millimeters) is assumed by default; callers must
     surface `scale` to the user so a wrong assumption is visible, per the
@@ -21,7 +21,7 @@ def import_mesh(file_path: str, scale: float = 0.001) -> tuple[Body, float]:
     if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
         raise ValueError("could not read mesh (no triangles found)")
 
-    name = os.path.splitext(os.path.basename(file_path))[0] or "mesh"
+    name = display_name or os.path.splitext(os.path.basename(file_path))[0] or "mesh"
     status, warnings = "ok", []
     if not mesh.is_watertight:
         n_open = len(trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1))

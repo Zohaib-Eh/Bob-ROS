@@ -200,7 +200,6 @@ def test_import_empty_stl_is_422_could_not_read():
     assert "empty.stl" in r.json()["detail"]
 
 
-@pytest.mark.xfail(reason="wired in Task 4", strict=True)
 def test_import_non_watertight_is_approximate_not_422(non_watertight_stl_path):
     with open(non_watertight_stl_path, "rb") as f:
         r = client.post("/import", files={"file": ("broken.stl", f.read())})
@@ -300,3 +299,25 @@ def test_http_stl_two_part_import_detect_confirm_export(peg_in_hole_step_path, t
         assert r.json()["applied_scale"] == 0.001
         bodies.append(r.json()["bodies"][0])
     _confirm_and_export(*bodies)
+
+
+def test_import_response_has_file_level_warnings(box_stl_path):
+    r = client.post("/import", files={"file": ("box.stl", open(box_stl_path, "rb").read())})
+    assert r.status_code == 200
+    assert r.json()["warnings"] == []
+    assert r.json()["bodies"][0]["status"] == "ok"
+
+
+def test_import_mixed_brep_lists_every_part(mixed_topology_brep_path):
+    r = client.post("/import?scale=1.0",
+                    files={"file": ("mixed.brep", open(mixed_topology_brep_path, "rb").read())})
+    assert r.status_code == 200
+    assert sorted(b["status"] for b in r.json()["bodies"]) == ["approximate", "approximate", "ok", "repaired"]
+
+
+def test_import_mesh_names_body_after_upload_filename(non_watertight_stl_path):
+    with open(non_watertight_stl_path, "rb") as f:
+        r = client.post("/import", files={"file": ("broken.stl", f.read())})
+    body = r.json()["bodies"][0]
+    assert body["name"] == "broken"
+    assert "broken" in body["warnings"][0]["message"]
