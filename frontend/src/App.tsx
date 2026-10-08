@@ -1,31 +1,39 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Matrix4 } from "three";
-import { detectJoints, exportRobot } from "./api/client";
+import { detectJoints } from "./api/client";
+import type { StepId } from "./model/checklist";
 import { DetectionRunner, pairsToDetect, type Progress } from "./model/detection";
-import { splitExportError } from "./model/errors";
-import { buildExportRequest } from "./model/exportRequest";
 import { historyReducer, initialHistory } from "./model/history";
+import { draftForPair, emptyDraft, snapAt, type JointDraft } from "./model/jointDraft";
+import { nextJoint } from "./model/nextJoint";
+import { partProblems } from "./model/problems";
 import Banner from "./ui/Banner";
-import DetailsPanel from "./ui/DetailsPanel";
-import { downloadBlob } from "./ui/download";
-import PartsTree from "./ui/PartsTree";
-import type { Selection } from "./ui/selection";
-import StatusBar from "./ui/StatusBar";
-import TopBar from "./ui/TopBar";
+import Browser from "./ui/Browser";
+import { glyphsFor, tintsFor } from "./ui/colors";
+import type { Ctx, PickMode } from "./ui/ctx";
+import MarkerLayer from "./ui/MarkerLayer";
+import { looseLines, markersFor, type Marker } from "./ui/markers";
+import { routePick } from "./ui/pick";
+import { linksOfSelection, selectedBodies, type Selection } from "./ui/selection";
+import { shortcutFor } from "./ui/shortcuts";
+import StepPanel from "./ui/steps/StepPanel";
+import Stepper from "./ui/Stepper";
+import ViewCube from "./ui/ViewCube";
 import ViewerPane from "./ui/ViewerPane";
-import type { Viewer } from "./viewer/Viewer";
+import type { Hit, Viewer } from "./viewer/Viewer";
 
 export default function App() {
   const [history, dispatch] = useReducer(historyReducer, undefined, initialHistory);
   const model = history.present;
+  const [step, goTo] = useState<StepId>("parts");
   const [selection, setSelection] = useState<Selection>(null);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [pick, setPick] = useState<PickMode>("select");
+  const [jointDraft, setJointDraft] = useState<JointDraft | null>(null);
+  const [banner, notify] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>({ done: 0, total: 0, running: false, paused: false });
   const [robotName, setRobotName] = useState("robot");
   const [scale, setScale] = useState(0.001);
   const [viewer, setViewer] = useState<Viewer | null>(null);
-  const [preview, setPreview] = useState<{ bodyIds: string[]; matrix: Matrix4 } | null>(null);
-  const [lastPick, setLastPick] = useState<{ bodyId: string; triangle: number } | null>(null);
+  const [autoGrouped, setAutoGrouped] = useState(false);
 
   const runner = useRef<DetectionRunner>();
   if (!runner.current) {
@@ -34,7 +42,7 @@ export default function App() {
       {
         onResult: (p, result) => dispatch({ type: "setSuggestion", suggestion: { ...p, result, status: "review" } }),
         onProgress: setProgress,
-        onError: (m) => setBanner(`Joint detection paused: ${m}`),
+        onError: (m) => notify(`Joint detection paused: ${m}`),
       });
   }
   useEffect(() => {
@@ -42,85 +50,98 @@ export default function App() {
       (model.links.find((l) => l.id === linkId)?.body_ids ?? []).map((id) => model.bodies[id]));
   }, [model]);
 
+  // the viewer calls back outside React's render: read the latest state through a ref
+  const live = useRef({ pick, model, selection, jointDraft, viewer });
+  live.current = { pick, model, selection, jointDraft, viewer };
+
+  const onPick = useCallback((hit: Hit, additive: boolean) => {
+    const s = live.current;
+    const r = routePick(s.pick, hit, additive, s.model, s.selection, s.jointDraft);
+    if (r.selection !== undefined) setSelection(r.selection);
+    if (r.draft) setJointDraft(r.draft);
+    if (r.action) dispatch(r.action);
+    if (r.mode) setPick(r.mode);
+  }, []);
+
+  useEffect(() => {
+    if (!viewer) return;
+    if (pick === "origin") {
+      viewer.onHover((hit) => {
+        const b = hit ? live.current.model.bodies[hit.bodyId] : undefined;
+        viewer.setSnap(b && hit ? snapAt(b, hit.triangle) : null);
+      });
+    } else {
+      viewer.onHover(null);
+      viewer.setSnap(null);
+    }
+  }, [viewer, pick]);
+
+  const drafting = jointDraft !== null;
+  useEffect(() => {
+    viewer?.onLimitDrag(drafting ? (which, value) => setJointDraft((d) => (d ? { ...d, [which]: value } : d)) : null);
+  }, [viewer, drafting]);
+
+  useEffect(() => {
+    if (step !== "connect") { setJointDraft(null); setPick("select"); viewer?.setPreview([], null); }
+  }, [step, viewer]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement).tagName === "INPUT") return;
-      if (e.key === "z") { e.preventDefault(); dispatch({ type: "undo" }); }
-      if (e.key === "y") { e.preventDefault(); dispatch({ type: "redo" }); }
+      const s = shortcutFor(e);
+      if (!s) return;
+      e.preventDefault();
+      const cur = live.current;
+      if (s === "undo") dispatch({ type: "undo" });
+      else if (s === "redo") dispatch({ type: "redo" });
+      else if (s === "joint") { goTo("connect"); setJointDraft((d) => d ?? emptyDraft()); setPick("fixed"); }
+      else if (s === "group") {
+        const ids = linksOfSelection(cur.model, cur.selection);
+        if (ids.length > 1) dispatch({ type: "merge", linkIds: ids });
+      } else if (s === "focus") cur.viewer?.focus(selectedBodies(cur.model, cur.selection));
+      else if (s === "animate") window.dispatchEvent(new Event("cad:animate"));
+      else if (cur.pick !== "select") setPick("select");
+      else if (cur.jointDraft) { setJointDraft(null); cur.viewer?.setPreview([], null); }
+      else setSelection(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const bodies = useMemo(() => Object.values(model.bodies), [model.bodies]);
-  const onPick = useCallback((hit: { bodyId: string; triangle: number } | null, additive: boolean) => {
-    setLastPick(hit);
-    setSelection((s) => {
-      if (!hit) return null;
-      const prev = s?.kind === "bodies" ? s.ids : [];
-      return { kind: "bodies", ids: additive ? [...new Set([...prev, hit.bodyId])] : [hit.bodyId] };
-    });
-  }, []);
-  const exportReq = useMemo(() => buildExportRequest(model), [model]);
-  const [serverErrors, setServerErrors] = useState<Record<string, string[]>>({});
-  useEffect(() => setServerErrors({}), [model]);
-  const treeErrors = useMemo(() => {
-    const out: Record<string, string[]> = {};
-    for (const e of exportReq.errors) for (const id of e.linkIds) (out[id] ??= []).push(e.message);
-    return out;
-  }, [exportReq]);
-  const pinned = useMemo(() => {
-    const out: Record<string, string[]> = { ...treeErrors };
-    for (const [id, msgs] of Object.entries(serverErrors)) (out[id] ??= []).push(...msgs);
-    return out;
-  }, [treeErrors, serverErrors]);
+  const selected = useMemo(() => selectedBodies(model, selection), [model, selection]);
+  const tints = useMemo(() => tintsFor(step, model, jointDraft), [step, model, jointDraft]);
+  const glyphs = useMemo(() => glyphsFor(step, model, jointDraft), [step, model, jointDraft]);
+  const markers = useMemo(() => markersFor(step, model), [step, model]);
+  const loose = useMemo(() => (step === "connect" ? looseLines(model) : []), [step, model]);
+  const approximate = useMemo(() => partProblems(model).filter((p) => p.kind === "approximate").map((p) => p.bodyId), [model]);
 
-  const onExport = async () => {
-    try {
-      const { blob, warnings } = await exportRobot(robotName, exportReq.links, exportReq.joints, exportReq.bodiesByLink);
-      downloadBlob(blob, `${robotName}.zip`);
-      setBanner(warnings.length ? `Exported. ${warnings.map((w) => w.message).join(" ")}` : null);
-    } catch (e) {
-      const { byLink, byJoint, general } = splitExportError((e as Error).message);
-      setServerErrors(byLink);
-      const linkName = (id: string) => model.links.find((l) => l.id === id)?.name ?? id;
-      const jointMsgs = Object.entries(byJoint).flatMap(([id, msgs]) => {
-        const j = exportReq.joints.find((x) => x.id === id);
-        const label = j ? `${linkName(j.parent_link_id)} ↔ ${linkName(j.child_link_id)}: ` : "";
-        return msgs.map((m) => label + m);
-      });
-      setBanner(["Export failed.", ...jointMsgs, ...general].join(" "));
+  const onMarker = (mk: Marker) => {
+    if (mk.kind === "loose" && mk.target?.kind === "link") {
+      const n = nextJoint(model, mk.target.id);
+      if (n) { setJointDraft(draftForPair(model, n)); return; }
     }
+    setSelection(mk.target);
+    if (mk.kind === "problem") goTo("parts");
   };
 
-  const jointArrows = useMemo(() => [
-    ...model.joints.map((joint) => ({ joint, dashed: false })),
-    ...Object.values(model.suggestions).filter((g) => g.status === "review" && g.result.joint)
-      .map((g) => ({ joint: g.result.joint!, dashed: true })),
-  ], [model.joints, model.suggestions]);
+  const ctx: Ctx = { model, dispatch, canUndo: history.past.length > 0, canRedo: history.future.length > 0, step,
+    goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, viewer, notify, scale, setScale,
+    robotName, setRobotName, autoGrouped, setAutoGrouped, detecting: progress.running };
 
   return (
     <div className="app">
-      <div>
-        <TopBar model={model} dispatch={dispatch} canUndo={history.past.length > 0} canRedo={history.future.length > 0}
-          setBanner={setBanner} robotName={robotName} setRobotName={setRobotName} scale={scale} setScale={setScale}
-          onExport={() => void onExport()}
-          exportDisabledReason={exportReq.errors[0]?.message ?? (model.links.length ? null : "Import a model first.")} />
-        <Banner message={banner} onClose={() => setBanner(null)} />
-      </div>
+      <Stepper ctx={ctx} progress={progress} onCancel={() => runner.current!.cancel()} onResume={() => runner.current!.resume()} />
+      <Banner message={banner} onClose={() => notify(null)} />
       <div className="workspace">
-        <div className="panel">
-          <PartsTree model={model} dispatch={dispatch} selection={selection} setSelection={setSelection} errors={pinned} />
-        </div>
-        <ViewerPane bodies={bodies} ignored={model.ignored}
-          selectedBodyIds={selection?.kind === "bodies" ? selection.ids : []}
-          joints={jointArrows} preview={preview} onPick={onPick} onViewer={setViewer} />
-        <div className="panel right">
-          <DetailsPanel model={model} dispatch={dispatch} selection={selection} setSelection={setSelection}
-            setBanner={setBanner} viewer={viewer} setPreview={setPreview} lastPick={lastPick} scale={scale} />
-        </div>
+        <aside className="panel left"><Browser ctx={ctx} /></aside>
+        <main className={`viewport${pick !== "select" ? " picking" : ""}`}>
+          <ViewerPane bodies={bodies} ignored={model.ignored} selected={selected} tints={tints}
+            approximate={approximate} glyphs={glyphs} loose={loose} onPick={onPick} onViewer={setViewer} />
+          <MarkerLayer viewer={viewer} markers={markers} onClick={onMarker} />
+          <ViewCube viewer={viewer} />
+        </main>
+        <aside className="panel right"><StepPanel ctx={ctx} /></aside>
       </div>
-      <StatusBar progress={progress} onCancel={() => runner.current!.cancel()} onResume={() => runner.current!.resume()} />
     </div>
   );
 }

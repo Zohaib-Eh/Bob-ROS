@@ -1,10 +1,9 @@
 import {
-  ArrowHelper, Box3, BufferAttribute, BufferGeometry, DirectionalLight, EdgesGeometry, GridHelper, Group,
+  Box3, BufferAttribute, BufferGeometry, DirectionalLight, EdgesGeometry, GridHelper, Group,
   HemisphereLight, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D,
   PerspectiveCamera, Raycaster, Scene, Sphere, Vector2, Vector3, WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import type { Body, Joint, Vec3 } from "../api/types";
 import { bodyArrays, isClick } from "./meshData";
 import {
@@ -52,10 +51,6 @@ export class Viewer {
   private approximate: string[] = [];
   private limitCb: LimitCb | null = null;
   private dragging: { which: "lower" | "upper"; joint: Joint } | null = null;
-  // legacy (old UI) — removed in Task 6
-  private joints = new Group();
-  private gizmo: TransformControls;
-  private gizmoTarget = new Object3D();
 
   constructor(private container: HTMLElement) {
     this.renderer = new WebGLRenderer({ antialias: true, alpha: true });
@@ -67,14 +62,11 @@ export class Viewer {
     key.position.set(3, -4, 6);
     const fill = new DirectionalLight(0xffffff, 0.35);
     fill.position.set(-4, 3, 2);
-    this.scene.add(key, fill, this.overlay, this.joints, this.gizmoTarget);
+    this.scene.add(key, fill, this.overlay);
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(2, -2, 1.5);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.addEventListener("change", this.requestRender);
-    this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
-    this.gizmo.addEventListener("dragging-changed", (e) => { this.controls.enabled = !e.value; });
-    this.gizmo.addEventListener("change", this.requestRender);
     const el = this.renderer.domElement;
     el.addEventListener("pointerdown", this.onDown);
     el.addEventListener("pointermove", this.onMove);
@@ -208,7 +200,7 @@ export class Viewer {
       const m = this.meshes.get(id);
       if (!m) continue;
       // shares the part's geometry, so it follows the part during previews
-      const w = new Mesh(m.geometry, new MeshBasicMaterial({ color: APPROX_COLOR, wireframe: true, transparent: true, opacity: 0.3 }));
+      const w = new Mesh(m.geometry, new MeshBasicMaterial({ color: APPROX_COLOR, wireframe: true, transparent: true, opacity: 0.08 }));
       w.name = "approx";
       m.add(w);
     }
@@ -337,50 +329,9 @@ export class Viewer {
     const down = this.down;
     this.down = null;
     if (this.dragging) { this.dragging = null; this.controls.enabled = true; return; }
-    if (this.gizmo.dragging || !down || !isClick(down, { x: e.clientX, y: e.clientY })) return;
+    if (!down || !isClick(down, { x: e.clientX, y: e.clientY })) return;
     this.pickCb(this.hitBody(this.ray(e)), e.shiftKey);
   };
-
-  // ---- legacy (old UI) — removed in Task 6 ----
-  private clearJoints() {
-    for (const a of this.joints.children) (a as ArrowHelper).dispose();
-    this.joints.clear();
-  }
-
-  setJoints(items: { joint: Joint; dashed: boolean }[]) {
-    this.clearJoints();
-    for (const { joint, dashed } of items) {
-      if (!joint.axis) continue;
-      this.joints.add(new ArrowHelper(new Vector3(...joint.axis).normalize(), new Vector3(...joint.origin_xyz),
-        0.1, dashed ? 0x999999 : 0x1565c0));
-    }
-    this.requestRender();
-  }
-
-  attachGizmo(origin: Vec3, axis: Vec3, onChange: (origin: Vec3, axis: Vec3) => void) {
-    this.gizmoTarget.position.set(...origin);
-    this.gizmoTarget.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), new Vector3(...axis).normalize());
-    this.gizmo.attach(this.gizmoTarget);
-    this.scene.add(this.gizmo.getHelper());
-    this.gizmo.removeEventListener("objectChange", this.gizmoChange);
-    this.gizmoChange = () => {
-      const p = this.gizmoTarget.position;
-      const a = new Vector3(0, 0, 1).applyQuaternion(this.gizmoTarget.quaternion);
-      onChange([p.x, p.y, p.z], [a.x, a.y, a.z]);
-    };
-    this.gizmo.addEventListener("objectChange", this.gizmoChange);
-    this.requestRender();
-  }
-  private gizmoChange = () => {};
-
-  setGizmoMode(mode: "translate" | "rotate") { this.gizmo.setMode(mode); }
-
-  detachGizmo() {
-    this.gizmo.detach();
-    this.scene.remove(this.gizmo.getHelper());
-    this.requestRender();
-  }
-  // ---- end legacy ----
 
   dispose() {
     cancelAnimationFrame(this.frame);
@@ -390,9 +341,7 @@ export class Viewer {
     el.removeEventListener("pointerup", this.onUp);
     this.observer.disconnect();
     this.cameraCbs.clear();
-    this.clearJoints();
     this.controls.dispose();
-    this.gizmo.dispose();
     for (const m of this.meshes.values()) this.free(m);
     this.edgeMaterial.dispose();
     if (this.grid) { this.grid.geometry.dispose(); (this.grid.material as Material).dispose(); }
