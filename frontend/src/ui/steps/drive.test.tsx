@@ -75,6 +75,25 @@ describe("Find limits from geometry", () => {
     expect(screen.queryByTestId("sweep-status")).toBeNull();
   });
 
+  it("a result arriving after the tool closed is ignored", async () => {
+    open();
+    let resolve!: (r: SweepResult) => void;
+    vi.spyOn(client, "sweepLimits").mockReturnValue(new Promise((r) => { resolve = r; }));
+    fireEvent.click(screen.getByTestId("find-limits"));
+    fireEvent.click(screen.getByTestId("cancel"));
+    await act(async () => { resolve(result({ lower: -0.2, upper: 0.2 })); });
+    expect(state().jointDraft).toBeNull();
+    expect(screen.queryByTestId("joint-tool")).toBeNull();
+  });
+
+  it("found limits switch No limits off so they are actually used", async () => {
+    open();
+    fireEvent.click(screen.getByTestId("no-limits"));
+    vi.spyOn(client, "sweepLimits").mockResolvedValue(result({ lower: -1, upper: 1 }));
+    await act(async () => { fireEvent.click(screen.getByTestId("find-limits")); });
+    expect(state().jointDraft).toMatchObject({ noLimits: false, lower: -1, upper: 1 });
+  });
+
   it("is not offered for Rigid", () => {
     open();
     fireEvent.click(screen.getByTestId("motion-rigid"));
@@ -102,6 +121,14 @@ describe("Drive", () => {
     expect(viewer!.setWarning).toHaveBeenLastCalledWith(["peg"]);
     fireEvent.change(screen.getByTestId("drive-slider"), { target: { value: "0.2" } });
     expect(viewer!.setWarning).toHaveBeenLastCalledWith([]);
+  });
+
+  it("driving pauses while picking, so a click on the moving part picks it", () => {
+    const { viewer } = open();
+    fireEvent.click(screen.getByTestId("pick-origin"));
+    expect(viewer!.onDrive).toHaveBeenLastCalledWith(null);
+    fireEvent.click(screen.getByTestId("pick-origin"));
+    expect(viewer!.onDrive).toHaveBeenLastCalledWith(expect.objectContaining({ bodyIds: ["peg"] }));
   });
 
   it("Set lower/upper here copy the pose", () => {

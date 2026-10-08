@@ -77,6 +77,8 @@ def sweep_limits(kind: str, origin, axis, moving: list[Body],
     if kind not in ("revolute", "prismatic"):
         raise ValueError(f"only revolute and prismatic joints can be swept, not {kind}")
     a = np.asarray(axis, dtype=float)
+    if not (np.all(np.isfinite(a)) and np.all(np.isfinite(np.asarray(origin, dtype=float)))):
+        raise ValueError("joint axis and origin must be finite numbers")
     n = float(np.linalg.norm(a))
     if n < 1e-12:
         raise ValueError("joint axis must have nonzero length")

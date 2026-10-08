@@ -1,3 +1,4 @@
+import json
 import math
 
 import pytest
@@ -124,6 +125,9 @@ def test_route_returns_limits_and_the_blocking_link():
 def test_route_rejects_bad_requests():
     assert client.post("/sweep-limits", json=_payload(kind="fixed")).status_code == 422
     assert client.post("/sweep-limits", json=_payload(axis=(0, 0, 0))).status_code == 422
+    nan = _payload()
+    nan["joint"]["axis"] = [float("nan"), 0, 0]
+    assert client.post("/sweep-limits", content=json.dumps(nan), headers={"content-type": "application/json"}).status_code == 422
     bad = _payload()
     del bad["joint"]["axis"]
     assert client.post("/sweep-limits", json=bad).status_code == 422
