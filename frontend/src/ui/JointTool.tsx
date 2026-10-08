@@ -4,12 +4,12 @@ import type { Vec3 } from "../api/types";
 import {
   draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, setMotion, type JointDraft, type Motion,
 } from "../model/jointDraft";
-import { directJoints } from "../model/tree";
-import { NAME_RE, type ModelState } from "../model/types";
-import { jointMotion, previewRange, subtreeLinks } from "../viewer/preview";
+import { NAME_RE } from "../model/types";
+import { jointMotion, previewRange } from "../viewer/preview";
 import type { Ctx, PickMode } from "./ctx";
 import { deg, rad, shortName } from "./format";
 import type { Term } from "./glossary";
+import { movingBodies } from "./drive";
 import Info from "./Info";
 
 const MOTIONS: { id: Motion; label: string; term: Term; icon: LucideIcon }[] = [
@@ -18,26 +18,6 @@ const MOTIONS: { id: Motion; label: string; term: Term; icon: LucideIcon }[] = [
   { id: "slider", label: "Slider", term: "slider", icon: MoveHorizontal },
   { id: "planar", label: "Planar", term: "planar", icon: Square },
 ];
-
-/** Bodies that move with the draft's joint: the child subtree seen from the base, or — when the pair
- *  isn't connected to the base yet — the child link and everything joined to it, never crossing the parent. */
-export function movingBodies(m: ModelState, d: JointDraft): string[] {
-  const j = draftPreviewJoint(d);
-  if (!j) return [];
-  const others = m.joints.filter((x) => x.id !== j.id);
-  let links = subtreeLinks(directJoints(m.links, [...others, j], m.rootLinkId).joints, j.id);
-  if (!links.length) {
-    links = [j.child_link_id];
-    const seen = new Set([j.parent_link_id, j.child_link_id]);
-    for (let i = 0; i < links.length; i++) {
-      for (const o of others) {
-        const next = o.parent_link_id === links[i] ? o.child_link_id : o.child_link_id === links[i] ? o.parent_link_id : null;
-        if (next && !seen.has(next)) { seen.add(next); links.push(next); }
-      }
-    }
-  }
-  return m.links.filter((l) => links.includes(l.id)).flatMap((l) => l.body_ids);
-}
 
 export default function JointTool({ ctx }: { ctx: Ctx }) {
   const { model, dispatch, jointDraft: d, setJointDraft, pick, setPick, viewer } = ctx;

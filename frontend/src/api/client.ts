@@ -1,4 +1,4 @@
-import type { Body, DetectResponse, ImportResponse, Joint, Link, LinkMass, PartWarning, Vec3 } from "./types";
+import type { Body, DetectResponse, ImportResponse, Joint, Link, LinkMass, PartWarning, SweepResult, Vec3 } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -74,4 +74,11 @@ export async function exportRobot(
     robot_name: robotName, links, joints, bodies_by_link: bodiesByLink }));
   const header = res.headers.get("X-Export-Warnings");
   return { blob: await res.blob(), warnings: header ? JSON.parse(header) : [] };
+}
+
+export async function sweepLimits(
+  joint: { type: "revolute" | "prismatic"; origin_xyz: Vec3; axis: Vec3 },
+  moving: Body[], obstacles: { link_id: string; bodies: Body[] }[],
+): Promise<SweepResult> {
+  return (await send("/sweep-limits", json({ joint, moving, obstacles }))).json();
 }

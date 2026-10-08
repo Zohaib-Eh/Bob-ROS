@@ -22,6 +22,8 @@ export const GLOSSARY = {
   scale: ["Scale", "Multiplier from file units to metres. STL, OBJ and BREP files carry no units: 0.001 means the file is in millimetres."],
   name: ["Names", "URDF names may use letters, digits, _ and - only, and must start with a letter, digit or _."],
   suggested: ["Suggested from contact faces", "The app found faces where the two links touch (shafts in holes, flat bearing faces) and guessed the joint from them."],
+  sweep: ["Find limits from geometry", "Swings the moving part until it would hit another part, then stops 1° (or 1 mm) short. Parts that only touch where they sit don't count."],
+  drive: ["Drive", "Move the joint by hand to check it: drag the moving part in the 3D view or use the slider. This only previews — the URDF keeps the pose from your CAD file."],
 } as const satisfies Record<string, readonly [string, string]>;
 
 export type Term = keyof typeof GLOSSARY;

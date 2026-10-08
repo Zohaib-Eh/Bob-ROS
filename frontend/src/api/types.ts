@@ -66,3 +66,11 @@ export interface DetectResponse {
 export interface ImportResponse { bodies: Body[]; applied_scale: number; warnings: PartWarning[] }
 
 export interface LinkMass { mass_kg: number; center_of_mass: Vec3; inertia: number[] }
+
+export interface SweepResult {
+  lower: number | null;
+  upper: number | null;
+  free: boolean;
+  blocked_by: { lower: string | null; upper: string | null };
+  at_rest_overlap: string[];
+}

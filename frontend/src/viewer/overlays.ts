@@ -131,3 +131,6 @@ export function disposeTree(o: Object3D) {
     else mat?.dispose();
   });
 }
+
+/** Signed angle from prev to next, the short way round (for dragging past ±180°). */
+export const unwrapStep = (prev: number, next: number) => Math.atan2(Math.sin(next - prev), Math.cos(next - prev));
