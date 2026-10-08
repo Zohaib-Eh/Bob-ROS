@@ -1,20 +1,26 @@
 import {
   ArrowHelper, Box3, BufferAttribute, BufferGeometry, DirectionalLight, EdgesGeometry, GridHelper, Group,
-  HemisphereLight, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshStandardMaterial, Object3D,
+  HemisphereLight, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D,
   PerspectiveCamera, Raycaster, Scene, Sphere, Vector2, Vector3, WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import type { Body, Joint, Vec3 } from "../api/types";
 import { bodyArrays, isClick } from "./meshData";
+import {
+  angleAroundAxis, buildGlyph, buildLooseLine, buildSnap, closestParamOnAxis, disposeTree, rayPlaneHit,
+  type JointGlyph,
+} from "./overlays";
 import { fitDistance, viewDirection, type ViewName } from "./viewMath";
 
 export type Hit = { bodyId: string; triangle: number } | null;
 type PickCb = (hit: Hit, additive: boolean) => void;
+type LimitCb = (which: "lower" | "upper", value: number) => void;
 
 export const PART_COLOR = 0xb9bdc3;
 const SELECT_EMISSIVE = 0x1d4ed8;
 const HOVER_EMISSIVE = 0x475569;
+const APPROX_COLOR = 0xd97706;
 
 export class Viewer {
   private renderer: WebGLRenderer;
@@ -39,6 +45,13 @@ export class Viewer {
   private ignored = new Set<string>();
   private down: { x: number; y: number } | null = null;
   private pendingHover: PointerEvent | null = null;
+  private overlay = new Group();
+  private glyphs: JointGlyph[] = [];
+  private loose: [Vec3, Vec3][] = [];
+  private snap: { origin: Vec3; axis: Vec3 } | null = null;
+  private approximate: string[] = [];
+  private limitCb: LimitCb | null = null;
+  private dragging: { which: "lower" | "upper"; joint: Joint } | null = null;
   // legacy (old UI) — removed in Task 6
   private joints = new Group();
   private gizmo: TransformControls;
@@ -54,7 +67,7 @@ export class Viewer {
     key.position.set(3, -4, 6);
     const fill = new DirectionalLight(0xffffff, 0.35);
     fill.position.set(-4, 3, 2);
-    this.scene.add(key, fill, this.joints, this.gizmoTarget);
+    this.scene.add(key, fill, this.overlay, this.joints, this.gizmoTarget);
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(2, -2, 1.5);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -123,6 +136,8 @@ export class Viewer {
     if (!this.framed && this.meshes.size) { this.setView("home"); this.framed = true; }
     this.applyLooks();
     this.setPreview(this.preview.ids, this.preview.m);
+    this.applyApproximate();
+    this.rebuildOverlay();
   }
 
   private free(m: Mesh) {
@@ -180,6 +195,58 @@ export class Viewer {
       mesh.matrixWorldNeedsUpdate = true;
     }
     this.requestRender();
+  }
+
+  setApproximate(bodyIds: string[]) { this.approximate = bodyIds; this.applyApproximate(); }
+
+  private applyApproximate() {
+    for (const m of this.meshes.values()) {
+      const w = m.getObjectByName("approx") as Mesh | undefined;
+      if (w) { m.remove(w); (w.material as Material).dispose(); }
+    }
+    for (const id of this.approximate) {
+      const m = this.meshes.get(id);
+      if (!m) continue;
+      // shares the part's geometry, so it follows the part during previews
+      const w = new Mesh(m.geometry, new MeshBasicMaterial({ color: APPROX_COLOR, wireframe: true, transparent: true, opacity: 0.3 }));
+      w.name = "approx";
+      m.add(w);
+    }
+    this.requestRender();
+  }
+
+  setJointGlyphs(g: JointGlyph[]) { this.glyphs = g; this.rebuildOverlay(); }
+  setLooseLines(l: [Vec3, Vec3][]) { this.loose = l; this.rebuildOverlay(); }
+  setSnap(s: { origin: Vec3; axis: Vec3 } | null) { this.snap = s; this.rebuildOverlay(); }
+  onLimitDrag(cb: LimitCb | null) { this.limitCb = cb; }
+
+  private rebuildOverlay() {
+    disposeTree(this.overlay);
+    this.overlay.clear();
+    const size = Math.max(this.bounds.radius * 0.35, 1e-3);
+    for (const g of this.glyphs) this.overlay.add(buildGlyph(g, size));
+    for (const [a, b] of this.loose) this.overlay.add(buildLooseLine(a, b, size));
+    if (this.snap) this.overlay.add(buildSnap(this.snap, size));
+    this.overlay.traverse((c) => {
+      c.renderOrder = 10;
+      const mat = (c as Mesh).material as Material | undefined;
+      if (mat) mat.depthTest = false;   // glyphs stay visible inside the parts
+    });
+    this.requestRender();
+  }
+
+  private drag(e: PointerEvent) {
+    const { which, joint: j } = this.dragging!;
+    if (!j.axis) return;
+    const r = this.ray(e).ray;
+    const ro = r.origin.toArray() as Vec3, rd = r.direction.toArray() as Vec3;
+    let value: number | null = null;
+    if (j.type === "prismatic") value = closestParamOnAxis(ro, rd, j.origin_xyz, j.axis);
+    else {
+      const p = rayPlaneHit(ro, rd, j.origin_xyz, j.axis);
+      if (p) value = angleAroundAxis(p, j.origin_xyz, j.axis);
+    }
+    if (value !== null) this.limitCb?.(which, value);
   }
 
   setView(v: ViewName | "home") {
@@ -248,15 +315,28 @@ export class Viewer {
     this.hoverCb?.(hit);
   }
 
-  private onDown = (e: PointerEvent) => { this.down = { x: e.clientX, y: e.clientY }; };
+  private onDown = (e: PointerEvent) => {
+    this.down = { x: e.clientX, y: e.clientY };
+    const glyph = this.glyphs.find((g) => g.state === "active");
+    if (!this.limitCb || !glyph) return;
+    const handles: Object3D[] = [];
+    this.overlay.traverse((c) => { if (c.userData.handle) handles.push(c); });
+    const h = this.ray(e).intersectObjects(handles, false)[0];
+    if (h) {
+      this.dragging = { which: h.object.userData.handle, joint: glyph.joint };
+      this.controls.enabled = false;
+    }
+  };
 
   private onMove = (e: PointerEvent) => {
+    if (this.dragging) { this.drag(e); return; }
     if (this.hoverCb && !this.down) this.pendingHover = e;
   };
 
   private onUp = (e: PointerEvent) => {
     const down = this.down;
     this.down = null;
+    if (this.dragging) { this.dragging = null; this.controls.enabled = true; return; }
     if (this.gizmo.dragging || !down || !isClick(down, { x: e.clientX, y: e.clientY })) return;
     this.pickCb(this.hitBody(this.ray(e)), e.shiftKey);
   };
@@ -316,6 +396,7 @@ export class Viewer {
     for (const m of this.meshes.values()) this.free(m);
     this.edgeMaterial.dispose();
     if (this.grid) { this.grid.geometry.dispose(); (this.grid.material as Material).dispose(); }
+    disposeTree(this.overlay);
     this.renderer.forceContextLoss();
     this.renderer.dispose();
     el.remove();
