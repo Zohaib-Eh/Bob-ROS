@@ -1,0 +1,30 @@
+{
+  "box_coarse": {
+    "axis_ok": 0,
+    "export_ok": true,
+    "failed": 0,
+    "parts": 1,
+    "type_ok": 0
+  },
+  "irb1300": {
+    "axis_ok": 6,
+    "export_ok": true,
+    "failed": 0,
+    "parts": 18,
+    "type_ok": 6
+  },
+  "open_shell": {
+    "axis_ok": 0,
+    "export_ok": true,
+    "failed": 0,
+    "parts": 2,
+    "type_ok": 0
+  },
+  "peg_in_hole": {
+    "axis_ok": 1,
+    "export_ok": true,
+    "failed": 0,
+    "parts": 2,
+    "type_ok": 1
+  }
+}

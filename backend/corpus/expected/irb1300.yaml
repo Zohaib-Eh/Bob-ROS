@@ -1,0 +1,19 @@
+file: irb1300_asm.stp
+sha256: 6c1c55bb7750ba03a34a3c82157433ae11293dd5d4dd78cd5d72b87e03af3102
+parts: {min: 18}
+statuses: {failed: 0}
+links:
+  - {name: base,  bodies: [IRB1300_7_12KG-1400-IP40-338203, PEDESTAL04557S]}
+  - {name: link1, bodies: [NONE-178789_9]}
+  - {name: link2, bodies: [IRB1300_7_12KG-1400-IP40-337405]}
+  - {name: link3, bodies: [SHELL]}
+  - {name: link4, bodies: [IRB1300_7_12KG-1400-IP40I-13701]}
+  - {name: link5, bodies: [NONE-20062]}
+  - {name: link6, bodies: [IRB1300_7_12KG-1400-IP40I-19258]}
+joints:
+  - {parent: base,  child: link1, type: [revolute, planar],             axis: [0, 0, 1]}
+  - {parent: link1, child: link2, type: [revolute, planar],             axis: [-0.712, 0.702, 0]}
+  - {parent: link2, child: link3, type: [revolute, planar],             axis: [-0.712, 0.702, 0]}
+  - {parent: link3, child: link4, type: [revolute, cylindrical],        axis: [-0.676, -0.685, -0.272]}
+  - {parent: link4, child: link5, type: [revolute, planar],             axis: [-0.712, 0.702, 0]}
+  - {parent: link5, child: link6, type: [revolute, cylindrical, continuous], axis: [-0.676, -0.685, -0.272]}
