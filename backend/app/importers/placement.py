@@ -12,7 +12,10 @@ def combine_bodies(bodies: list[Body], body_id: str, name: str) -> Body:
         faces += [f.model_copy(update={"triangle_indices": [i + t0 for i in f.triangle_indices]})
                   for f in b.faces]
         warnings += b.warnings
-    status = max((b.status for b in bodies), key=STATUS_ORDER.get, default="failed")
+    live = [b.status for b in bodies if b.vertices]
+    status = max(live, key=STATUS_ORDER.get, default="failed")
+    if live and len(live) < len(bodies):  # a failed part is missing from the geometry
+        status = max(status, "approximate", key=STATUS_ORDER.get)
     return Body(id=body_id, name=name, vertices=vertices, triangles=triangles,
                 faces=faces, status=status, warnings=warnings)
 

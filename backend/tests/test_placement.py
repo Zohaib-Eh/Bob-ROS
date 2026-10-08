@@ -42,3 +42,10 @@ def test_no_original_box_keeps_coordinates_unverified():
     r = place_replacement(_box("r", (100, 0, 0)), None, None)
     assert np.allclose(np.array(r.vertices).min(0), [99.5, -0.5, -0.5])
     assert [w.code for w in r.warnings] == ["position_unverified"]
+
+
+def test_combine_failed_plus_ok_is_approximate_with_geometry():
+    failed = Body(id="f", name="f", vertices=[], triangles=[], status="failed")
+    c = combine_bodies([failed, _box("a")], "orig", "part")
+    assert c.status == "approximate" and len(c.vertices) == 8
+    assert combine_bodies([failed], "orig", "part").status == "failed"

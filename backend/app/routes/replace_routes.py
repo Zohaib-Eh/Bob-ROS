@@ -32,6 +32,10 @@ def replace_part(
     lo, hi = _vec(bbox_min, "bbox_min"), _vec(bbox_max, "bbox_max")
     if (lo is None) != (hi is None):
         raise HTTPException(422, "bbox_min and bbox_max must be given together")
-    bodies, _, _ = run_import(file, scale)
-    body = place_replacement(combine_bodies(bodies, body_id, name), lo, hi)
+    if lo is not None and any(a > b for a, b in zip(lo, hi)):
+        raise HTTPException(422, "bbox_min must not exceed bbox_max")
+    bodies, _, file_warnings = run_import(file, scale)
+    combined = combine_bodies(bodies, body_id, name)
+    combined.warnings += file_warnings
+    body = place_replacement(combined, lo, hi)
     return body.model_dump()

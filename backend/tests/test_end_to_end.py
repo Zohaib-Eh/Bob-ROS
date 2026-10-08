@@ -413,3 +413,36 @@ def test_replace_part_with_unmeshable_file_returns_failed_body(tmp_path):
         assert r.json()["status"] == "failed" and r.json()["id"] == "orig"
     else:
         assert "empty.brep" in r.json()["detail"]
+
+
+def test_replace_part_keeps_file_level_warnings(mixed_topology_brep_path, monkeypatch):
+    from app.importers import step_importer
+    monkeypatch.setattr(step_importer, "_loose_faces", lambda shape: [])
+    r = _replace(open(mixed_topology_brep_path, "rb").read(), "mixed.brep")
+    assert r.status_code == 200
+    assert "unaccounted_faces" in [w["code"] for w in r.json()["warnings"]]
+
+
+def test_replace_part_inverted_bbox_is_422(box_stl_path):
+    r = _replace(open(box_stl_path, "rb").read(), "box.stl",
+                 bbox_min="1,0,0", bbox_max="0,1,1")
+    assert r.status_code == 422
+
+
+def test_export_two_body_link_excludes_body_missing_from_body_ids():
+    payload = _payload(["a"], [])
+    payload["bodies_by_link"]["a"].append(_box_json("extra"))
+    r = client.post("/export", json=payload)
+    assert r.status_code == 200
+    ws = json.loads(r.headers["X-Export-Warnings"])
+    assert [w["code"] for w in ws] == ["unused_body"] and "extra" in ws[0]["message"]
+    stl = zipfile.ZipFile(io.BytesIO(r.content)).read("r/meshes/a.stl")
+    assert len(trimesh.load(io.BytesIO(stl), file_type="stl").faces) == 12  # one box only
+
+
+def test_export_closed_box_with_override_and_zero_density_is_422():
+    payload = _payload(["a"], [])
+    payload["links"][0].update(density_kg_m3=0.0, mass_override_kg=5.0)
+    r = client.post("/export", json=payload)
+    assert r.status_code == 422
+    assert "'a'" in r.json()["detail"] and "density" in r.json()["detail"]
