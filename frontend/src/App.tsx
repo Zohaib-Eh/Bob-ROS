@@ -10,6 +10,7 @@ import Banner from "./ui/Banner";
 import Browser from "./ui/Browser";
 import { glyphsFor, tintsFor } from "./ui/colors";
 import type { Ctx, PickMode } from "./ui/ctx";
+import InfoCard from "./ui/InfoCard";
 import MarkerLayer from "./ui/MarkerLayer";
 import { looseLines, markersFor, type Marker } from "./ui/markers";
 import { routePick } from "./ui/pick";
@@ -139,6 +140,7 @@ export default function App() {
             approximate={approximate} glyphs={glyphs} loose={loose} onPick={onPick} onViewer={setViewer} />
           <MarkerLayer viewer={viewer} markers={markers} onClick={onMarker} />
           <ViewCube viewer={viewer} />
+          {!jointDraft && <InfoCard ctx={ctx} />}
         </main>
         <aside className="panel right"><StepPanel ctx={ctx} /></aside>
       </div>

@@ -109,3 +109,6 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .floating { position: absolute; z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 .step .card { cursor: default; }
 .step .card[data-testid^="problem-"] { cursor: pointer; }
+.infocard { width: 260px; padding: 10px 12px; transform: translate(-50%, calc(-100% - 14px)); }
+.infocard .close { position: absolute; top: 4px; right: 4px; }
+.linkcard { cursor: pointer; }
