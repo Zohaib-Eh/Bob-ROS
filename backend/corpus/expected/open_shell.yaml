@@ -1,0 +1,5 @@
+file: open_shell.brep
+generated: true
+scale: 1.0
+parts: {min: 2}
+statuses: {failed: 0}

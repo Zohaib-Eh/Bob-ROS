@@ -1,0 +1,5 @@
+file: box_coarse.stl
+generated: true
+scale: 0.001
+parts: {min: 1}
+statuses: {failed: 0}
