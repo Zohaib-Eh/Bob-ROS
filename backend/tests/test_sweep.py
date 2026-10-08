@@ -98,3 +98,32 @@ def test_bad_input_raises():
     empty = Body(id="e", name="e", vertices=[], triangles=[])
     with pytest.raises(ValueError, match="no geometry"):
         sweep_limits("revolute", O, Z, [empty], [])
+
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+client = TestClient(app)
+
+
+def _payload(kind="prismatic", axis=(1.0, 0.0, 0.0)):
+    wall = box("wall", (0.15, -1, -1), (0.25, 1, 1))
+    slider = box("slider", (0, -0.05, -0.05), (0.1, 0.05, 0.05))
+    return {"joint": {"type": kind, "origin_xyz": [0, 0, 0], "axis": list(axis)},
+            "moving": [slider.model_dump()], "obstacles": [{"link_id": "L-wall", "bodies": [wall.model_dump()]}]}
+
+
+def test_route_returns_limits_and_the_blocking_link():
+    r = client.post("/sweep-limits", json=_payload())
+    assert r.status_code == 200
+    assert r.json()["blocked_by"]["upper"] == "L-wall"
+    assert 0.0485 <= r.json()["upper"] <= 0.0495
+
+
+def test_route_rejects_bad_requests():
+    assert client.post("/sweep-limits", json=_payload(kind="fixed")).status_code == 422
+    assert client.post("/sweep-limits", json=_payload(axis=(0, 0, 0))).status_code == 422
+    bad = _payload()
+    del bad["joint"]["axis"]
+    assert client.post("/sweep-limits", json=bad).status_code == 422
