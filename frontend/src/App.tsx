@@ -11,6 +11,7 @@ import Browser from "./ui/Browser";
 import { glyphsFor, tintsFor } from "./ui/colors";
 import type { Ctx, PickMode } from "./ui/ctx";
 import InfoCard from "./ui/InfoCard";
+import JointTool from "./ui/JointTool";
 import MarkerLayer from "./ui/MarkerLayer";
 import { looseLines, markersFor, type Marker } from "./ui/markers";
 import { routePick } from "./ui/pick";
@@ -141,6 +142,7 @@ export default function App() {
           <MarkerLayer viewer={viewer} markers={markers} onClick={onMarker} />
           <ViewCube viewer={viewer} />
           {!jointDraft && <InfoCard ctx={ctx} />}
+          {jointDraft && step === "connect" && <JointTool ctx={ctx} />}
         </main>
         <aside className="panel right"><StepPanel ctx={ctx} /></aside>
       </div>

@@ -112,3 +112,11 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .infocard { width: 260px; padding: 10px 12px; transform: translate(-50%, calc(-100% - 14px)); }
 .infocard .close { position: absolute; top: 4px; right: 4px; }
 .linkcard { cursor: pointer; }
+.jointtool { top: 10px; left: 10px; width: 310px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; max-height: calc(100% - 20px); overflow: auto; }
+.jointtool .field-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.jointtool .pick { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.jointtool .label { font-weight: 600; margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+.jointtool .hint { padding: 6px 8px; border-radius: var(--radius); background: var(--accent-soft); }
+.motion-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.btn.motion { justify-content: flex-start; }
+.swatch.fixed { background: #2563eb; } .swatch.moving { background: #f59e0b; }
