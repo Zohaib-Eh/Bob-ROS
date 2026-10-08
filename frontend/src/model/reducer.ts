@@ -1,5 +1,5 @@
 import type { Body, Joint, Link, PartWarning } from "../api/types";
-import { boxVolume, linkBox } from "./geometry";
+import { baseGuess } from "./geometry";
 import { membership } from "./pairs";
 import { DEFAULT_DENSITY, emptyModel, type ModelState, type Suggestion } from "./types";
 
@@ -56,10 +56,7 @@ function tidy(s: ModelState): ModelState {
   const suggestions = Object.fromEntries(
     Object.entries(s.suggestions).filter(([, g]) => ids.has(g.linkA) && ids.has(g.linkB)));
   let rootLinkId = s.rootLinkId && ids.has(s.rootLinkId) ? s.rootLinkId : null;
-  if (!rootLinkId && links.length) {
-    const vol = (l: Link) => { const b = linkBox(l, s.bodies); return b ? boxVolume(b) : 0; };
-    rootLinkId = links.reduce((best, l) => (vol(l) > vol(best) ? l : best)).id;
-  }
+  if (!rootLinkId && links.length) rootLinkId = baseGuess(links, s.bodies);
   return { ...s, links, joints, suggestions, rootLinkId };
 }
 

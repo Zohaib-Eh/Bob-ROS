@@ -24,7 +24,7 @@ const joint = (id: string, a: string, b: string): Joint => ({
   origin_rpy: [0, 0, 0], axis: null, limit_lower: null, limit_upper: null, source: "manual" });
 
 describe("modelReducer", () => {
-  it("import makes one link per part and picks the largest as base", () => {
+  it("import makes one link per part and picks the lowest (then largest) as base", () => {
     const s = imported();
     expect(s.links).toHaveLength(3);
     expect(s.links.map((l) => l.name)).toEqual(["big", "arm", "screw"]);

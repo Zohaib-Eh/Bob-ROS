@@ -98,7 +98,7 @@ describe("JointDetails", () => {
 describe("preview off the base", () => {
   it("moves the child link when the pair isn't connected to the base yet", () => {
     let h: History = historyReducer(initialHistory(), { type: "import", warnings: [], bodies: [
-      boxBody("base", [10, 10, 10], [14, 14, 14]), boxBody("block", [0, 0, 0], [1, 1, 1]), boxBody("peg", [1, 0, 0], [2, 1, 1])] });
+      boxBody("base", [10, 10, -4], [14, 14, 0]), boxBody("block", [0, 0, 0], [1, 1, 1]), boxBody("peg", [1, 0, 0], [2, 1, 1])] });
     const id = (b: string) => h.present.links.find((l) => l.body_ids.includes(b))!.id;
     expect(h.present.rootLinkId).toBe(id("base"));
     const [a, b] = [id("block"), id("peg")];
