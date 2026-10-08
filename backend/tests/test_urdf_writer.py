@@ -112,8 +112,9 @@ def test_export_package_zip_layout_and_meshes():
                 triangles=[tuple(t) for t in box.faces], faces=[])
     links = [_link("base"), _link("arm")]
     joints = [_joint("j1", "base", "arm")]
+    arm = body.model_copy(update={"id": "arm_body"})
     data = export_package("bot", links, joints,
-                          {"base": [body], "arm": [body]})
+                          {"base": [body], "arm": [arm]})
     z = zipfile.ZipFile(io.BytesIO(data))
     names = set(z.namelist())
     assert {"bot/urdf/bot.urdf", "bot/package.xml",
@@ -235,3 +236,20 @@ def test_unused_body_warnings_name_bodies_under_unknown_keys():
     ws = unused_body_warnings([link], {"a": [_box_body("b")], "spare": [_box_body("screw")]})
     assert [w.code for w in ws] == ["unused_body"]
     assert "screw" in ws[0].message
+
+
+def test_body_not_in_link_body_ids_is_not_exported():
+    link = Link(id="a", name="a", body_ids=["other"], density_kg_m3=1000.0)
+    bodies = {"a": [_box_body("b")]}
+    assert [w.code for w in unused_body_warnings([link], bodies)] == ["unused_body"]
+    with pytest.raises(ValueError, match="Link .a."):  # no geometry left in the link
+        export_package("r", [link.model_copy(update={"mass_override_kg": 1.0})], [], bodies)
+
+
+def test_accept_approximate_on_unmeasurable_geometry_asks_for_override():
+    body = Body(id="b", name="b", status="approximate",
+                vertices=[(0, 0, 0), (2, 0, 0), (2, 1, 0), (0, 1, 0)],
+                triangles=[(0, 1, 2), (0, 2, 3)])
+    link = Link(id="a", name="a", body_ids=["b"], density_kg_m3=1000.0, accept_approximate_mass=True)
+    with pytest.raises(ValueError, match=r"Link 'a'.*mass_override_kg"):
+        export_package("r", [link], [], {"a": [body]})

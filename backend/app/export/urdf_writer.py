@@ -1,4 +1,5 @@
 import io
+import math
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -172,9 +173,14 @@ def _with_mass_properties(link: Link, bodies: list[Body]) -> Link:
     """Mass/COM/inertia always come from geometry + density, never the client.
     A user mass override rescales the computed inertia (uniform density)."""
     override = link.mass_override_kg
+    if not (math.isfinite(link.density_kg_m3) and link.density_kg_m3 > 0):
+        raise ValueError(f"Link '{link.id}': density must be finite and > 0")
     try:
         mass, com, inertia = compute_link_mass_properties(bodies, link.density_kg_m3)
     except ValueError as exc:
+        if override is None and any(b.status == "approximate" for b in bodies):
+            raise ValueError(f"Link '{link.id}': volume of approximate part(s) can't be "
+                             "measured; set mass_override_kg for this link.") from exc
         if override is None or not any(b.vertices for b in bodies):
             raise ValueError(f"Link '{link.id}': {exc}") from exc
         com, inertia = _bbox_mass_properties(bodies, override)
@@ -200,13 +206,17 @@ def _part_status_errors(links: list[Link], bodies_by_link: dict[str, list[Body]]
     return errors
 
 
+def _used_bodies(links: list[Link], bodies_by_link: dict[str, list[Body]]) -> dict[str, list[Body]]:
+    """A link's geometry is the bodies sent under its id AND listed in its body_ids."""
+    return {l.id: [b for b in bodies_by_link.get(l.id, []) if b.id in l.body_ids] for l in links}
+
+
 def unused_body_warnings(links: list[Link], bodies_by_link: dict[str, list[Body]]) -> list[PartWarning]:
-    link_ids = {l.id for l in links}
+    used = {id(b) for bs in _used_bodies(links, bodies_by_link).values() for b in bs}
     return [
         PartWarning(code="unused_body", fixes=[],
                     message=f"Part '{b.name}' is in no link and was not exported.")
-        for key, bodies in bodies_by_link.items() if key not in link_ids
-        for b in bodies
+        for bodies in bodies_by_link.values() for b in bodies if id(b) not in used
     ]
 
 
@@ -216,6 +226,7 @@ def export_package(
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
 ) -> bytes:
+    bodies_by_link = _used_bodies(links, bodies_by_link)
     errors = _part_status_errors(links, bodies_by_link)
     if errors:
         raise ValueError("Cannot export URDF -- " + "; ".join(errors))
