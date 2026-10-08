@@ -88,16 +88,27 @@ export function modelReducer(s: ModelState, a: Action): ModelState {
       return tidy({ ...s, bodies, links, fileWarnings: [...s.fileWarnings, ...a.warnings] });
     }
     case "merge": {
-      const [target, ...others] = a.linkIds;
+      const [target, ...others] = [...new Set(a.linkIds)];
       if (!target || !others.length || !s.links.some((l) => l.id === target)) return s;
       return tidy(mergeLinks(s, target, others));
     }
     case "mergeSmall": {
+      // Pairs run in order; a link merged earlier resolves to where its bodies went.
+      const into = new Map<string, string>();
+      const resolve = (id: string) => { while (into.has(id)) id = into.get(id)!; return id; };
+      const exists = (id: string) => s.links.some((l) => l.id === id);
       let next = s;
-      for (const p of a.pairs) next = mergeLinks(next, p.neighbourId, [p.linkId]);
-      return a.pairs.length ? tidy(next) : s;
+      for (const p of a.pairs) {
+        const from = resolve(p.linkId);
+        const to = resolve(p.neighbourId);
+        if (from === to || !exists(from) || !exists(to)) continue;
+        next = mergeLinks(next, to, [from]);
+        into.set(from, to);
+      }
+      return next === s ? s : tidy(next);
     }
     case "moveBody": {
+      if (!s.bodies[a.bodyId] || s.ignored.includes(a.bodyId)) return s;
       if (!s.links.some((l) => l.id === a.toLinkId)) return s;
       const links = removeBodyFromLinks(s.links, a.bodyId).map((l) =>
         (l.id === a.toLinkId ? { ...l, body_ids: [...l.body_ids, a.bodyId] } : l));

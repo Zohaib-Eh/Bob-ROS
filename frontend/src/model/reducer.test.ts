@@ -12,6 +12,12 @@ function imported(): ModelState {
   return modelReducer(emptyModel(), { type: "import", bodies: [big, arm, screw], warnings: [] });
 }
 const linkOf = (s: ModelState, bodyId: string) => s.links.find((l) => l.body_ids.includes(bodyId))!;
+/** Every non-ignored body sits in exactly one link; ignored bodies sit in none. */
+function expectEachBodyPlacedOnce(s: ModelState) {
+  const placed = s.links.flatMap((l) => l.body_ids).sort();
+  const expected = Object.keys(s.bodies).filter((id) => !s.ignored.includes(id)).sort();
+  expect(placed).toEqual(expected);
+}
 const joint = (id: string, a: string, b: string): Joint => ({
   id, parent_link_id: a, child_link_id: b, type: "fixed", origin_xyz: [0, 0, 0],
   origin_rpy: [0, 0, 0], axis: null, limit_lower: null, limit_upper: null, source: "manual" });
@@ -43,6 +49,61 @@ describe("modelReducer", () => {
     expect(s.links).toHaveLength(2);
     expect(linkOf(s, "screw").id).toBe(b);
     expect(s.joints.map((j) => j.id)).toEqual(["j1"]);
+  });
+
+  it("merge ignores duplicate ids and keeps the target holding both bodies", () => {
+    let s = imported();
+    const [a, b] = [linkOf(s, "big").id, linkOf(s, "arm").id];
+    s = modelReducer(s, { type: "merge", linkIds: [a, b, a] });
+    expect(s.links).toHaveLength(2);
+    expect(linkOf(s, "big").id).toBe(a);
+    expect([...linkOf(s, "big").body_ids].sort()).toEqual(["arm", "big"]);
+    expectEachBodyPlacedOnce(s);
+  });
+
+  it("mergeSmall keeps every body when a neighbour was already merged away", () => {
+    const s1 = boxBody("s1", [2, 0, 0], [2.1, 0.1, 0.1]);
+    const s2 = boxBody("s2", [3, 0, 0], [3.1, 0.1, 0.1]);
+    const s3 = boxBody("s3", [4, 0, 0], [4.1, 0.1, 0.1]);
+    let s = modelReducer(emptyModel(), { type: "import", bodies: [big, s1, s2, s3], warnings: [] });
+    const [l1, l2, l3] = ["s1", "s2", "s3"].map((id) => linkOf(s, id).id);
+    // s1 merges into s2 first; then s3's neighbour s1 is already gone and must resolve to s2.
+    s = modelReducer(s, { type: "mergeSmall", pairs: [
+      { linkId: l1, neighbourId: l2 }, { linkId: l3, neighbourId: l1 }] });
+    expectEachBodyPlacedOnce(s);
+    expect(linkOf(s, "s3").id).toBe(l2);
+  });
+
+  it("mergeSmall keeps every body for a chain of small links into the base", () => {
+    const s1 = boxBody("s1", [2, 0, 0], [2.1, 0.1, 0.1]);
+    const s2 = boxBody("s2", [3, 0, 0], [3.1, 0.1, 0.1]);
+    let s = modelReducer(emptyModel(), { type: "import", bodies: [big, s1, s2], warnings: [] });
+    const [l1, l2, lb] = ["s1", "s2", "big"].map((id) => linkOf(s, id).id);
+    s = modelReducer(s, { type: "mergeSmall", pairs: [
+      { linkId: l1, neighbourId: l2 }, { linkId: l2, neighbourId: lb }] });
+    expect(s.links).toHaveLength(1);
+    expectEachBodyPlacedOnce(s);
+  });
+
+  it("moveBody does nothing for an ignored body", () => {
+    const s = modelReducer(imported(), { type: "ignoreBody", bodyId: "screw" });
+    expect(modelReducer(s, { type: "moveBody", bodyId: "screw", toLinkId: linkOf(s, "big").id })).toBe(s);
+    expect(modelReducer(s, { type: "moveBody", bodyId: "nope", toLinkId: linkOf(s, "big").id })).toBe(s);
+  });
+
+  it("every body is in exactly one link or ignored after a sequence of merge, move and ignore", () => {
+    let s = imported();
+    const lid = (bodyId: string) => linkOf(s, bodyId).id;
+    s = modelReducer(s, { type: "ignoreBody", bodyId: "screw" });
+    expectEachBodyPlacedOnce(s);
+    s = modelReducer(s, { type: "unignoreBody", bodyId: "screw" });
+    expectEachBodyPlacedOnce(s);
+    s = modelReducer(s, { type: "merge", linkIds: [lid("big"), lid("arm"), lid("big")] });
+    expectEachBodyPlacedOnce(s);
+    s = modelReducer(s, { type: "moveBody", bodyId: "screw", toLinkId: lid("big") });
+    expectEachBodyPlacedOnce(s);
+    s = modelReducer(s, { type: "ignoreBody", bodyId: "arm" });
+    expectEachBodyPlacedOnce(s);
   });
 
   it("moveBody removes an emptied link and its joints", () => {
