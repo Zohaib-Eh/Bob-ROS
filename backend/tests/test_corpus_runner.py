@@ -57,3 +57,24 @@ def test_same_named_bodies_are_ambiguous(tmp_path, monkeypatch, capsys):
             "--baseline", str(tmp_path / "b.json"), "--report", str(tmp_path / "r.json")]
     assert run.main(args) == 1
     assert "ambiguous body name 'dup' (2 bodies)" in capsys.readouterr().out
+
+
+def _one_model(tmp_path, yaml_text, name="open_shell.brep"):
+    corpus, exp = tmp_path / "corpus", tmp_path / "expected"
+    generate.main([str(corpus)]); exp.mkdir()
+    (exp / "m.yaml").write_text(yaml_text.replace("FILE", name))
+    return ["--corpus-dir", str(corpus), "--expected-dir", str(exp),
+            "--baseline", str(tmp_path / "b.json"), "--report", str(tmp_path / "r.json")]
+
+
+def test_status_upper_bound_overrun_fails(tmp_path, capsys):
+    args = _one_model(tmp_path, "file: FILE\ngenerated: true\nscale: 1.0\nstatuses: {approximate: 0}\n")
+    assert run.main(args) == 1
+    assert "m: approximate 1 > max 0" in capsys.readouterr().out
+
+
+def test_update_baseline_refuses_bad_models(tmp_path, capsys):
+    args = _one_model(tmp_path, "file: FILE\ngenerated: true\nscale: 1.0\nparts: {min: 5}\n")
+    assert run.main(args + ["--update-baseline"]) == 1
+    assert "parts 2 < min 5" in capsys.readouterr().out
+    assert "m" not in json.loads((tmp_path / "b.json").read_text())

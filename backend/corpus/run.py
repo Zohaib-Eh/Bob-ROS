@@ -56,7 +56,8 @@ def score_model(exp: dict, path: Path) -> dict:
     s = {"parts": len(bodies), "failed": sum(b.status == "failed" for b in bodies),
          "joints": 0, "type_ok": 0, "axis_ok": 0,
          "warnings": len(file_warnings) + sum(len(b.warnings) for b in bodies),
-         "export_ok": False, "seconds": 0.0}
+         "export_ok": False, "seconds": 0.0,
+         "statuses": {st: sum(b.status == st for b in bodies) for st in {b.status for b in bodies}}}
     links, errors = {}, []
     for l in exp.get("links", []):
         picked = []
@@ -120,6 +121,9 @@ def _expectation_failures(name: str, exp: dict, s: dict) -> list[str]:
     out = []
     if s["parts"] < exp.get("parts", {}).get("min", 0):
         out.append(f"{name}: parts {s['parts']} < min {exp['parts']['min']}")
+    for st, mx in exp.get("statuses", {}).items():
+        if s.get("statuses", {}).get(st, 0) > mx:
+            out.append(f"{name}: {st} {s['statuses'][st]} > max {mx}")
     if s.get("error"):
         out.append(f"{name}: {s['error']}")
     return out
@@ -147,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     baseline = json.loads(baseline_path.read_text()) if baseline_path.exists() else {}
-    scores, problems = {}, []
+    scores, problems, refused = {}, [], set()
     for exp_file in sorted(Path(a.expected_dir).glob("*.yaml")):
         name, exp = exp_file.stem, yaml.safe_load(exp_file.read_text())
         path = corpus / exp["file"]
@@ -165,16 +169,22 @@ def main(argv: list[str] | None = None) -> int:
                  "error": f"{type(exc).__name__}: {exc}"[:200]}
         scores[name] = s
         print(_line(name, exp, s))
-        problems += _regressions(name, s, baseline.get(name)) + _expectation_failures(name, exp, s)
+        bad = _expectation_failures(name, exp, s)
+        if bad:
+            refused.add(name)
+        problems += _regressions(name, s, baseline.get(name)) + bad
 
     Path(a.report).parent.mkdir(parents=True, exist_ok=True)
     Path(a.report).write_text(json.dumps(scores, indent=2))
     if a.update_baseline:
         baseline.update({k: {kk: v[kk] for kk in ("parts", "failed", "type_ok", "axis_ok", "export_ok")}
-                         for k, v in scores.items()})
+                         for k, v in scores.items() if k not in refused})
         baseline_path.write_text(json.dumps(baseline, indent=2, sort_keys=True))
         print(f"baseline updated: {baseline_path}")
-        return 0
+        for line in problems:
+            if line.split(":")[0] in refused:
+                print("REFUSED " + line)
+        return 1 if refused else 0
     for line in problems:
         print("REGRESSION " + line)
     return 1 if problems else 0
