@@ -9,5 +9,5 @@ export default defineConfig({
       "/api": { target: "http://localhost:8000", rewrite: (p) => p.replace(/^\/api/, "") },
     },
   },
-  test: { environment: "jsdom", globals: true, exclude: ["e2e/**", "node_modules/**"] },
+  test: { environment: "jsdom", globals: true, exclude: ["e2e/**", "node_modules/**", "**/*.local.*"] },
 });

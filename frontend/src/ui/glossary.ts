@@ -1,0 +1,27 @@
+export const GLOSSARY = {
+  link: ["Link", "A set of parts bolted together that move as one piece. Each link becomes one <link> in the URDF."],
+  base: ["Base link", "The link that stays still — usually the part that sits on the ground. Every other link hangs off it through joints."],
+  joint: ["Joint", "Connects two links and says how one moves relative to the other."],
+  origin: ["Joint origin", "The point the joint moves around, for example the centre of a shaft."],
+  axis: ["Axis", "The direction the joint turns around or slides along."],
+  rigid: ["Rigid (URDF: fixed)", "The two links are locked together and never move relative to each other."],
+  revolute: ["Revolute (URDF: revolute)", "Turns around the axis between a lower and an upper limit, like an elbow."],
+  continuous: ["No limits (URDF: continuous)", "A revolute joint that can spin forever, like a wheel."],
+  slider: ["Slider (URDF: prismatic)", "Slides along the axis between two limits, like a drawer."],
+  planar: ["Planar (URDF: planar)", "Slides freely in the plane perpendicular to the axis. Rare in robot arms — if the preview looks wrong, pick Revolute."],
+  cylindrical: ["Cylindrical", "Turns and slides on the same axis. URDF can't express this — use two joints instead."],
+  ball: ["Ball", "Turns in every direction. URDF can't express this — use three revolute joints instead."],
+  limits: ["Limits", "How far the joint may turn (degrees) or slide (millimetres) from where the parts are now."],
+  mass: ["Mass", "How heavy the link is. Simulators need it to move the robot realistically."],
+  inertia: ["Inertia", "How the link's mass is spread out; it decides how hard the link is to spin. Computed from the shape."],
+  estimated: ["Estimated mass", "Mass computed from the part's volume and its material's density."],
+  approximate: ["Approximate shape", "The part's surface has gaps, so its volume — and with it the mass — is only an estimate."],
+  failed: ["Failed part", "The file had no usable shape for this part. Replace it with a fixed file, or ignore it."],
+  urdf: ["URDF", "Unified Robot Description Format: the XML file ROS, Gazebo and most robot simulators use to describe a robot."],
+  mesh: ["Mesh", "The 3D surface of a link, saved as an STL file next to the URDF."],
+  scale: ["Scale", "Multiplier from file units to metres. STL, OBJ and BREP files carry no units: 0.001 means the file is in millimetres."],
+  name: ["Names", "URDF names may use letters, digits, _ and - only, and must start with a letter, digit or _."],
+  suggested: ["Suggested from contact faces", "The app found faces where the two links touch (shafts in holes, flat bearing faces) and guessed the joint from them."],
+} as const satisfies Record<string, readonly [string, string]>;
+
+export type Term = keyof typeof GLOSSARY;
