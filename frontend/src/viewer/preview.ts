@@ -29,8 +29,11 @@ export function subtreeLinks(directed: Joint[], jointId: string): string[] {
   const start = directed.find((j) => j.id === jointId);
   if (!start) return [];
   const out = [start.child_link_id];
+  const seen = new Set(out);
   for (let i = 0; i < out.length; i++) {
-    for (const j of directed) if (j.parent_link_id === out[i]) out.push(j.child_link_id);
+    for (const j of directed) {
+      if (j.parent_link_id === out[i] && !seen.has(j.child_link_id)) { seen.add(j.child_link_id); out.push(j.child_link_id); }
+    }
   }
   return out;
 }

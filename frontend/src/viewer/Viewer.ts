@@ -1,11 +1,11 @@
 import {
-  AmbientLight, ArrowHelper, Box3, BufferAttribute, BufferGeometry, Color, DirectionalLight, Group, Matrix4,
+  AmbientLight, ArrowHelper, Box3, BufferAttribute, BufferGeometry, Color, DirectionalLight, Group, Material, Matrix4,
   Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Raycaster, Scene, Vector2, Vector3, WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import type { Body, Joint, Vec3 } from "../api/types";
-import { bodyArrays, statusColor } from "./meshData";
+import { bodyArrays, isClick, statusColor } from "./meshData";
 
 type PickCb = (hit: { bodyId: string; triangle: number } | null, additive: boolean) => void;
 
@@ -21,6 +21,11 @@ export class Viewer {
   private pickCb: PickCb = () => {};
   private frame = 0;
   private framed = false;
+  private observer: ResizeObserver;
+  private selection: string[] = [];
+  private preview: { ids: string[]; m: Matrix4 | null } = { ids: [], m: null };
+  private ignored = new Set<string>();
+  private down: { x: number; y: number } | null = null;
 
   constructor(private container: HTMLElement) {
     this.renderer = new WebGLRenderer({ antialias: true });
@@ -36,8 +41,10 @@ export class Viewer {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
     this.gizmo.addEventListener("dragging-changed", (e) => { this.controls.enabled = !e.value; });
-    this.renderer.domElement.addEventListener("pointerdown", this.onPointer);
-    new ResizeObserver(() => this.resize()).observe(container);
+    this.renderer.domElement.addEventListener("pointerdown", this.onDown);
+    this.renderer.domElement.addEventListener("pointerup", this.onUp);
+    this.observer = new ResizeObserver(() => this.resize());
+    this.observer.observe(container);
     this.resize();
     const loop = () => { this.renderer.render(this.scene, this.camera); this.frame = requestAnimationFrame(loop); };
     loop();
@@ -51,14 +58,15 @@ export class Viewer {
   }
 
   setBodies(bodies: Body[], ignored: Set<string>) {
+    this.ignored = ignored;
     const keep = new Set(bodies.map((b) => b.id));
     for (const [id, m] of this.meshes) {
-      if (!keep.has(id)) { this.scene.remove(m); m.geometry.dispose(); this.meshes.delete(id); }
+      if (!keep.has(id)) { this.scene.remove(m); this.free(m); this.meshes.delete(id); }
     }
     for (const b of bodies) {
       let mesh = this.meshes.get(b.id);
       if (!mesh || mesh.userData.source !== b) {
-        if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); }
+        if (mesh) { this.scene.remove(mesh); this.free(mesh); }
         const { positions, indices } = bodyArrays(b);
         const g = new BufferGeometry();
         g.setAttribute("position", new BufferAttribute(positions, 3));
@@ -75,6 +83,13 @@ export class Viewer {
       mat.opacity = ignored.has(b.id) ? 0.2 : 1;
     }
     if (!this.framed && bodies.length) this.frameAll();
+    this.setSelection(this.selection);
+    this.setPreview(this.preview.ids, this.preview.m);
+  }
+
+  private free(m: Mesh) {
+    m.geometry.dispose();
+    (m.material as Material).dispose();
   }
 
   private frameAll() {
@@ -90,13 +105,19 @@ export class Viewer {
   }
 
   setSelection(bodyIds: string[]) {
+    this.selection = bodyIds;
     for (const [id, m] of this.meshes) {
       (m.material as MeshStandardMaterial).emissive.setHex(bodyIds.includes(id) ? 0x2266cc : 0x000000);
     }
   }
 
-  setJoints(items: { joint: Joint; dashed: boolean }[]) {
+  private clearJoints() {
+    for (const a of this.joints.children) (a as ArrowHelper).dispose();
     this.joints.clear();
+  }
+
+  setJoints(items: { joint: Joint; dashed: boolean }[]) {
+    this.clearJoints();
     for (const { joint, dashed } of items) {
       if (!joint.axis) continue;
       const arrow = new ArrowHelper(new Vector3(...joint.axis).normalize(), new Vector3(...joint.origin_xyz),
@@ -106,6 +127,7 @@ export class Viewer {
   }
 
   setPreview(bodyIds: string[], m: Matrix4 | null) {
+    this.preview = { ids: bodyIds, m };
     for (const [id, mesh] of this.meshes) {
       mesh.matrixAutoUpdate = false;
       mesh.matrix.copy(m && bodyIds.includes(id) ? m : new Matrix4());
@@ -115,13 +137,17 @@ export class Viewer {
 
   onPick(cb: PickCb) { this.pickCb = cb; }
 
-  private onPointer = (e: PointerEvent) => {
-    if (this.gizmo.dragging) return;
+  private onDown = (e: PointerEvent) => { this.down = { x: e.clientX, y: e.clientY }; };
+
+  private onUp = (e: PointerEvent) => {
+    const down = this.down;
+    this.down = null;
+    if (this.gizmo.dragging || !down || !isClick(down, { x: e.clientX, y: e.clientY })) return;
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     const ray = new Raycaster();
     ray.setFromCamera(ndc, this.camera);
-    const hit = ray.intersectObjects([...this.meshes.values()], false)[0];
+    const hit = ray.intersectObjects([...this.meshes.values()].filter((m) => !this.ignored.has(m.userData.bodyId)), false)[0];
     this.pickCb(hit ? { bodyId: hit.object.userData.bodyId, triangle: hit.faceIndex ?? -1 } : null, e.shiftKey);
   };
 
@@ -149,10 +175,14 @@ export class Viewer {
 
   dispose() {
     cancelAnimationFrame(this.frame);
-    this.renderer.domElement.removeEventListener("pointerdown", this.onPointer);
+    this.renderer.domElement.removeEventListener("pointerdown", this.onDown);
+    this.renderer.domElement.removeEventListener("pointerup", this.onUp);
+    this.observer.disconnect();
+    this.clearJoints();
     this.controls.dispose();
     this.gizmo.dispose();
-    for (const m of this.meshes.values()) m.geometry.dispose();
+    for (const m of this.meshes.values()) this.free(m);
+    this.renderer.forceContextLoss();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

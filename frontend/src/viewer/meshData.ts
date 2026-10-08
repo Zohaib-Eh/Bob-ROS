@@ -13,5 +13,8 @@ const COLORS: Record<Status, number> = {
 };
 export const statusColor = (s: Status) => COLORS[s];
 
+export const isClick = (down: { x: number; y: number }, up: { x: number; y: number }, px = 4) =>
+  Math.hypot(up.x - down.x, up.y - down.y) < px;
+
 export const faceAtTriangle = (b: Body, tri: number): Face | null =>
   b.faces.find((f) => f.triangle_indices.includes(tri)) ?? null;

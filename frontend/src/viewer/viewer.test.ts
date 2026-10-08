@@ -2,7 +2,7 @@ import { Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 import type { Joint } from "../api/types";
 import { boxBody } from "../model/testBodies";
-import { bodyArrays, faceAtTriangle, statusColor } from "./meshData";
+import { bodyArrays, faceAtTriangle, isClick, statusColor } from "./meshData";
 import { jointMotion, previewRange, subtreeLinks } from "./preview";
 
 const J = (over: Partial<Joint>): Joint => ({
@@ -47,5 +47,17 @@ describe("preview", () => {
     const directed = [J({ id: "j1", parent_link_id: "a", child_link_id: "b" }),
       J({ id: "j2", parent_link_id: "b", child_link_id: "c" }), J({ id: "j3", parent_link_id: "a", child_link_id: "d" })];
     expect(subtreeLinks(directed, "j1").sort()).toEqual(["b", "c"]);
+  });
+});
+
+describe("robustness", () => {
+  it("subtree terminates on cycles and has no duplicates", () => {
+    const directed = [J({ id: "j1", parent_link_id: "a", child_link_id: "b" }),
+      J({ id: "j2", parent_link_id: "b", child_link_id: "a" }), J({ id: "j3", parent_link_id: "a", child_link_id: "b" })];
+    expect(subtreeLinks(directed, "j1").sort()).toEqual(["a", "b"]);
+  });
+  it("distinguishes click from drag", () => {
+    expect(isClick({ x: 10, y: 10 }, { x: 12, y: 11 })).toBe(true);
+    expect(isClick({ x: 10, y: 10 }, { x: 20, y: 10 })).toBe(false);
   });
 });
