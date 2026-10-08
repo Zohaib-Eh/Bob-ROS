@@ -19,19 +19,18 @@ def _dot(a: tuple, b: tuple) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _face_aabbs(body: Body) -> list:
-    """Tessellation AABB (min, max) per face, or None if it has no triangles.
-    Arrays are built once per body, not per face pair."""
+def _face_aabbs(body: Body) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Tessellation AABBs per face as (lo (F,3), hi (F,3), has (F,)); has is False
+    for a face without triangles. Arrays are built once per body, not per face pair."""
     verts = np.asarray(body.vertices, dtype=float).reshape(-1, 3)
     tris = np.asarray(body.triangles, dtype=int).reshape(-1, 3)
-    boxes = []
-    for face in body.faces:
-        if not face.triangle_indices:
-            boxes.append(None)
-            continue
-        pts = verts[tris[face.triangle_indices].ravel()]
-        boxes.append((pts.min(axis=0), pts.max(axis=0)))
-    return boxes
+    n = len(body.faces)
+    lo, hi, has = np.zeros((n, 3)), np.zeros((n, 3)), np.zeros(n, dtype=bool)
+    for i, face in enumerate(body.faces):
+        if face.triangle_indices:
+            pts = verts[tris[face.triangle_indices].ravel()]
+            lo[i], hi[i], has[i] = pts.min(axis=0), pts.max(axis=0), True
+    return lo, hi, has
 
 
 def _aabbs_overlap(box_a, box_b, tol: float) -> bool:
@@ -97,16 +96,20 @@ def find_matching_face_pairs(
     distance_tolerance: float = _PLANE_DISTANCE_TOLERANCE_DEFAULT,
 ) -> list[tuple[Face, Face]]:
     pairs: list[tuple[Face, Face]] = []
-    boxes_b = _face_aabbs(body_b)
-    for face_a, box_a in zip(body_a.faces, _face_aabbs(body_a)):
-        for face_b, box_b in zip(body_b.faces, boxes_b):
-            if not _aabbs_overlap(box_a, box_b, distance_tolerance):
-                continue
-            has_boxes = box_a is not None and box_b is not None
-            if _planar_match(face_a, face_b, distance_tolerance, has_boxes) or _cylindrical_match(
-                face_a, face_b
-            ):
-                pairs.append((face_a, face_b))
+    if not body_a.faces or not body_b.faces:
+        return pairs
+    lo_a, hi_a, has_a = _face_aabbs(body_a)
+    lo_b, hi_b, has_b = _face_aabbs(body_b)
+    # all face pairs at once; a face without triangles gives no box constraint
+    both = has_a[:, None] & has_b[None, :]
+    overlap = ~both | (np.all(lo_a[:, None] <= hi_b[None] + distance_tolerance, axis=2)
+                       & np.all(lo_b[None] <= hi_a[:, None] + distance_tolerance, axis=2))
+    for i, j in np.argwhere(overlap):   # row-major: same order as the nested loop
+        face_a, face_b = body_a.faces[i], body_b.faces[j]
+        if _planar_match(face_a, face_b, distance_tolerance, bool(both[i, j])) or _cylindrical_match(
+            face_a, face_b
+        ):
+            pairs.append((face_a, face_b))
 
     pairs.sort(key=lambda pair: _contact_score(*pair), reverse=True)
     return pairs

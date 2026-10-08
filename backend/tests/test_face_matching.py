@@ -107,3 +107,25 @@ def test_matching_large_body_against_itself_is_fast(holed_plate_step_path):
     t = time.perf_counter()
     find_matching_face_pairs(body, body)
     assert time.perf_counter() - t < 1.0
+
+
+def _grid_body(n, z, normal):
+    """n separate unit-ish plane faces on a grid at height z, one triangle each."""
+    verts, tris, faces = [], [], []
+    for i in range(n):
+        x, y = (i % 50) * 2.0, (i // 50) * 2.0
+        verts += [(x, y, z), (x + 1, y, z), (x, y + 1, z)]
+        tris.append((3 * i, 3 * i + 1, 3 * i + 2))
+        faces.append(Face(kind="plane", origin="brep", normal=normal, center=(x, y, z),
+                          residual=0.0, triangle_indices=[i]))
+    return Body(id="g", name="g", vertices=verts, triangles=tris, faces=faces)
+
+
+def test_many_faces_against_many_faces_is_fast():
+    """Real assemblies have ~2000 x ~1000 faces per pair (ABB IRB1300): no per-pair Python loop."""
+    import time
+    a, b = _grid_body(2000, 0.0, (0, 0, 1)), _grid_body(1000, 0.0, (0, 0, -1))
+    t = time.perf_counter()
+    pairs = find_matching_face_pairs(a, b)
+    assert time.perf_counter() - t < 3.0
+    assert len(pairs) == 1000   # each b face sits exactly on one a face
