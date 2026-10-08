@@ -17,7 +17,7 @@ function Harness({ initial }: { initial: (linkId: string) => Selection }) {
   return (
     <>
       <DetailsPanel model={h.present} dispatch={dispatch} selection={selection} setSelection={setSelection}
-        setBanner={vi.fn()} />
+        setBanner={vi.fn()} viewer={null} setPreview={vi.fn()} lastPick={null} />
       <div data-testid="state">{JSON.stringify({ links: h.present.links, ignored: h.present.ignored, sel: selection })}</div>
     </>
   );

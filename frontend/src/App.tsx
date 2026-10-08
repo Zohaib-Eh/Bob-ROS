@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { Matrix4 } from "three";
 import { detectJoints } from "./api/client";
 import { DetectionRunner, pairsToDetect, type Progress } from "./model/detection";
 import { historyReducer, initialHistory } from "./model/history";
@@ -9,6 +10,7 @@ import type { Selection } from "./ui/selection";
 import StatusBar from "./ui/StatusBar";
 import TopBar from "./ui/TopBar";
 import ViewerPane from "./ui/ViewerPane";
+import type { Viewer } from "./viewer/Viewer";
 
 export default function App() {
   const [history, dispatch] = useReducer(historyReducer, undefined, initialHistory);
@@ -17,6 +19,9 @@ export default function App() {
   const [banner, setBanner] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>({ done: 0, total: 0, running: false, paused: false });
   const [robotName, setRobotName] = useState("robot");
+  const [viewer, setViewer] = useState<Viewer | null>(null);
+  const [preview, setPreview] = useState<{ bodyIds: string[]; matrix: Matrix4 } | null>(null);
+  const [lastPick, setLastPick] = useState<{ bodyId: string; triangle: number } | null>(null);
 
   const runner = useRef<DetectionRunner>();
   if (!runner.current) {
@@ -44,7 +49,8 @@ export default function App() {
   }, []);
 
   const bodies = useMemo(() => Object.values(model.bodies), [model.bodies]);
-  const onPick = useCallback((hit: { bodyId: string } | null, additive: boolean) => {
+  const onPick = useCallback((hit: { bodyId: string; triangle: number } | null, additive: boolean) => {
+    setLastPick(hit);
     setSelection((s) => {
       if (!hit) return null;
       const prev = s?.kind === "bodies" ? s.ids : [];
@@ -71,10 +77,10 @@ export default function App() {
         </div>
         <ViewerPane bodies={bodies} ignored={model.ignored}
           selectedBodyIds={selection?.kind === "bodies" ? selection.ids : []}
-          joints={jointArrows} preview={null} onPick={onPick} />
+          joints={jointArrows} preview={preview} onPick={onPick} onViewer={setViewer} />
         <div className="panel right">
           <DetailsPanel model={model} dispatch={dispatch} selection={selection} setSelection={setSelection}
-            setBanner={setBanner} />
+            setBanner={setBanner} viewer={viewer} setPreview={setPreview} lastPick={lastPick} />
         </div>
       </div>
       <StatusBar progress={progress} onCancel={() => runner.current!.cancel()} onResume={() => runner.current!.resume()} />
