@@ -16,13 +16,14 @@ export default function JointDetails(p: DetailsProps) {
   const [draft, setDraft] = useState<Joint | null>(source);
   const [editing, setEditing] = useState(false);
   const [preview, setPreviewValue] = useState(0);
+  const [pose, setPose] = useState(0);   // bumped when the axis is set from outside the gizmo (snap)
   useEffect(() => { setDraft(source); setEditing(false); }, [source?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!editing || !viewer || !draft?.axis) { viewer?.detachGizmo(); return; }
     viewer.attachGizmo(draft.origin_xyz, draft.axis, (origin, axis) =>
       setDraft((d) => (d ? { ...d, origin_xyz: origin, axis } : d)));
     return () => viewer.detachGizmo();
-  }, [editing, viewer, draft?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editing, viewer, draft?.id, pose]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (!draft) return <div>Nothing to show.</div>;
 
   const typeOk = URDF_TYPES.includes(draft.type);
@@ -35,13 +36,26 @@ export default function JointDetails(p: DetailsProps) {
     if (!lastPick) return;
     const face = faceAtTriangle(model.bodies[lastPick.bodyId], lastPick.triangle);
     const axis: Vec3 | null = mode === "cylinder" ? face?.axis ?? null : face?.normal ?? null;
-    if (axis) setDraft({ ...draft, axis, origin_xyz: mode === "cylinder" && face ? face.center : draft.origin_xyz });
+    if (!axis) return;
+    setDraft({ ...draft, axis, origin_xyz: mode === "cylinder" && face ? face.center : draft.origin_xyz });
+    setPose((n) => n + 1);
   };
 
   const onPreview = (value: number) => {
     setPreviewValue(value);
-    const { joints } = directJoints(model.links, [...model.joints.filter((j) => j.id !== draft.id), draft], model.rootLinkId);
-    const links = subtreeLinks(joints, draft.id);
+    const others = model.joints.filter((j) => j.id !== draft.id);
+    const { joints } = directJoints(model.links, [...others, draft], model.rootLinkId);
+    let links = subtreeLinks(joints, draft.id);
+    if (!links.length) {   // pair not reachable from the base yet: child side, never crossing the parent
+      links = [draft.child_link_id];
+      const seen = new Set([draft.parent_link_id, draft.child_link_id]);
+      for (let i = 0; i < links.length; i++) {
+        for (const j of others) {
+          const next = j.parent_link_id === links[i] ? j.child_link_id : j.child_link_id === links[i] ? j.parent_link_id : null;
+          if (next && !seen.has(next)) { seen.add(next); links.push(next); }
+        }
+      }
+    }
     const bodyIds = model.links.filter((l) => links.includes(l.id)).flatMap((l) => l.body_ids);
     setPreview({ bodyIds, matrix: jointMotion(draft, value) });
   };

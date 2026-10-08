@@ -22,6 +22,7 @@ export default function App() {
   const [banner, setBanner] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>({ done: 0, total: 0, running: false, paused: false });
   const [robotName, setRobotName] = useState("robot");
+  const [scale, setScale] = useState(0.001);
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [preview, setPreview] = useState<{ bodyIds: string[]; matrix: Matrix4 } | null>(null);
   const [lastPick, setLastPick] = useState<{ bodyId: string; triangle: number } | null>(null);
@@ -102,7 +103,7 @@ export default function App() {
     <div className="app">
       <div>
         <TopBar model={model} dispatch={dispatch} canUndo={history.past.length > 0} canRedo={history.future.length > 0}
-          setBanner={setBanner} robotName={robotName} setRobotName={setRobotName}
+          setBanner={setBanner} robotName={robotName} setRobotName={setRobotName} scale={scale} setScale={setScale}
           onExport={() => void onExport()}
           exportDisabledReason={exportReq.errors[0]?.message ?? (model.links.length ? null : "Import a model first.")} />
         <Banner message={banner} onClose={() => setBanner(null)} />
@@ -116,7 +117,7 @@ export default function App() {
           joints={jointArrows} preview={preview} onPick={onPick} onViewer={setViewer} />
         <div className="panel right">
           <DetailsPanel model={model} dispatch={dispatch} selection={selection} setSelection={setSelection}
-            setBanner={setBanner} viewer={viewer} setPreview={setPreview} lastPick={lastPick} />
+            setBanner={setBanner} viewer={viewer} setPreview={setPreview} lastPick={lastPick} scale={scale} />
         </div>
       </div>
       <StatusBar progress={progress} onCancel={() => runner.current!.cancel()} onResume={() => runner.current!.resume()} />

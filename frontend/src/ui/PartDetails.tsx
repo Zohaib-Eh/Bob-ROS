@@ -8,7 +8,7 @@ const LABEL: Record<Fix, string> = {
   set_mass: "Set mass", replace: "Replace part…", ignore: "Ignore part", reexport: "How to re-export",
 };
 
-export default function PartDetails({ model, dispatch, setSelection, setBanner, bodyId }:
+export default function PartDetails({ model, dispatch, setSelection, setBanner, scale, bodyId }:
   DetailsProps & { bodyId: string }) {
   const body = model.bodies[bodyId];
   const [advice, setAdvice] = useState(false);
@@ -20,7 +20,7 @@ export default function PartDetails({ model, dispatch, setSelection, setBanner, 
   const onReplace = async (file: File) => {
     setBusy(true);
     try {
-      const next = await replacePart(file, body.id, body.name, bodyBox(body), 0.001);
+      const next = await replacePart(file, body.id, body.name, bodyBox(body), scale);
       dispatch({ type: "replaceBody", body: next });
     } catch (e) {
       setBanner(`Replace failed: ${(e as Error).message}`);

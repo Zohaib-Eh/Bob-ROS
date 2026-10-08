@@ -17,7 +17,7 @@ function Harness({ initial }: { initial: (linkId: string) => Selection }) {
   return (
     <>
       <DetailsPanel model={h.present} dispatch={dispatch} selection={selection} setSelection={setSelection}
-        setBanner={vi.fn()} viewer={null} setPreview={vi.fn()} lastPick={null} />
+        setBanner={vi.fn()} viewer={null} setPreview={vi.fn()} lastPick={null} scale={1} />
       <div data-testid="state">{JSON.stringify({ links: h.present.links, ignored: h.present.ignored, sel: selection })}</div>
     </>
   );
@@ -47,12 +47,12 @@ describe("PartDetails", () => {
     expect(state().sel.kind).toBe("link");
   });
 
-  it("replace sends the part's id, name and bounding box", async () => {
+  it("replace sends the part's id, name, bounding box and the import scale", async () => {
     const spy = vi.spyOn(client, "replacePart").mockResolvedValue({ ...warned, status: "ok", warnings: [] });
     render(<Harness initial={() => ({ kind: "bodies", ids: ["p"] })} />);
     const file = new File(["x"], "fixed.stl");
     await act(async () => { fireEvent.change(screen.getByTestId("replace-input"), { target: { files: [file] } }); });
-    expect(spy).toHaveBeenCalledWith(file, "p", "p", { min: [0, 0, 0], max: [1, 1, 1] }, 0.001);
+    expect(spy).toHaveBeenCalledWith(file, "p", "p", { min: [0, 0, 0], max: [1, 1, 1] }, 1);
   });
 });
 

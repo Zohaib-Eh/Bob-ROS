@@ -7,7 +7,9 @@ export type DetectFn = (a: Body[], b: Body[], linkA: string, linkB: string, sign
 export interface Progress { done: number; total: number; running: boolean; paused: boolean }
 
 export function pairsToDetect(m: ModelState): PendingPair[] {
+  const jointed = new Set(m.joints.map((j) => pairKey(j.parent_link_id, j.child_link_id)));
   return touchingPairs(m.links, m.bodies)
+    .filter(([a, b]) => !jointed.has(pairKey(a.id, b.id)))   // already decided: don't re-suggest
     .map(([a, b]) => ({ key: pairKey(a.id, b.id), linkA: a.id, linkB: b.id, membership: membership(a, b) }))
     .filter((p) => m.suggestions[p.key]?.membership !== p.membership);
 }

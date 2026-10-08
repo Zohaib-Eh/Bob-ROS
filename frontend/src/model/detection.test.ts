@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DetectResponse } from "../api/types";
 import { DetectionRunner, pairsToDetect, type PendingPair } from "./detection";
+import { pairKey } from "./pairs";
 import { modelReducer } from "./reducer";
 import { boxBody } from "./testBodies";
 import { emptyModel } from "./types";
@@ -21,6 +22,16 @@ describe("pairsToDetect", () => {
     const other = m.links.find((l) => l.body_ids.includes("c"))!.id;
     m = modelReducer(m, { type: "merge", linkIds: [target, other] });   // membership changed
     expect(pairsToDetect(m)).toHaveLength(1);
+  });
+
+  it("skips pairs that already have a joint, even after their membership changes", () => {
+    let m = modelReducer(emptyModel(), { type: "import", warnings: [], bodies: [
+      boxBody("a", [0, 0, 0], [1, 1, 1]), boxBody("b", [1, 0, 0], [2, 1, 1]), boxBody("screw", [0.5, 0.5, 1], [0.6, 0.6, 1.1])] });
+    const id = (b: string) => m.links.find((l) => l.body_ids.includes(b))!.id;
+    m = modelReducer(m, { type: "addJoint", joint: { id: "j", parent_link_id: id("b"), child_link_id: id("a"), type: "fixed",
+      origin_xyz: [1, 0.5, 0.5], origin_rpy: [0, 0, 0], axis: null, limit_lower: null, limit_upper: null, source: "manual" } });
+    m = modelReducer(m, { type: "merge", linkIds: [id("a"), id("screw")] });
+    expect(pairsToDetect(m).map((p) => p.key)).not.toContain(pairKey(id("a"), id("b")));
   });
 });
 

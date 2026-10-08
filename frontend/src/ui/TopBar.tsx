@@ -17,17 +17,18 @@ interface Props {
   setRobotName: (n: string) => void;
   onExport: () => void;
   exportDisabledReason: string | null;
+  scale: number;
+  setScale: (s: number) => void;
 }
 
 export default function TopBar(p: Props) {
-  const [scale, setScale] = useState(0.001);
   const [lastScale, setLastScale] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const onImport = async (file: File) => {
     setBusy(true);
     try {
-      const res = await importFile(file, scale);
+      const res = await importFile(file, p.scale);
       p.dispatch({ type: "import", bodies: res.bodies, warnings: res.warnings });
       setLastScale(NEEDS_SCALE.test(file.name) ? `${file.name}: scale ${res.applied_scale}` : null);
     } catch (e) {
@@ -51,8 +52,8 @@ export default function TopBar(p: Props) {
       <label>Import <input data-testid="import-input" type="file" disabled={busy}
         accept=".step,.stp,.iges,.igs,.brep,.stl,.obj"
         onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onImport(f); }} /></label>
-      <label>Scale (STL/OBJ/BREP) <input data-testid="scale-input" type="number" step="any" value={scale}
-        style={{ width: 80 }} onChange={(e) => setScale(Number(e.target.value))} /></label>
+      <label>Scale (STL/OBJ/BREP) <input data-testid="scale-input" type="number" step="any" value={p.scale}
+        style={{ width: 80 }} onChange={(e) => p.setScale(Number(e.target.value))} /></label>
       {busy && <span>Importing…</span>}
       {lastScale && <span>{lastScale}</span>}
       <button data-testid="undo" disabled={!p.canUndo} onClick={() => p.dispatch({ type: "undo" })}>Undo</button>

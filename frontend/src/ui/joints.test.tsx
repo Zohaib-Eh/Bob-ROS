@@ -5,6 +5,7 @@ import type { DetectResponse } from "../api/types";
 import { historyReducer, initialHistory, type History } from "../model/history";
 import { membership, pairKey } from "../model/pairs";
 import { boxBody } from "../model/testBodies";
+import type { Viewer } from "../viewer/Viewer";
 import DetailsPanel from "./DetailsPanel";
 import type { Selection } from "./selection";
 
@@ -26,7 +27,8 @@ const cylindrical: DetectResponse = {
   evidence: { pairs: [{ kind: "cylinder", radius: 0.1 }], candidate_count: 2, tolerance: 1e-4 },
 };
 
-function Harness({ start, initial }: { start: History; initial: Selection }) {
+function Harness({ start, initial, viewer = null, lastPick = null }:
+  { start: History; initial: Selection; viewer?: Viewer | null; lastPick?: { bodyId: string; triangle: number } | null }) {
   const [h, dispatch] = useReducer(historyReducer, start);
   const [selection, setSelection] = useState<Selection>(initial);
   const setPreview = vi.fn();
@@ -34,7 +36,7 @@ function Harness({ start, initial }: { start: History; initial: Selection }) {
   return (
     <>
       <DetailsPanel model={h.present} dispatch={dispatch} selection={selection} setSelection={setSelection}
-        setBanner={vi.fn()} viewer={null} setPreview={setPreview} lastPick={null} />
+        setBanner={vi.fn()} viewer={viewer} setPreview={setPreview} lastPick={lastPick} scale={0.001} />
       <div data-testid="state">{JSON.stringify({ joints: h.present.joints, suggestions: h.present.suggestions })}</div>
     </>
   );
@@ -90,6 +92,38 @@ describe("JointDetails", () => {
     expect(setPreview).toHaveBeenLastCalledWith(expect.objectContaining({ bodyIds: ["peg"] }));
     fireEvent.mouseUp(screen.getByTestId("preview-slider"));
     expect(setPreview).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe("preview off the base", () => {
+  it("moves the child link when the pair isn't connected to the base yet", () => {
+    let h: History = historyReducer(initialHistory(), { type: "import", warnings: [], bodies: [
+      boxBody("base", [10, 10, 10], [14, 14, 14]), boxBody("block", [0, 0, 0], [1, 1, 1]), boxBody("peg", [1, 0, 0], [2, 1, 1])] });
+    const id = (b: string) => h.present.links.find((l) => l.body_ids.includes(b))!.id;
+    expect(h.present.rootLinkId).toBe(id("base"));
+    const [a, b] = [id("block"), id("peg")];
+    h = historyReducer(h, { type: "setSuggestion", suggestion: { key: pairKey(a, b), linkA: a, linkB: b,
+      membership: membership(h.present.links.find((l) => l.id === a)!, h.present.links.find((l) => l.id === b)!),
+      status: "review", result: { ...cylindrical, joint: { ...cylindrical.joint!, type: "continuous", parent_link_id: a, child_link_id: b } } } });
+    render(<Harness start={h} initial={{ kind: "suggestion", key: pairKey(a, b) }} />);
+    fireEvent.change(screen.getByTestId("preview-slider"), { target: { value: "1" } });
+    const setPreview = (globalThis as { __setPreview?: ReturnType<typeof vi.fn> }).__setPreview!;
+    expect(setPreview).toHaveBeenLastCalledWith(expect.objectContaining({ bodyIds: ["peg"] }));
+  });
+});
+
+describe("snap", () => {
+  it("moves the gizmo to the snapped axis, even when the joint had no axis", () => {
+    const hole = { kind: "cylinder" as const, origin: "brep" as const, normal: null, axis: [0, 1, 0] as [number, number, number],
+      center: [1.5, 0.5, 0.5] as [number, number, number], radius: 0.1, residual: 0, triangle_indices: [0] };
+    const { h, key } = setup({ ...cylindrical, joint: { ...cylindrical.joint!, type: "fixed", axis: null } });
+    const peg = h.present.bodies["peg"];
+    const start = { ...h, present: { ...h.present, bodies: { ...h.present.bodies, peg: { ...peg, faces: [hole] } } } };
+    const viewer = { attachGizmo: vi.fn(), detachGizmo: vi.fn(), setGizmoMode: vi.fn() } as unknown as Viewer;
+    render(<Harness start={start} initial={{ kind: "suggestion", key }} viewer={viewer} lastPick={{ bodyId: "peg", triangle: 0 }} />);
+    fireEvent.click(screen.getByTestId("edit"));
+    fireEvent.click(screen.getByTestId("snap-cylinder"));
+    expect(viewer.attachGizmo).toHaveBeenLastCalledWith([1.5, 0.5, 0.5], [0, 1, 0], expect.any(Function));
   });
 });
 

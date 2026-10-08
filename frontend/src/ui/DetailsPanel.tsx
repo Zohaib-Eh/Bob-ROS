@@ -18,6 +18,7 @@ export interface DetailsProps {
   viewer: Viewer | null;
   setPreview: (p: { bodyIds: string[]; matrix: Matrix4 } | null) => void;
   lastPick: { bodyId: string; triangle: number } | null;
+  scale: number;   // import scale, also used for replacement parts
 }
 
 export default function DetailsPanel(props: DetailsProps) {
