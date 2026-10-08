@@ -1,8 +1,8 @@
-export type Shortcut = "undo" | "redo" | "joint" | "group" | "animate" | "focus" | "back";
+export type Shortcut = "undo" | "redo" | "joint" | "group" | "animate" | "focus" | "back" | "rename" | "delete";
 
 type KeyLike = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey"> & { target: EventTarget | null };
 
-const PLAIN: Record<string, Shortcut> = { j: "joint", g: "group", " ": "animate", f: "focus", escape: "back" };
+const PLAIN: Record<string, Shortcut> = { j: "joint", g: "group", " ": "animate", f: "focus", escape: "back", f2: "rename", delete: "delete" };
 
 export function shortcutFor(e: KeyLike): Shortcut | null {
   const k = e.key.toLowerCase();

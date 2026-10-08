@@ -48,6 +48,30 @@ describe("InfoCard", () => {
     expect(state().step).toBe("connect");
     expect(state().jointDraft).toMatchObject({ id: "j", motion: "revolute" });
   });
+  it("a part card renames and deletes the part", () => {
+    setup(() => ({ kind: "bodies", ids: ["arm"] }));
+    const input = screen.getByTestId("info-name-arm");
+    fireEvent.change(input, { target: { value: "Forearm" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(state().links.find((l: { body_ids: string[] }) => l.body_ids.includes("arm")).name).toBe("Forearm");
+    fireEvent.click(screen.getByTestId("info-delete-arm"));
+    expect(state().ignored).toEqual(["arm"]);
+    expect(screen.queryByTestId("infocard")).toBeNull();
+  });
+  it("a link card renames, refuses bad names, and deletes", () => {
+    const { b } = setup(({ b }) => ({ kind: "link", id: b }));
+    const input = screen.getByTestId("info-link-name");
+    fireEvent.change(input, { target: { value: "base" } });
+    expect(screen.getByText(/already has this name/)).toBeTruthy();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(state().links.find((l: { id: string }) => l.id === b).name).toBe("arm");
+    fireEvent.change(input, { target: { value: "elbow" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(state().links.find((l: { id: string }) => l.id === b).name).toBe("elbow");
+    fireEvent.click(screen.getByTestId("info-delete-link"));
+    expect(state().ignored).toEqual(["arm"]);
+  });
+
   it("closes on ×", () => {
     setup(() => ({ kind: "bodies", ids: ["arm"] }));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));

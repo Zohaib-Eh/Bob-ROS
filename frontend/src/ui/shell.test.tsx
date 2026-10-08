@@ -10,6 +10,7 @@ import { emptyModel } from "../model/types";
 import Browser from "./Browser";
 import { markersFor } from "./markers";
 import { routePick } from "./pick";
+import { deleteAction } from "./selection";
 import { shortcutFor } from "./shortcuts";
 import StepPanel from "./steps/StepPanel";
 import Stepper from "./Stepper";
@@ -30,12 +31,25 @@ describe("shortcutFor", () => {
     expect(shortcutFor(ev("f"))).toBe("focus");
     expect(shortcutFor(ev("Escape"))).toBe("back");
     expect(shortcutFor(ev("q"))).toBeNull();
+    expect(shortcutFor(ev("F2"))).toBe("rename");
+    expect(shortcutFor(ev("Delete"))).toBe("delete");
   });
   it("ignores typing in fields except Escape", () => {
     const input = document.createElement("input");
     expect(shortcutFor(ev("j", { target: input }))).toBeNull();
     expect(shortcutFor(ev("z", { ctrlKey: true, target: input }))).toBeNull();
     expect(shortcutFor(ev("Escape", { target: input }))).toBe("back");
+  });
+});
+
+describe("deleteAction", () => {
+  const m = two().present;
+  const lid = (b: string) => m.links.find((l) => l.body_ids.includes(b))!.id;
+  it("deletes selected parts, a link's parts, or a joint", () => {
+    expect(deleteAction(m, { kind: "bodies", ids: ["arm", "base"] })).toEqual({ type: "ignoreBodies", bodyIds: ["arm", "base"] });
+    expect(deleteAction(m, { kind: "link", id: lid("arm") })).toEqual({ type: "ignoreBodies", bodyIds: ["arm"] });
+    expect(deleteAction(m, { kind: "joint", id: "j" })).toEqual({ type: "removeJoint", jointId: "j" });
+    expect(deleteAction(m, null)).toBeNull();
   });
 });
 

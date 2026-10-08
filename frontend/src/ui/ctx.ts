@@ -32,4 +32,6 @@ export interface Ctx {
   autoGrouped: boolean;
   setAutoGrouped: (v: boolean) => void;
   detecting: boolean;
+  /** Part under the mouse in the 3D view. */
+  hovered: string | null;
 }

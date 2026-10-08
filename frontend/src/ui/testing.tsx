@@ -12,8 +12,8 @@ export const imported = (bodies: Body[]): History =>
   historyReducer(initialHistory(), { type: "import", bodies, warnings: [] });
 
 /** Real reducer and real UI state around the component under test. */
-export function Harness({ start, step = "parts", viewer = null, detecting = false, ui }: {
-  start: History; step?: StepId; viewer?: Ctx["viewer"]; detecting?: boolean; ui: (ctx: Ctx) => ReactNode;
+export function Harness({ start, step = "parts", viewer = null, detecting = false, hovered = null, ui }: {
+  start: History; step?: StepId; viewer?: Ctx["viewer"]; detecting?: boolean; hovered?: string | null; ui: (ctx: Ctx) => ReactNode;
 }) {
   const [h, dispatch] = useReducer(historyReducer, start);
   const [s, goTo] = useState<StepId>(step);
@@ -26,7 +26,7 @@ export function Harness({ start, step = "parts", viewer = null, detecting = fals
   const [notify] = useState(() => vi.fn());
   const ctx: Ctx = { model: h.present, dispatch, canUndo: h.past.length > 0, canRedo: h.future.length > 0, undoDepth: h.past.length,
     step: s, goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, viewer, notify, scale,
-    setScale, robotName, setRobotName, autoGrouped, setAutoGrouped, detecting };
+    setScale, robotName, setRobotName, autoGrouped, setAutoGrouped, detecting, hovered };
   return (
     <>
       {ui(ctx)}

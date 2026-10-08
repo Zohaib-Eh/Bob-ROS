@@ -39,6 +39,7 @@ export class Viewer {
   private observer: ResizeObserver;
   private selection: string[] = [];
   private hovered: string | null = null;
+  private listHover: string[] = [];
   private tints: Record<string, number> = {};
   private preview: { ids: string[]; m: Matrix4 | null } = { ids: [], m: null };
   private ignored = new Set<string>();
@@ -110,6 +111,10 @@ export class Viewer {
     for (const b of bodies) {
       const old = this.meshes.get(b.id);
       if (old && old.userData.source === b) continue;
+      if (old && old.userData.source.vertices === b.vertices && old.userData.source.triangles === b.triangles) {
+        old.userData.source = b;   // renamed, same geometry: keep the mesh
+        continue;
+      }
       if (old) { this.scene.remove(old); this.free(old); }
       const { positions, indices } = bodyArrays(b);
       const g = new BufferGeometry();
@@ -169,7 +174,7 @@ export class Viewer {
       mat.opacity = ignored ? 0.15 : 1;
       mat.depthWrite = !ignored;
       const sel = this.selection.includes(id);
-      mat.emissive.setHex(sel ? SELECT_EMISSIVE : id === this.hovered ? HOVER_EMISSIVE : 0x000000);
+      mat.emissive.setHex(sel ? SELECT_EMISSIVE : id === this.hovered || this.listHover.includes(id) ? HOVER_EMISSIVE : 0x000000);
       mat.emissiveIntensity = sel ? 0.45 : 0.25;
     }
     this.requestRender();
@@ -178,6 +183,9 @@ export class Viewer {
   setSelection(bodyIds: string[]) { this.selection = bodyIds; this.applyLooks(); }
 
   setTints(t: Record<string, number>) { this.tints = t; this.applyLooks(); }
+
+  /** Highlight parts hovered in a list outside the 3D view. */
+  setHovered(bodyIds: string[]) { this.listHover = bodyIds; this.applyLooks(); }
 
   setPreview(bodyIds: string[], m: Matrix4 | null) {
     this.preview = { ids: bodyIds, m };

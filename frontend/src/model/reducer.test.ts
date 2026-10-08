@@ -184,3 +184,58 @@ describe("modelReducer", () => {
     expect(modelReducer(s, { type: "renameLink", linkId: "nope", name: "x" })).toBe(s);
   });
 });
+
+describe("part and link editing", () => {
+  it("renameBody renames the part and its untouched single-part link", () => {
+    let s = imported();
+    s = modelReducer(s, { type: "renameBody", bodyId: "arm", name: "upper arm" });
+    expect(s.bodies.arm.name).toBe("upper arm");
+    expect(linkOf(s, "arm").name).toBe("upper_arm");
+  });
+
+  it("renameBody also follows de-duplicated default names like arm_2", () => {
+    let s = modelReducer(imported(), { type: "import", warnings: [], bodies: [boxBody("arm2", [5, 5, 5], [6, 6, 6], { name: "arm" })] });
+    expect(linkOf(s, "arm2").name).toBe("arm_2");
+    s = modelReducer(s, { type: "renameBody", bodyId: "arm2", name: "wrist" });
+    expect(linkOf(s, "arm2").name).toBe("wrist");
+  });
+
+  it("renameBody keeps a link name the user chose, and links of several parts", () => {
+    let s = imported();
+    s = modelReducer(s, { type: "renameLink", linkId: linkOf(s, "arm").id, name: "shoulder" });
+    s = modelReducer(s, { type: "renameBody", bodyId: "arm", name: "Arm v2" });
+    expect(linkOf(s, "arm").name).toBe("shoulder");
+    s = modelReducer(s, { type: "merge", linkIds: [linkOf(s, "big").id, linkOf(s, "screw").id] });
+    s = modelReducer(s, { type: "renameBody", bodyId: "big", name: "Base plate" });
+    expect(linkOf(s, "big").name).toBe("big");
+  });
+
+  it("renameBody keeps the geometry arrays, so the viewer need not rebuild the mesh", () => {
+    const s = imported();
+    const t = modelReducer(s, { type: "renameBody", bodyId: "arm", name: "x" });
+    expect(t.bodies.arm.vertices).toBe(s.bodies.arm.vertices);
+    expect(modelReducer(s, { type: "renameBody", bodyId: "nope", name: "x" })).toBe(s);
+    expect(modelReducer(s, { type: "renameBody", bodyId: "arm", name: "  " })).toBe(s);
+  });
+
+  it("ungroupLink splits a link into one link per part and drops its joints", () => {
+    let s = imported();
+    s = modelReducer(s, { type: "merge", linkIds: [linkOf(s, "big").id, linkOf(s, "screw").id] });
+    const group = linkOf(s, "big").id;
+    s = modelReducer(s, { type: "addJoint", joint: joint("j", group, linkOf(s, "arm").id) });
+    s = modelReducer(s, { type: "ungroupLink", linkId: group });
+    expect(s.links).toHaveLength(3);
+    expect(linkOf(s, "big").id).toBe(group);
+    expect(linkOf(s, "screw").body_ids).toEqual(["screw"]);
+    expect(s.joints).toEqual([]);
+    expectEachBodyPlacedOnce(s);
+    expect(modelReducer(s, { type: "ungroupLink", linkId: linkOf(s, "arm").id })).toBe(s);
+  });
+
+  it("ignoreBodies removes several parts from the robot at once", () => {
+    let s = imported();
+    s = modelReducer(s, { type: "ignoreBodies", bodyIds: ["arm", "screw", "arm", "nope"] });
+    expect(s.ignored).toEqual(["arm", "screw"]);
+    expectEachBodyPlacedOnce(s);
+  });
+});

@@ -11,6 +11,9 @@ export type Action =
   | { type: "mergeSmall"; pairs: { linkId: string; neighbourId: string }[] }
   | { type: "moveBody"; bodyId: string; toLinkId: string }
   | { type: "ignoreBody"; bodyId: string }
+  | { type: "ignoreBodies"; bodyIds: string[] }
+  | { type: "renameBody"; bodyId: string; name: string }
+  | { type: "ungroupLink"; linkId: string }
   | { type: "unignoreBody"; bodyId: string }
   | { type: "renameLink"; linkId: string; name: string }
   | { type: "setRoot"; linkId: string }
@@ -115,6 +118,39 @@ export function modelReducer(s: ModelState, a: Action): ModelState {
     case "ignoreBody": {
       if (!s.bodies[a.bodyId] || s.ignored.includes(a.bodyId)) return s;
       return tidy({ ...s, links: removeBodyFromLinks(s.links, a.bodyId), ignored: [...s.ignored, a.bodyId] });
+    }
+    case "ignoreBodies": {
+      const ids = [...new Set(a.bodyIds)].filter((id) => s.bodies[id] && !s.ignored.includes(id));
+      if (!ids.length) return s;
+      let links = s.links;
+      for (const id of ids) links = removeBodyFromLinks(links, id);
+      return tidy({ ...s, links, ignored: [...s.ignored, ...ids] });
+    }
+    case "renameBody": {
+      const b = s.bodies[a.bodyId];
+      const name = a.name.trim();
+      if (!b || !name || name === b.name) return s;
+      const bodies = { ...s.bodies, [b.id]: { ...b, name } };   // same geometry arrays: no mesh rebuild
+      const link = s.links.find((l) => l.body_ids.length === 1 && l.body_ids[0] === b.id);
+      const base = sanitizeName(b.name);
+      // a single-part link still named after its part follows the part's new name
+      const isDefault = (n: string) => n === base || (n.startsWith(`${base}_`) && /^\d+$/.test(n.slice(base.length + 1)));
+      if (!link || !isDefault(link.name)) {
+        return { ...s, bodies };
+      }
+      const taken = new Set(s.links.filter((l) => l.id !== link.id).map((l) => l.name));
+      const linkName = uniqueName(sanitizeName(name), taken);
+      return { ...s, bodies, links: s.links.map((l) => (l.id === link.id ? { ...l, name: linkName } : l)) };
+    }
+    case "ungroupLink": {
+      const link = s.links.find((l) => l.id === a.linkId);
+      if (!link || link.body_ids.length < 2) return s;
+      const taken = new Set(s.links.map((l) => l.name));
+      const [first, ...rest] = link.body_ids;
+      const links = s.links.flatMap((l) => (l.id === link.id
+        ? [{ ...l, body_ids: [first] }, ...rest.map((id) => newLink(s.bodies[id], taken))] : [l]));
+      const joints = s.joints.filter((j) => j.parent_link_id !== link.id && j.child_link_id !== link.id);
+      return tidy({ ...s, links, joints });
     }
     case "unignoreBody": {
       if (!s.ignored.includes(a.bodyId)) return s;

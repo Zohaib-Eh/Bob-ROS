@@ -15,7 +15,7 @@ import JointTool from "./ui/JointTool";
 import MarkerLayer from "./ui/MarkerLayer";
 import { looseLines, markersFor, type Marker } from "./ui/markers";
 import { routePick } from "./ui/pick";
-import { linksOfSelection, selectedBodies, type Selection } from "./ui/selection";
+import { deleteAction, linksOfSelection, selectedBodies, type Selection } from "./ui/selection";
 import { shortcutFor } from "./ui/shortcuts";
 import StepPanel from "./ui/steps/StepPanel";
 import Stepper from "./ui/Stepper";
@@ -36,6 +36,7 @@ export default function App() {
   const [scale, setScale] = useState(0.001);
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [autoGrouped, setAutoGrouped] = useState(false);
+  const [hovered, setHoveredBody] = useState<string | null>(null);
 
   const runner = useRef<DetectionRunner>();
   if (!runner.current) {
@@ -67,15 +68,13 @@ export default function App() {
 
   useEffect(() => {
     if (!viewer) return;
-    if (pick === "origin") {
-      viewer.onHover((hit) => {
-        const b = hit ? live.current.model.bodies[hit.bodyId] : undefined;
-        viewer.setSnap(b && hit ? snapAt(b, hit.triangle) : null);
-      });
-    } else {
-      viewer.onHover(null);
-      viewer.setSnap(null);
-    }
+    viewer.onHover((hit) => {
+      setHoveredBody(hit?.bodyId ?? null);   // React skips the render when the id is unchanged
+      if (live.current.pick !== "origin") return;
+      const b = hit ? live.current.model.bodies[hit.bodyId] : undefined;
+      viewer.setSnap(b && hit ? snapAt(b, hit.triangle) : null);
+    });
+    if (pick !== "origin") viewer.setSnap(null);
   }, [viewer, pick]);
 
   const drafting = jointDraft !== null;
@@ -101,6 +100,11 @@ export default function App() {
         if (ids.length > 1) dispatch({ type: "merge", linkIds: ids });
       } else if (s === "focus") cur.viewer?.focus(selectedBodies(cur.model, cur.selection));
       else if (s === "animate") window.dispatchEvent(new Event("cad:animate"));
+      else if (s === "rename") window.dispatchEvent(new Event("cad:rename"));
+      else if (s === "delete") {
+        const a = deleteAction(cur.model, cur.selection);
+        if (a) { dispatch(a); setSelection(null); }
+      }
       else if (cur.pick !== "select") setPick("select");
       else if (cur.jointDraft) { setJointDraft(null); cur.viewer?.setPreview([], null); }
       else setSelection(null);
@@ -128,7 +132,7 @@ export default function App() {
 
   const ctx: Ctx = { model, dispatch, canUndo: history.past.length > 0, canRedo: history.future.length > 0, undoDepth: history.past.length, step,
     goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, viewer, notify, scale, setScale,
-    robotName, setRobotName, autoGrouped, setAutoGrouped, detecting: progress.running };
+    robotName, setRobotName, autoGrouped, setAutoGrouped, detecting: progress.running, hovered };
 
   return (
     <div className="app">

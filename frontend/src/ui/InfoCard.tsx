@@ -1,5 +1,5 @@
-import { X } from "lucide-react";
-import { useEffect, useReducer } from "react";
+import { Trash2, Ungroup, X } from "lucide-react";
+import { useEffect, useReducer, useState } from "react";
 import type { JointType, Vec3 } from "../api/types";
 import { bodyBox, linkBox, type Box } from "../model/geometry";
 import { draftFromJoint } from "../model/jointDraft";
@@ -10,6 +10,7 @@ import type { Term } from "./glossary";
 import { JointIcon } from "./icons";
 import Info from "./Info";
 import type { Selection } from "./selection";
+import { nameProblem } from "./steps/GroupStep";
 import { useLinkMass } from "./useLinkMass";
 
 const STATUS_TEXT = { ok: "Shape OK", repaired: "Shape repaired automatically", approximate: "Approximate shape", failed: "Failed to import" } as const;
@@ -56,14 +57,33 @@ export default function InfoCard({ ctx }: { ctx: Ctx }) {
   );
 }
 
+/** Inline name editor: Enter or blur saves, Escape reverts; a problem blocks saving and says why. */
+function NameField({ value, testid, problem, onCommit }: {
+  value: string; testid: string; problem: (v: string) => string | null; onCommit: (v: string) => void;
+}) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  const err = problem(v);
+  const save = () => { if (!err && v !== value) onCommit(v); else setV(value); };
+  return (
+    <>
+      <input className={`field title-field${err ? " invalid" : ""}`} data-testid={testid} value={v} aria-label="Name"
+        onChange={(e) => setV(e.target.value)} onBlur={save}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { e.stopPropagation(); setV(value); } }} />
+      {err && <div className="error-text">{err}</div>}
+    </>
+  );
+}
+
 function BodyInfo({ ctx, bodyId }: { ctx: Ctx; bodyId: string }) {
-  const { model, dispatch, goTo } = ctx;
+  const { model, dispatch, goTo, setSelection } = ctx;
   const b = model.bodies[bodyId];
   const link = model.links.find((l) => l.body_ids.includes(bodyId));
   const box = bodyBox(b)!;
   return (
     <>
-      <h3 title={b.name}>{shortName(b.name, 28)}</h3>
+      <NameField value={b.name} testid={`info-name-${bodyId}`} problem={(v) => (v.trim() ? null : "Give the part a name.")}
+        onCommit={(v) => dispatch({ type: "renameBody", bodyId, name: v })} />
       <div className="row"><span className={`dot ${b.status}`} />{STATUS_TEXT[b.status]}
         {b.status === "approximate" && <Info term="approximate" />}</div>
       <div className="muted small">Size {fmtLen(box.max[0] - box.min[0])} × {fmtLen(box.max[1] - box.min[1])} × {fmtLen(box.max[2] - box.min[2])}</div>
@@ -77,26 +97,36 @@ function BodyInfo({ ctx, bodyId }: { ctx: Ctx; bodyId: string }) {
       )}
       <div className="row" style={{ marginTop: 6 }}>
         {(b.status === "approximate" || b.warnings.length > 0) && <button className="btn" onClick={() => goTo("parts")}>Fix…</button>}
-        <button className="btn" data-testid={`info-ignore-${bodyId}`} onClick={() => dispatch({ type: "ignoreBody", bodyId })}>Ignore</button>
+        <button className="btn" data-testid={`info-delete-${bodyId}`} title="Delete from the robot (Delete) — recoverable"
+          onClick={() => { dispatch({ type: "ignoreBodies", bodyIds: [bodyId] }); setSelection(null); }}><Trash2 size={14} />Delete</button>
       </div>
     </>
   );
 }
 
 function LinkInfo({ ctx, linkId }: { ctx: Ctx; linkId: string }) {
-  const { model, dispatch } = ctx;
+  const { model, dispatch, setSelection } = ctx;
   const link = model.links.find((l) => l.id === linkId)!;
   const { mass, error } = useLinkMass(link, model.bodies, model.links);
   const joints = model.joints.filter((j) => j.parent_link_id === linkId || j.child_link_id === linkId).length;
   return (
     <>
-      <h3 title={link.name}>{shortName(link.name, 28)} <Info term="link" /></h3>
+      <div className="row"><NameField value={link.name} testid="info-link-name" problem={(v) => nameProblem(v, linkId, model)}
+        onCommit={(v) => dispatch({ type: "renameLink", linkId, name: v })} /><Info term="name" /></div>
       <div className="muted small">{link.body_ids.length} part(s) · {joints} joint(s)</div>
       <div className="small">{error ? <span className="error-text">{error}</span> : mass ? `Mass ${mass.mass_kg.toFixed(3)} kg` : "Computing mass…"}</div>
       <div className="row" style={{ marginTop: 6 }}>
         {link.id === model.rootLinkId
           ? <span className="muted small">This is the base <Info term="base" /></span>
           : <button className="btn" data-testid="make-base" onClick={() => dispatch({ type: "setRoot", linkId })}>Make base</button>}
+      </div>
+      <div className="row" style={{ marginTop: 6 }}>
+        {link.body_ids.length > 1 && (
+          <button className="btn" data-testid="info-ungroup" title="One link per part"
+            onClick={() => { dispatch({ type: "ungroupLink", linkId }); setSelection(null); }}><Ungroup size={14} />Ungroup</button>
+        )}
+        <button className="btn" data-testid="info-delete-link" title="Delete the link's parts from the robot — recoverable"
+          onClick={() => { dispatch({ type: "ignoreBodies", bodyIds: link.body_ids }); setSelection(null); }}><Trash2 size={14} />Delete</button>
       </div>
     </>
   );
