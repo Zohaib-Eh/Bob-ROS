@@ -253,20 +253,32 @@ def test_detect_joints_far_apart_bodies_returns_null(box_step_path):
     box = import_step(box_step_path)[0].model_dump()
     r = _detect(box, _shifted(box, 100.0))
     assert r.status_code == 200
-    assert r.json() is None
+    assert r.json() == {"joint": None, "reason": "no_overlap", "evidence": None}
 
 
-def test_detect_joints_touching_bodies_returns_joint(box_step_path):
+def test_detect_joints_touching_bodies_returns_joint_with_evidence(box_step_path):
     box = import_step(box_step_path)[0].model_dump()  # 1 x 2 x 3, x in [0, 1]
     r = _detect(box, _shifted(box, 1.0))
     assert r.status_code == 200
-    assert r.json()["type"] == "planar"
+    out = r.json()
+    assert out["joint"]["type"] == "planar" and out["reason"] is None
+    assert out["evidence"]["candidate_count"] == 1
+    assert out["evidence"]["pairs"] == [{"kind": "plane", "radius": None}]
+    assert out["evidence"]["tolerance"] == 1e-4
+
+
+def test_detect_joints_overlapping_boxes_without_contact_faces_is_null(box_step_path):
+    """Boxes overlap (bbox) but no faces mate: an offset box that overlaps in volume."""
+    box = import_step(box_step_path)[0].model_dump()
+    r = _detect(box, _shifted(box, 0.5))
+    assert r.status_code == 200
+    assert r.json() == {"joint": None, "reason": "no_contact_faces", "evidence": None}
 
 
 def _confirm_and_export(block: dict, peg: dict) -> zipfile.ZipFile:
     r = _detect(block, peg)
     assert r.status_code == 200
-    joint = r.json()
+    joint = r.json()["joint"]
     assert joint["type"] == "cylindrical"
     joint.update(type="continuous", source="confirmed")  # user confirms a URDF type
     links = [{"id": lid, "name": lid, "body_ids": [b["id"]], "density_kg_m3": 1000.0}
