@@ -14,6 +14,17 @@ def _check_direction(v: Vec3 | None, what: str) -> None:
         raise ValueError(f"{what} must have nonzero length")
 
 
+Fix = Literal["set_mass", "replace", "ignore", "reexport"]
+Status = Literal["ok", "repaired", "approximate", "failed"]
+STATUS_ORDER = {"ok": 0, "repaired": 1, "approximate": 2, "failed": 3}
+
+
+class PartWarning(_Model):
+    code: str
+    message: str
+    fixes: list[Fix] = []
+
+
 class Face(_Model):
     kind: Literal["plane", "cylinder", "sphere", "unclassified"]
     origin: Literal["brep", "segmented"]
@@ -43,6 +54,8 @@ class Body(_Model):
     vertices: list[Vec3]
     triangles: list[tuple[int, int, int]]
     faces: list[Face] = []
+    status: Status = "ok"
+    warnings: list[PartWarning] = []
 
     @model_validator(mode="after")
     def _check_indices(self):
@@ -62,6 +75,14 @@ class Link(_Model):
     mass_kg: float | None = None
     center_of_mass: Vec3 | None = None
     inertia: list[float] | None = None  # [ixx, iyy, izz, ixy, ixz, iyz]
+    mass_override_kg: float | None = None
+    accept_approximate_mass: bool = False
+
+    @model_validator(mode="after")
+    def _check_override(self):
+        if self.mass_override_kg is not None and not self.mass_override_kg > 0:
+            raise ValueError("mass_override_kg must be > 0")
+        return self
 
 
 class Joint(_Model):

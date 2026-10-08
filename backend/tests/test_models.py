@@ -112,3 +112,42 @@ def test_bad_joint_rejected(kw):
 def test_link_non_finite_density_rejected():
     with pytest.raises(ValidationError):
         Link(id="l", name="l", body_ids=[], density_kg_m3=float("inf"))
+
+
+import math
+from app.models import PartWarning, STATUS_ORDER
+
+
+def test_body_defaults_to_ok_with_no_warnings():
+    b = Body(id="b", name="n", vertices=[], triangles=[])
+    assert b.status == "ok"
+    assert b.warnings == []
+
+
+def test_body_carries_status_and_warnings():
+    w = PartWarning(code="open_geometry", message="p: 4 open edges", fixes=["set_mass", "replace", "ignore"])
+    b = Body(id="b", name="p", vertices=[], triangles=[], status="approximate", warnings=[w])
+    assert b.warnings[0].fixes == ["set_mass", "replace", "ignore"]
+
+
+def test_unknown_status_or_fix_rejected():
+    with pytest.raises(ValidationError):
+        Body(id="b", name="n", vertices=[], triangles=[], status="broken")
+    with pytest.raises(ValidationError):
+        PartWarning(code="x", message="m", fixes=["delete_everything"])
+
+
+def test_link_mass_override_defaults():
+    l = Link(id="l", name="l", body_ids=[], density_kg_m3=1000.0)
+    assert l.mass_override_kg is None
+    assert l.accept_approximate_mass is False
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, math.nan, math.inf])
+def test_link_mass_override_must_be_finite_positive(bad):
+    with pytest.raises(ValidationError):
+        Link(id="l", name="l", body_ids=[], density_kg_m3=1000.0, mass_override_kg=bad)
+
+
+def test_status_order_is_worst_last():
+    assert sorted(STATUS_ORDER, key=STATUS_ORDER.get) == ["ok", "repaired", "approximate", "failed"]
