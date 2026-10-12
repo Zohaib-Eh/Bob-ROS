@@ -7,7 +7,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Body, Joint, Vec3 } from "../api/types";
 import { bodyArrays, isClick } from "./meshData";
 import {
-  angleAroundAxis, buildGlyph, buildLooseLine, buildSnap, closestParamOnAxis, disposeTree, rayPlaneHit,
+  angleAroundAxis, buildGlyph, buildLooseLine, buildSnap, closestParamOnAxis, disposeTree, rayPlaneHit, unwrapStep,
   type JointGlyph,
 } from "./overlays";
 import { fitDistance, viewDirection, type ViewName } from "./viewMath";
@@ -15,11 +15,13 @@ import { fitDistance, viewDirection, type ViewName } from "./viewMath";
 export type Hit = { bodyId: string; triangle: number } | null;
 type PickCb = (hit: Hit, additive: boolean) => void;
 type LimitCb = (which: "lower" | "upper", value: number) => void;
+export type DriveSpec = { joint: Joint; bodyIds: string[]; value: number; onChange: (v: number) => void };
 
 export const PART_COLOR = 0xb9bdc3;
 const SELECT_EMISSIVE = 0x1d4ed8;
 const HOVER_EMISSIVE = 0x475569;
 const APPROX_COLOR = 0xd97706;
+const WARNING_COLOR = 0xdc2626;
 
 export class Viewer {
   private renderer: WebGLRenderer;
@@ -52,6 +54,9 @@ export class Viewer {
   private approximate: string[] = [];
   private limitCb: LimitCb | null = null;
   private dragging: { which: "lower" | "upper"; joint: Joint } | null = null;
+  private drive: DriveSpec | null = null;
+  private driving: { last: number } | null = null;
+  private warning: string[] = [];
 
   constructor(private container: HTMLElement) {
     this.renderer = new WebGLRenderer({ antialias: true, alpha: true });
@@ -168,7 +173,7 @@ export class Viewer {
   private applyLooks() {
     for (const [id, m] of this.meshes) {
       const mat = m.material as MeshStandardMaterial;
-      mat.color.setHex(this.tints[id] ?? PART_COLOR);
+      mat.color.setHex(this.warning.includes(id) ? WARNING_COLOR : this.tints[id] ?? PART_COLOR);
       const ignored = this.ignored.has(id);
       mat.transparent = ignored;
       mat.opacity = ignored ? 0.15 : 1;
@@ -220,6 +225,23 @@ export class Viewer {
   setSnap(s: { origin: Vec3; axis: Vec3 } | null) { this.snap = s; this.rebuildOverlay(); }
   onLimitDrag(cb: LimitCb | null) { this.limitCb = cb; }
 
+  onDrive(d: DriveSpec | null) {
+    this.drive = d;
+    if (!d && this.driving) { this.driving = null; this.controls.enabled = true; }
+  }
+
+  setWarning(bodyIds: string[]) { this.warning = bodyIds; this.applyLooks(); }
+
+  /** The pointer's position along the joint: angle around the axis, or distance along it. */
+  private jointParam(e: PointerEvent, j: Joint): number | null {
+    if (!j.axis) return null;
+    const r = this.ray(e).ray;
+    const ro = r.origin.toArray() as Vec3, rd = r.direction.toArray() as Vec3;
+    if (j.type === "prismatic") return closestParamOnAxis(ro, rd, j.origin_xyz, j.axis);
+    const p = rayPlaneHit(ro, rd, j.origin_xyz, j.axis);
+    return p ? angleAroundAxis(p, j.origin_xyz, j.axis) : null;
+  }
+
   private rebuildOverlay() {
     disposeTree(this.overlay);
     this.overlay.clear();
@@ -236,16 +258,8 @@ export class Viewer {
   }
 
   private drag(e: PointerEvent) {
-    const { which, joint: j } = this.dragging!;
-    if (!j.axis) return;
-    const r = this.ray(e).ray;
-    const ro = r.origin.toArray() as Vec3, rd = r.direction.toArray() as Vec3;
-    let value: number | null = null;
-    if (j.type === "prismatic") value = closestParamOnAxis(ro, rd, j.origin_xyz, j.axis);
-    else {
-      const p = rayPlaneHit(ro, rd, j.origin_xyz, j.axis);
-      if (p) value = angleAroundAxis(p, j.origin_xyz, j.axis);
-    }
+    const { which, joint } = this.dragging!;
+    const value = this.jointParam(e, joint);
     if (value !== null) this.limitCb?.(which, value);
   }
 
@@ -318,25 +332,42 @@ export class Viewer {
   private onDown = (e: PointerEvent) => {
     this.down = { x: e.clientX, y: e.clientY };
     const glyph = this.glyphs.find((g) => g.state === "active");
-    if (!this.limitCb || !glyph) return;
-    const handles: Object3D[] = [];
-    this.overlay.traverse((c) => { if (c.userData.handle) handles.push(c); });
-    const h = this.ray(e).intersectObjects(handles, false)[0];
-    if (h) {
-      this.dragging = { which: h.object.userData.handle, joint: glyph.joint };
-      this.controls.enabled = false;
+    if (this.limitCb && glyph) {
+      const handles: Object3D[] = [];
+      this.overlay.traverse((c) => { if (c.userData.handle) handles.push(c); });
+      const h = this.ray(e).intersectObjects(handles, false)[0];
+      if (h) {
+        this.dragging = { which: h.object.userData.handle, joint: glyph.joint };
+        this.controls.enabled = false;
+        return;
+      }
+    }
+    if (this.drive) {
+      const hit = this.hitBody(this.ray(e));
+      const p = hit && this.drive.bodyIds.includes(hit.bodyId) ? this.jointParam(e, this.drive.joint) : null;
+      if (p !== null) { this.driving = { last: p }; this.controls.enabled = false; }
     }
   };
 
   private onMove = (e: PointerEvent) => {
     if (this.dragging) { this.drag(e); return; }
+    if (this.driving && this.drive) {
+      const p = this.jointParam(e, this.drive.joint);
+      if (p !== null) {
+        const step = this.drive.joint.type === "prismatic" ? p - this.driving.last : unwrapStep(this.driving.last, p);
+        this.driving.last = p;
+        this.drive.value += step;
+        this.drive.onChange(this.drive.value);
+      }
+      return;
+    }
     if (this.hoverCb && !this.down) this.pendingHover = e;
   };
 
   private onUp = (e: PointerEvent) => {
     const down = this.down;
     this.down = null;
-    if (this.dragging) { this.dragging = null; this.controls.enabled = true; return; }
+    if (this.dragging || this.driving) { this.dragging = null; this.driving = null; this.controls.enabled = true; return; }
     if (!down || !isClick(down, { x: e.clientX, y: e.clientY })) return;
     this.pickCb(this.hitBody(this.ray(e)), e.shiftKey);
   };

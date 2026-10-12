@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, model_validator
 
 from app.importers.placement import combine_bodies
@@ -9,6 +9,7 @@ from app.joints.face_matching import (
 )
 from app.joints.ipv_img import classify_joint
 from app.models import Body, Joint
+from app.validate.sweep import sweep_limits
 
 router = APIRouter()
 
@@ -65,3 +66,43 @@ def detect_joints(request: DetectJointsRequest) -> DetectJointsResponse:
         candidate_count=len(pairs), tolerance=tol,
     )
     return DetectJointsResponse(joint=joint, reason=None, evidence=evidence)
+
+
+class SweepJoint(BaseModel):
+    type: Literal["revolute", "prismatic"]
+    origin_xyz: tuple[float, float, float]
+    axis: tuple[float, float, float]
+
+
+class SweepObstacle(BaseModel):
+    link_id: str
+    bodies: list[Body]
+
+
+class SweepRequest(BaseModel):
+    joint: SweepJoint
+    moving: list[Body]
+    obstacles: list[SweepObstacle] = []
+
+
+class SweepBlockers(BaseModel):
+    lower: str | None
+    upper: str | None
+
+
+class SweepResponse(BaseModel):
+    lower: float | None
+    upper: float | None
+    free: bool
+    blocked_by: SweepBlockers
+    at_rest_overlap: list[str]
+
+
+@router.post("/sweep-limits", response_model=SweepResponse)
+def sweep_limits_route(request: SweepRequest) -> SweepResponse:
+    try:
+        result = sweep_limits(request.joint.type, request.joint.origin_xyz, request.joint.axis,
+                              request.moving, [(o.link_id, o.bodies) for o in request.obstacles])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return SweepResponse(**result)
