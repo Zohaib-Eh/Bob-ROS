@@ -52,3 +52,21 @@ def test_fk_matches_the_exporters_world_frames(tmp_path):
     T = fk(c, [math.pi / 2, 0.3])
     assert T[:3, 3] == pytest.approx([0, 0.5, 0.2])
     assert T[:3, :3] == pytest.approx(_rz(math.pi / 2) @ Rotation.from_euler("y", 0.3).as_matrix())
+
+
+
+def test_six_axis_helper_has_an_exact_spherical_wrist(tmp_path):
+    """Joints 4-6 must meet at one point at any pose, or EAIK has no closed form."""
+    from app.ros.fk import segment_poses
+    from tests.ros_helpers import six_axis_zip
+    d = unzip(six_axis_zip(tmp_path), tmp_path / "x")
+    c = parse_chain((d / "six" / "urdf" / "six.urdf").read_text())
+    seg = segment_poses(c, [0.3, -0.2, 0.4, 0.5, -0.6, 0.7])
+    lines = []
+    for i in (3, 4, 5):
+        T = seg[i] @ c.joints[i].origin          # joint i's frame in the base frame
+        lines.append((T[:3, 3], T[:3, :3] @ c.joints[i].axis))
+    for (p, a), (r, b) in [(lines[0], lines[1]), (lines[1], lines[2]), (lines[0], lines[2])]:
+        n = np.cross(a, b)
+        gap = abs((r - p) @ n) / np.linalg.norm(n) if np.linalg.norm(n) > 1e-9 else np.linalg.norm(np.cross(r - p, a))
+        assert gap < 1e-9
