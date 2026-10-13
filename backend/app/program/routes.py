@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
 
-from app.program import agent, conversations, session
+from app.program import agent, conversations, files, session
 from app.routes.export_routes import ExportRequest
 
 router = APIRouter(prefix="/program")
@@ -143,3 +143,69 @@ def delete_conversation(cid: str) -> dict:
     except KeyError:
         raise HTTPException(404, "No such conversation.")
     return {"deleted": cid}
+
+
+class SaveFile(BaseModel):
+    path: str
+    content: str
+    conversation: str | None = None
+
+
+class RunFile(BaseModel):
+    path: str
+    conversation: str | None = None
+
+
+def _robot() -> str:
+    _src()
+    return session.current()["robot"]
+
+
+@router.get("/files")
+def list_files() -> list:
+    return files.tree(_src(), _robot())
+
+
+@router.get("/files/content")
+def read_file(path: str) -> dict:
+    src, robot = _src(), _robot()
+    try:
+        return {"path": path, "content": files.read(src, path), "editable": files.editable(robot, path)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError:
+        raise HTTPException(404, "No such file.")
+
+
+@router.put("/files/content")
+def save_file(req: SaveFile) -> dict:
+    src, robot = _src(), _robot()
+    try:
+        files.write(src, robot, req.path, req.content)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(400, str(exc))
+    if req.conversation:
+        _, conv = _conv(req.conversation)
+        if req.path not in conv["edited"]:
+            conv["edited"].append(req.path)
+        conversations.save(src, conv)
+    return {"saved": req.path}
+
+
+@router.post("/files/run")
+def run_file(req: RunFile) -> dict:
+    src, robot = _src(), _robot()
+    try:
+        files.safe(src, req.path)
+        if not files.editable(robot, req.path):
+            raise ValueError(f"Only {robot}_tasks/programs/*.py can be run.")
+        result = session.run_program(req.path.split("/", 1)[1])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except session.SessionError as exc:
+        raise HTTPException(503, str(exc))
+    if req.conversation:
+        _, conv = _conv(req.conversation)
+        conv["messages"].append({"role": "run", "path": req.path, **result})
+        conversations.save(src, conv)
+    return result
