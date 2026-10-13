@@ -13,6 +13,11 @@ trap 'kill $LAUNCH 2>/dev/null || true; wait $LAUNCH 2>/dev/null || true' EXIT
 status=0
 python3 /check/check_ros.py "$ROBOT" || status=1
 python3 /check/check_ik.py "$ROBOT" || status=1
+for p in /check/programs/*.py; do
+  out=$(cd /ws/src/${ROBOT}_tasks && PYTHONPATH=/ws/src/${ROBOT}_program:$PYTHONPATH timeout 180 python3 -u -m runner "$p" 2>&1) || true
+  if echo "$out" | grep -q "^RESULT: ok"; then echo "PASS robot.py $(basename "$p")"
+  else echo "FAIL robot.py $(basename "$p")"; echo "$out" | tail -n 15; status=1; fi
+done
 if [ "$status" -ne 0 ]; then
   echo "--- last launch log lines ---"
   tail -n 60 /tmp/launch.log

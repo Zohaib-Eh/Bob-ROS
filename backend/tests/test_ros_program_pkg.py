@@ -76,3 +76,15 @@ def test_run_task_says_when_the_session_is_down(ws, tmp_path):
     (ws / "bot_tasks" / "programs" / "task_001.py").write_text("pass")
     r, calls = _run_task(ws, tmp_path, "programs/task_001.py", running="false")
     assert "RESULT: failed: the ROS session is not running" in r.stdout and "docker exec" not in calls
+
+
+def test_generated_library_compiles_and_names_the_robot(ws):
+    for name in ("robot.py", "runner.py"):
+        src = (ws / "bot_program" / name).read_text()
+        compile(src, name, "exec")
+    lib = (ws / "bot_program" / "robot.py").read_text()
+    assert 'ROBOT = "bot"' in lib
+    for api in ("def add_box", "def add_cylinder", "def move_to", "def move_line", "def move_joints",
+                "def home", "def attach", "def detach", "def solutions", "def tool_pose", "def reset",
+                "class Unreachable", "class Collision", "class PlanningFailed", "class UnknownObject"):
+        assert api in lib, api
