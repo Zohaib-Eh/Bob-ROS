@@ -303,3 +303,27 @@ def test_empty_step_product_becomes_failed_body(tmp_path):
     assert bodies[1].status == "failed"
     assert bodies[1].warnings[0].code == "degenerate"
     assert bodies[1].warnings[0].fixes == ["replace", "ignore"]
+
+
+def _plane_with_normal(body, n):
+    return next(f for f in body.faces if f.kind == "plane" and np.allclose(f.normal, n, atol=1e-9))
+
+
+def test_plane_face_centre_is_its_hole_centre(tmp_path):
+    """A plate's top face around a through-hole: the joint axis passes through the hole, not the
+    plane's parametric origin (a corner of the plate)."""
+    from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCC.Core.gp import gp_Ax2, gp_Dir
+    from tests.conftest import _write_step
+    plate = BRepPrimAPI_MakeBox(0.2, 0.2, 0.05).Shape()
+    hole = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0.13, 0.07, -0.1), gp_Dir(0, 0, 1)), 0.03, 0.3).Shape()
+    path = str(tmp_path / "plate.step")
+    _write_step(BRepAlgoAPI_Cut(plate, hole).Shape(), path)
+    top = _plane_with_normal(import_step(path)[0], (0, 0, 1))
+    assert top.center == pytest.approx((0.13, 0.07, 0.05), abs=1e-6)
+
+
+def test_plane_face_without_circles_is_centred_on_its_area(box_step_path):
+    side = _plane_with_normal(import_step(box_step_path)[0], (1, 0, 0))   # 1 x 2 x 3 box
+    assert side.center == pytest.approx((1.0, 1.0, 1.5), abs=1e-6)
