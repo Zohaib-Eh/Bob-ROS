@@ -144,3 +144,21 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .limit-rows { margin: 8px 0 0; padding-left: 16px; display: grid; gap: 4px; }
 .limit-rows li.ok b { color: var(--success); }
 .limit-rows .btn { margin-left: 8px; }
+
+.program-mode { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--chrome); }
+.program-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.program-bar .spacer { flex: 1; }
+.program-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.program-bar .dot.ready { background: var(--success); } .program-bar .dot.starting { background: var(--warning); }
+.program-bar .dot.failed { background: var(--danger); }
+.program-error { margin: 4px 12px; }
+.program-columns { flex: 1; min-height: 0; display: grid; grid-template-columns: auto minmax(320px, auto) 1fr; }
+.conversations { width: 220px; min-width: 160px; max-width: 360px; resize: horizontal; overflow: auto; border-right: 1px solid var(--border); padding: 8px; }
+.conversations ul { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 2px; }
+.conversations li { display: flex; align-items: center; gap: 4px; border-radius: 6px; }
+.conversations li.active { background: var(--accent-soft); }
+.conversations li.broken .conv-title { color: var(--danger); }
+.conversations .conv-title { flex: 1; text-align: left; background: none; border: 0; padding: 6px; color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-column { width: 440px; min-width: 320px; max-width: 70vw; resize: horizontal; overflow: hidden; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.workspace-column { min-width: 0; display: flex; flex-direction: column; }
+.viewer-pane { position: relative; flex: 1; min-height: 0; }

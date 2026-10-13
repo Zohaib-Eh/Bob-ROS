@@ -14,6 +14,7 @@ import InfoCard from "./ui/InfoCard";
 import JointTool from "./ui/JointTool";
 import MarkerLayer from "./ui/MarkerLayer";
 import { looseLines, markersFor, type Marker } from "./ui/markers";
+import ProgramMode from "./ui/program/ProgramMode";
 import { routePick } from "./ui/pick";
 import { deleteAction, linksOfSelection, selectedBodies, type Selection } from "./ui/selection";
 import { shortcutFor } from "./ui/shortcuts";
@@ -133,6 +134,18 @@ export default function App() {
   const ctx: Ctx = { model, dispatch, canUndo: history.past.length > 0, canRedo: history.future.length > 0, undoDepth: history.past.length, step,
     goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, viewer, notify, scale, setScale,
     robotName, setRobotName, autoGrouped, setAutoGrouped, detecting: progress.running, hovered };
+
+  if (step === "program") {
+    return (
+      <ProgramMode ctx={ctx} preview={(
+        <div className="viewer-pane">
+          <ViewerPane bodies={bodies} ignored={model.ignored} selected={selected} tints={tints}
+            approximate={approximate} glyphs={glyphs} loose={loose} onPick={onPick} onViewer={setViewer} />
+          <ViewCube viewer={viewer} />
+        </div>
+      )} />
+    );
+  }
 
   return (
     <div className="app">
