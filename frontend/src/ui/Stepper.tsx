@@ -23,7 +23,7 @@ export function stepBadges(ctx: Pick<Ctx, "model" | "robotName">): Record<StepId
     parts: partProblems(m).filter((p) => p.kind !== "warning").length,
     group: checks.find((c) => c.id === "names")!.linkIds.length,
     connect: m.links.filter((l) => !depth.has(l.id)).length,
-    export: checks.filter((c) => !c.ok).length,
+    export: checks.filter((c) => !c.ok && !c.warning).length,
     program: 0,
   };
 }

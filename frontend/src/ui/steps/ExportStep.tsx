@@ -1,4 +1,4 @@
-import { Check, Download, Play, X } from "lucide-react";
+import { AlertTriangle, Check, Download, Play, X } from "lucide-react";
 import { useState } from "react";
 import type { Joint } from "../../api/types";
 import { exportRobot } from "../../api/client";
@@ -34,7 +34,7 @@ export default function ExportStep({ ctx }: { ctx: Ctx }) {
   const [server, setServer] = useState<string[]>([]);
   const items = exportChecklist(model, robotName);
   const req = buildExportRequest(model);
-  const blocked = items.find((i) => !i.ok);
+  const blocked = items.find((i) => !i.ok && !i.warning);
   const meshes = model.links.filter((l) => l.body_ids.length > 0).length;
   const linkName = (id: string) => model.links.find((l) => l.id === id)?.name ?? id;
 
@@ -88,8 +88,8 @@ export default function ExportStep({ ctx }: { ctx: Ctx }) {
       <ul className="checklist">
         {items.map((i) => (
           <li key={i.id}>
-            <button className={`check ${i.ok ? "ok" : "bad"}`} data-testid={`check-${i.id}`} disabled={i.ok} onClick={() => open(i)}>
-              {i.ok ? <Check size={14} /> : <X size={14} />}
+            <button className={`check ${i.ok ? "ok" : i.warning ? "warn" : "bad"}`} data-testid={`check-${i.id}`} disabled={i.ok} onClick={() => open(i)}>
+              {i.ok ? <Check size={14} /> : i.warning ? <AlertTriangle size={14} /> : <X size={14} />}
               <span><span>{i.label}</span>{!i.ok && i.detail && <span className="muted small block">{i.detail}</span>}</span>
             </button>
           </li>

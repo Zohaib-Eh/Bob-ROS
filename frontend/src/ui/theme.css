@@ -124,6 +124,7 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .check { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .check.ok { cursor: default; } .check.ok svg { color: var(--success); }
 .check.bad { border-left: 3px solid var(--danger); } .check.bad svg { color: var(--danger); }
+.check.warn { border-left: 3px solid var(--warning); } .check.warn svg { color: var(--warning); }
 .block { display: block; }
 .motion-cell { display: flex; align-items: center; gap: 2px; }
 .motion-cell .btn { flex: 1; }
@@ -139,3 +140,7 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .drive-label { position: absolute; z-index: 15; transform: translate(-50%, calc(-100% - 10px)); padding: 2px 8px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); font: 600 12px var(--font); white-space: nowrap; pointer-events: none; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.limit-rows { margin: 8px 0 0; padding-left: 16px; display: grid; gap: 4px; }
+.limit-rows li.ok b { color: var(--success); }
+.limit-rows .btn { margin-left: 8px; }
