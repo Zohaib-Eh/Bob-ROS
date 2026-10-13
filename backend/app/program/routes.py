@@ -156,19 +156,25 @@ class RunFile(BaseModel):
     conversation: str | None = None
 
 
-def _robot() -> str:
-    _src()
-    return session.current()["robot"]
+def _ws() -> tuple[Path, str]:
+    try:
+        cur = session.current()
+    except session.SessionError as exc:
+        raise HTTPException(503, str(exc))
+    if not cur:
+        raise HTTPException(409, "Start the ROS session first.")
+    return Path(cur["src"]), cur["robot"]
 
 
 @router.get("/files")
 def list_files() -> list:
-    return files.tree(_src(), _robot())
+    src, robot = _ws()
+    return files.tree(src, robot)
 
 
 @router.get("/files/content")
 def read_file(path: str) -> dict:
-    src, robot = _src(), _robot()
+    src, robot = _ws()
     try:
         return {"path": path, "content": files.read(src, path), "editable": files.editable(robot, path)}
     except ValueError as exc:
@@ -179,13 +185,15 @@ def read_file(path: str) -> dict:
 
 @router.put("/files/content")
 def save_file(req: SaveFile) -> dict:
-    src, robot = _src(), _robot()
+    src, robot = _ws()
+    if req.conversation:
+        _conv(req.conversation)  # resolve first: a bad or unknown conversation writes nothing
     try:
         files.write(src, robot, req.path, req.content)
     except (ValueError, PermissionError) as exc:
         raise HTTPException(400, str(exc))
     if req.conversation:
-        _, conv = _conv(req.conversation)
+        _, conv = _conv(req.conversation)  # re-load so a concurrent edit isn't overwritten
         if req.path not in conv["edited"]:
             conv["edited"].append(req.path)
         conversations.save(src, conv)
@@ -194,18 +202,25 @@ def save_file(req: SaveFile) -> dict:
 
 @router.post("/files/run")
 def run_file(req: RunFile) -> dict:
-    src, robot = _src(), _robot()
+    src, robot = _ws()
+    if req.conversation:
+        _conv(req.conversation)  # resolve first: a bad or unknown conversation runs nothing
     try:
         files.safe(src, req.path)
         if not files.editable(robot, req.path):
             raise ValueError(f"Only {robot}_tasks/programs/*.py can be run.")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if not files.safe(src, req.path).is_file():
+        raise HTTPException(404, "No such file.")
+    try:
         result = session.run_program(req.path.split("/", 1)[1])
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except session.SessionError as exc:
         raise HTTPException(503, str(exc))
     if req.conversation:
-        _, conv = _conv(req.conversation)
+        _, conv = _conv(req.conversation)  # re-load so a concurrent edit isn't overwritten
         conv["messages"].append({"role": "run", "path": req.path, **result})
         conversations.save(src, conv)
     return result

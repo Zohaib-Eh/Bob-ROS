@@ -48,11 +48,54 @@ def test_only_programs_are_editable(src):
     assert (src / "bot_program/robot.py").read_text() == "# lib\n"
 
 
-def test_run_a_program_and_record_it(src, monkeypatch):
-    seen = {}
-    monkeypatch.setattr(routes.session, "run_program", lambda p: seen.setdefault("p", p) and {"ok": True, "output": "RESULT: ok"})
+@pytest.fixture
+def runs(monkeypatch):
+    calls = []
+
+    def fake_run(program):
+        calls.append(program)
+        return {"ok": True, "output": "RESULT: ok"}
+
+    monkeypatch.setattr(routes.session, "run_program", fake_run)
+    return calls
+
+
+def test_run_a_program_and_record_it(src, runs):
     cid = conversations.create(src)["id"]
     r = client.post("/program/files/run", json={"path": "bot_tasks/programs/task_001.py", "conversation": cid}).json()
-    assert r == {"ok": True, "output": "RESULT: ok"} and seen["p"] == "programs/task_001.py"
+    assert r == {"ok": True, "output": "RESULT: ok"} and runs == ["programs/task_001.py"]
     assert conversations.load(src, cid)["messages"][-1] == {
         "role": "run", "path": "bot_tasks/programs/task_001.py", "ok": True, "output": "RESULT: ok"}
+
+
+@pytest.mark.parametrize("bad", ["../x.py", "/etc/passwd", "C:/x.py", "bot_tasks/../../x.py",
+                                 "bot_tasks/programs/../../x", "bot_program/robot.py"])
+def test_run_refuses_bad_paths(src, runs, bad):
+    assert client.post("/program/files/run", json={"path": bad}).status_code == 400
+    assert runs == []
+
+
+def test_run_missing_program_is_404(src, runs):
+    r = client.post("/program/files/run", json={"path": "bot_tasks/programs/missing.py"})
+    assert r.status_code == 404 and r.json()["detail"] == "No such file."
+    assert runs == []
+
+
+def test_unknown_conversation_on_save_writes_nothing(src):
+    r = client.put("/program/files/content", json={
+        "path": "bot_tasks/programs/task_001.py", "content": "print(2)\n", "conversation": "000000000000"})
+    assert r.status_code == 404
+    assert (src / "bot_tasks/programs/task_001.py").read_text() == "print(1)\n"
+
+
+def test_unknown_conversation_on_run_does_not_run(src, runs):
+    r = client.post("/program/files/run", json={
+        "path": "bot_tasks/programs/task_001.py", "conversation": "000000000000"})
+    assert r.status_code == 404 and runs == []
+
+
+def test_bad_conversation_id_on_save_writes_nothing(src):
+    r = client.put("/program/files/content", json={
+        "path": "bot_tasks/programs/task_001.py", "content": "print(2)\n", "conversation": "../x"})
+    assert r.status_code == 400
+    assert (src / "bot_tasks/programs/task_001.py").read_text() == "print(1)\n"
