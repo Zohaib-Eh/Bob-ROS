@@ -21,8 +21,9 @@ from robot import Robot   # errors: Unreachable, Collision, PlanningFailed, Unkn
 r = Robot()                                    # connected; robot at home, scene empty
 r.add_box(name, size_xyz, xyz, rpy=(0, 0, 0))  # box centred at xyz
 r.add_cylinder(name, radius, height, xyz, rpy=(0, 0, 0))  # axis along its local z
-r.move_to(xyz, rpy)       # tool link to a pose, planned around obstacles
-r.move_line(xyz, rpy)     # tool link along a straight line
+r.move_to(xyz, rpy=None)  # tool link to a position; with rpy also that orientation; planned around obstacles
+r.move_line(xyz, rpy=None)  # straight line; without rpy keeps the current orientation
+r.tool_down()             # an orientation (rpy) with the tool pointing straight down, for this robot
 r.move_joints(q)          # joint values in joint order
 r.home()
 r.attach(name)            # the object rides on the tool link (pick)
@@ -37,7 +38,7 @@ Example (pick and place):
 from robot import Robot
 r = Robot()
 r.add_box("box", (0.05, 0.05, 0.05), (0.5, 0.2, 0.025))
-xyz, down = r.tool_pose()                 # keep the home orientation of the tool
+down = r.tool_down()                       # tool pointing straight down
 r.move_to((0.5, 0.2, 0.15), down)
 r.move_line((0.5, 0.2, 0.06), down)
 r.attach("box")
@@ -54,6 +55,7 @@ RULES = """## Rules
 - Fix and re-run until `RESULT: ok`. You have at most __MAX_RUNS__ runs per task; after that, stop and explain what is still wrong.
 - Positions are in metres in the base frame, z up; keep objects above the floor (z > 0) and inside the reach.
 - Only edit files under `programs/`. Do not run any other command.
+- Never search for joint angles by moving the robot; use move_to (with or without rpy), solutions() or known joint values.
 - Finish with a two-line summary: what the program does, and the last run result."""
 
 
@@ -67,6 +69,12 @@ def reach(chain: Chain, samples: int = 2000, seed: int = 0) -> float:
     return best
 
 
+def bearing(chain: Chain) -> float:
+    """Direction (degrees, x axis = 0°, y axis = 90°) the arm reaches toward at home, in the base x-y plane."""
+    T = fk(chain, home(chain))
+    return math.degrees(math.atan2(T[1, 3], T[0, 3])) if math.hypot(T[0, 3], T[1, 3]) > 1e-9 else 0.0
+
+
 def brief(chain: Chain, robot: str) -> str:
     T = fk(chain, home(chain))
     lines = [f"# Robot: {robot}", "",
@@ -74,6 +82,11 @@ def brief(chain: Chain, robot: str) -> str:
              f"Base frame: {chain.base}. Tool link: {chain.tip}. Units: metres and radians.",
              f"Approximate reach from the base origin: {reach(chain):.2f} m.",
              f"At home the tool link is at xyz ({T[0, 3]:.3f}, {T[1, 3]:.3f}, {T[2, 3]:.3f}).",
+             f'"In front of the robot" means toward bearing {bearing(chain):.0f}° in the base x-y plane '
+             "(x axis = 0°, y axis = 90°), where the arm reaches at home.",
+             f"The arm has {len(chain.joints)} moving joints."
+             + ("" if len(chain.joints) >= 6 else " It cannot hold arbitrary tool orientations: call "
+                "r.move_to(xyz) without rpy and let the library choose the orientation."),
              "", "Joints, in order:"]
     for j, h in zip(chain.joints, home(chain)):
         unit = "m" if j.type == "prismatic" else "rad"

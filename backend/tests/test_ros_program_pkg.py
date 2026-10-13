@@ -92,3 +92,30 @@ def test_generated_library_compiles_and_names_the_robot(ws):
 
 def test_run_task_keeps_the_ros_pythonpath(ws):
     assert "_program:\$PYTHONPATH" in (ws / "bot_program" / "run_task.sh").read_text()
+
+
+from app.ros.chain import parse_chain  # noqa: E402
+from app.ros.program_pkg import bearing, brief  # noqa: E402
+from tests.ros_helpers import four_axis_zip, unzip  # noqa: E402
+
+
+def test_brief_states_joints_facing_and_the_no_probing_rule(ws, tmp_path):
+    text = (ws / "bot_program" / "brief.md").read_text()
+    assert "The arm has 2 moving joints." in text
+    assert "It cannot hold arbitrary tool orientations: call r.move_to(xyz) without rpy" in text
+    assert '"In front of the robot" means toward bearing' in text
+    assert "Never search for joint angles by moving the robot" in text
+    assert "r.move_to(xyz, rpy=None)" in text and "r.tool_down()" in text
+
+
+def test_bearing_is_the_home_reach_direction(tmp_path):
+    d = unzip(four_axis_zip(tmp_path), tmp_path / "x")
+    c = parse_chain((d / "four" / "urdf" / "four.urdf").read_text())
+    assert abs(bearing(c) - 0.0) < 1e-6          # the test arm reaches along +x at home
+    assert "The arm has 4 moving joints." in brief(c, "four")
+
+
+def test_library_has_position_only_moves_and_tool_down(ws):
+    lib = (ws / "bot_program" / "robot.py").read_text()
+    assert "def move_to(self, xyz, rpy=None)" in lib and "def move_line(self, xyz, rpy=None)" in lib
+    assert "def tool_down(self)" in lib and "def _position_ik(self" in lib

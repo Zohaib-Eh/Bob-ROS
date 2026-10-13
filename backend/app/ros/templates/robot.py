@@ -243,6 +243,48 @@ class Robot:
         except NotImplementedError:
             pass  # no closed form for this robot: MoveIt's own IK decides
 
+    def _position_ik(self, xyz, tries: int = 8) -> list:
+        """Joint solutions that put the tool link at xyz with any orientation, computed on the model
+        (damped least squares from the current state and random seeds); nearest to the current state first."""
+        target = np.asarray(xyz, float)
+        lo = np.array([j.lower if j.lower is not None else -math.pi for j in self.chain.joints])
+        hi = np.array([j.upper if j.upper is not None else math.pi for j in self.chain.joints])
+        rng = np.random.default_rng(0)
+        cur = self._current()
+        sols = []
+        for q in [cur] + [rng.uniform(lo, hi) for _ in range(tries - 1)]:
+            q = np.clip(np.asarray(q, float), lo, hi)
+            for _ in range(100):
+                p = self._kin.fk(q)[:3, 3]
+                err = target - p
+                if np.linalg.norm(err) < 1e-4:
+                    sols.append(q)
+                    break
+                J = np.empty((3, len(q)))
+                for i in range(len(q)):
+                    dq = np.zeros(len(q))
+                    dq[i] = 1e-6
+                    J[:, i] = (self._kin.fk(q + dq)[:3, 3] - p) / 1e-6
+                step = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(3), err)
+                q = np.clip(q + step * min(1.0, 0.3 / max(1e-9, float(np.abs(step).max()))), lo, hi)
+        return sorted(sols, key=lambda s: float(np.linalg.norm(s - cur)))
+
+    def tool_down(self) -> tuple:
+        """rpy that points the tool's approach axis (the last joint's axis) straight down, turning the
+        home orientation as little as possible."""
+        R = self._kin.fk(_home(self.chain))[:3, :3]
+        a = R @ np.asarray(self.chain.joints[-1].axis, float)          # approach axis in the base frame
+        if a[2] > 0:
+            a = -a                                                     # either direction of the axis may point outward
+        target = np.array([0.0, 0.0, -1.0])
+        v, c = np.cross(a, target), float(a @ target)
+        if np.linalg.norm(v) < 1e-9:
+            turn = np.eye(3) if c > 0 else np.diag([1.0, -1.0, -1.0])
+        else:
+            vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+            turn = np.eye(3) + vx + vx @ vx * (1 / (1 + c))
+        return _rpy(turn @ R)
+
     def _run(self, client, goal, timeout):
         handle = _wait(client.send_goal_async(goal), 30)
         if not handle.accepted:
@@ -281,7 +323,20 @@ class Robot:
             raise self._error(res.error_code.val, what)
         self._settle()
 
-    def move_to(self, xyz, rpy):
+    def move_to(self, xyz, rpy=None):
+        if rpy is None:
+            cands = self._position_ik(xyz)
+            if not cands:
+                raise Unreachable(f"no joint solution puts the tool at {_fmt(xyz)} "
+                                  "(outside the reach or the joint limits)")
+            last = None
+            for q in cands[:4]:
+                try:
+                    self.move_joints(list(q))
+                    return
+                except (Collision, PlanningFailed) as exc:
+                    last = exc
+            raise last
         self._check_reach(xyz, rpy)
         target = _pose(xyz, rpy)
         pc = PositionConstraint()
@@ -316,7 +371,9 @@ class Robot:
     def home(self):
         self.move_joints(_home(self.chain))
 
-    def move_line(self, xyz, rpy):
+    def move_line(self, xyz, rpy=None):
+        if rpy is None:
+            rpy = self.tool_pose()[1]                    # keep the current orientation along the line
         self._check_reach(xyz, rpy)
         req = GetCartesianPath.Request()
         req.header.frame_id = self.chain.base
