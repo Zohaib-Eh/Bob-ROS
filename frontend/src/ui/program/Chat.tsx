@@ -5,19 +5,21 @@ import type { ClaudeMessage, Item, Message } from "../../model/chat";
 
 const MAX_RUNS = 3;
 
-function Step({ item }: { item: Item }) {
+function RunOutput({ head, output, cls }: { head: string; output?: string; cls: string }) {
   const [open, setOpen] = useState(false);
+  return (
+    <div className={`step run ${cls}`}>
+      <button className="step-head" onClick={() => setOpen((o) => !o)}>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}{head}</button>
+      {open && output && <pre className="step-output">{output}</pre>}
+    </div>
+  );
+}
+
+function Step({ item }: { item: Item }) {
   if (item.kind === "text") return <div className="narration"><Markdown>{item.text}</Markdown></div>;
   if (item.kind === "file") return <div className="step"><FileCode size={12} />Wrote {item.path}</div>;
   const mark = item.ok === undefined ? "…" : item.ok ? "✓" : "✗";
-  return (
-    <div className={`step run ${item.ok === false ? "bad" : item.ok ? "ok" : ""}`}>
-      <button className="step-head" onClick={() => setOpen((o) => !o)}>
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}Run {item.n} {mark} {item.message ?? "running"}
-      </button>
-      {open && item.output && <pre className="step-output">{item.output}</pre>}
-    </div>
-  );
+  return <RunOutput head={`Run ${item.n} ${mark} ${item.message ?? "running"}`} output={item.output} cls={item.ok === false ? "bad" : item.ok ? "ok" : ""} />;
 }
 
 function Claude({ m, live }: { m: ClaudeMessage; live: boolean }) {
@@ -45,7 +47,7 @@ export default function Chat({ messages, live, running, disabled, onSend }: Prop
     <>
       <div className="chat-scroll">
         {messages.map((m, i) => m.role === "user" ? <div key={i} className="bubble">{m.text}</div>
-          : m.role === "run" ? <div key={i} className={`step ${m.ok ? "ok" : "bad"}`}>You ran {m.path} {m.ok ? "✓" : "✗"}</div>
+          : m.role === "run" ? <RunOutput key={i} head={`You ran ${m.path} ${m.ok ? "✓" : "✗"}`} output={m.output} cls={m.ok ? "ok" : "bad"} />
           : <Claude key={i} m={m} live={false} />)}
         {live && <Claude m={live} live={true} />}
         <div ref={end} />

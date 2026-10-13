@@ -10,11 +10,11 @@ vi.mock("./Editor", () => ({
 afterEach(() => vi.restoreAllMocks());
 
 const files = [{ path: "bot_program/robot.py", editable: false }, { path: "bot_tasks/programs/task_001.py", editable: true }];
-function ui(running = false, onRan = vi.fn()) {
+function ui(running = false, onRan = vi.fn(), onRunning = vi.fn()) {
   vi.spyOn(api, "listFiles").mockResolvedValue(files);
   vi.spyOn(api, "readFile").mockImplementation(async (p) => ({ path: p, content: `# ${p}`, editable: p.includes("programs") }));
   return render(<Workspace preview={<div data-testid="viewer" />} conversation="aaaaaaaaaaaa" running={running}
-    changed={new Set(["bot_tasks/programs/task_001.py"])} onRan={onRan} />);
+    changed={new Set(["bot_tasks/programs/task_001.py"])} onRan={onRan} onRunning={onRunning} />);
 }
 
 describe("Workspace", () => {
@@ -39,7 +39,7 @@ describe("Workspace", () => {
     expect(save).toHaveBeenCalledWith("bot_tasks/programs/task_001.py", "print(2)", "aaaaaaaaaaaa");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
     expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_001.py", "aaaaaaaaaaaa");
-    expect(onRan).toHaveBeenCalled();
+    expect(onRan).toHaveBeenCalledWith("aaaaaaaaaaaa");
   });
 
   it("library files are read-only and nothing can be saved while a task runs", async () => {
@@ -59,7 +59,7 @@ describe("Workspace", () => {
   it("asks before discarding unsaved edits when switching files", async () => {
     vi.spyOn(api, "listFiles").mockResolvedValue([...files, { path: "bot_tasks/programs/task_002.py", editable: true }]);
     vi.spyOn(api, "readFile").mockImplementation(async (p) => ({ path: p, content: `# ${p}`, editable: true }));
-    render(<Workspace preview={<div />} conversation="aaaaaaaaaaaa" running={false} changed={new Set()} onRan={vi.fn()} />);
+    render(<Workspace preview={<div />} conversation="aaaaaaaaaaaa" running={false} changed={new Set()} onRan={vi.fn()} onRunning={vi.fn()} />);
     await openCode();
     await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "edited" } });
@@ -78,7 +78,7 @@ describe("Workspace", () => {
     vi.spyOn(api, "readFile").mockImplementation((p) => p.includes("robot.py")
       ? new Promise((r) => { resolveA = r; })
       : Promise.resolve({ path: p, content: `# ${p}`, editable: true }));
-    render(<Workspace preview={<div />} conversation="aaaaaaaaaaaa" running={false} changed={new Set()} onRan={vi.fn()} />);
+    render(<Workspace preview={<div />} conversation="aaaaaaaaaaaa" running={false} changed={new Set()} onRan={vi.fn()} onRunning={vi.fn()} />);
     await openCode();
     await act(async () => { fireEvent.click(await screen.findByText("robot.py")); });
     await act(async () => { fireEvent.click(screen.getByText("task_001.py")); });
@@ -105,5 +105,30 @@ describe("Workspace", () => {
     await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
     expect(screen.getByText("A task is already running.")).toBeTruthy();
+  });
+
+  it("reports running while a manual run is pending and reloads the conversation it started in", async () => {
+    let done!: (v: { ok: boolean; output: string }) => void;
+    vi.spyOn(api, "runFile").mockImplementation(() => new Promise((r) => { done = r; }));
+    const onRan = vi.fn(), onRunning = vi.fn();
+    ui(false, onRan, onRunning);
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+    expect(onRunning).toHaveBeenLastCalledWith(true);
+    await act(async () => { done({ ok: true, output: "" }); });
+    expect(onRunning).toHaveBeenLastCalledWith(false);
+    expect(onRan).toHaveBeenCalledWith("aaaaaaaaaaaa");
+  });
+
+  it("re-lists files when the conversation changes", async () => {
+    const list = vi.spyOn(api, "listFiles").mockRejectedValueOnce(new Error("not ready")).mockResolvedValue(files);
+    const props = { preview: <div />, running: false, changed: new Set<string>(), onRan: vi.fn(), onRunning: vi.fn() };
+    const { rerender } = render(<Workspace {...props} conversation={null} />);
+    await openCode();
+    await vi.waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    rerender(<Workspace {...props} conversation="aaaaaaaaaaaa" />);
+    expect(await screen.findByText("task_001.py")).toBeTruthy();
+    expect(list).toHaveBeenCalledTimes(2);
   });
 });

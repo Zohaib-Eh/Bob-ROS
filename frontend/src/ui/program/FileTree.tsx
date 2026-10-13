@@ -22,7 +22,7 @@ export default function FileTree({ files, open, changed, onOpen }: {
               {items.map((f) => (
                 <li key={f.path} title={f.path}
                   className={`${f.path === open ? "open" : ""}${changed.has(f.path) ? " changed" : ""}${f.editable ? "" : " readonly"}`}>
-                  <button onClick={() => onOpen(f.path)}>{f.path.split("/").pop()}</button>
+                  <button onClick={() => onOpen(f.path)}>{g.label === "Programs" ? f.path.split("/").pop() : f.path.split("/").slice(1).join("/")}</button>
                 </li>
               ))}
             </ul>

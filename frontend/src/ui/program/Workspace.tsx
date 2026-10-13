@@ -5,9 +5,9 @@ import type { FileEntry } from "../../api/program";
 import Editor from "./Editor";
 import FileTree from "./FileTree";
 
-interface Props { preview: ReactNode; conversation: string | null; running: boolean; changed: Set<string>; onRan(): void }
+interface Props { preview: ReactNode; conversation: string | null; running: boolean; changed: Set<string>; onRan(id: string | null): void; onRunning(running: boolean): void }
 
-export default function Workspace({ preview, conversation, running, changed, onRan }: Props) {
+export default function Workspace({ preview, conversation, running, changed, onRan, onRunning }: Props) {
   const [tab, setTab] = useState<"preview" | "code">("preview");
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [file, setFile] = useState<{ path: string; content: string; editable: boolean } | null>(null);
@@ -16,7 +16,7 @@ export default function Workspace({ preview, conversation, running, changed, onR
   const dirty = !!file && text !== file.content;
 
   // re-list when a task starts/finishes (it may have written files); listing is read-only so safe while running
-  useEffect(() => { if (tab === "code") void api.listFiles().then(setFiles).catch((e) => setNote(e.message)); }, [tab, running]);
+  useEffect(() => { if (tab === "code") void api.listFiles().then(setFiles).catch((e) => setNote(e.message)); }, [tab, running, conversation]);
   useEffect(() => { if (!running && file && !dirty) void openFile(file.path); }, [running]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const opens = useRef(0);
@@ -43,8 +43,11 @@ export default function Workspace({ preview, conversation, running, changed, onR
   async function run() {
     if (!file) return;
     if (dirty && !(await save())) return;
-    try { const r = await api.runFile(file.path, conversation); setNote(r.ok ? "Run ok" : r.output.trim().split("\n").pop() ?? "Run failed"); onRan(); }
+    const started = conversation;
+    onRunning(true);
+    try { const r = await api.runFile(file.path, started); setNote(r.ok ? "Run ok" : r.output.trim().split("\n").pop() ?? "Run failed"); onRan(started); }
     catch (e) { setNote((e as Error).message); }
+    finally { onRunning(false); }
   }
 
   return (

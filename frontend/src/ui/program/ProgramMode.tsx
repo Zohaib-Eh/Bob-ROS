@@ -28,6 +28,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
 
   // select: id = switch to it, null = first non-broken of the fresh list, undefined = keep current
   async function reload(select?: string | null) {
+    ros.setError(null);
     const token = ++req.current;
     try {
       const list = await api.listConversations();
@@ -62,6 +63,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         setConvs((cs) => [{ id: n.id, title: n.title, created: n.created, updated: n.updated }, ...cs]);
       } catch (e) { fail(e); return; }
     }
+    ros.setError(null);
     const id = c.id;  // the stream writes only into this conversation; the sidebar is locked while running
     setActive((a) => (a && a.id === id ? { ...a, messages: [...a.messages, { role: "user", text: task }] } : a));
     setRunning(true);
@@ -111,7 +113,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
   return (
     <div className="program-mode">
       <header className="program-bar">
-        <button className="btn" onClick={() => ctx.goTo("export")}><ArrowLeft size={14} />Back to robot</button>
+        <button className="btn" onClick={() => ctx.goTo("export")} disabled={running}><ArrowLeft size={14} />Back to robot</button>
         <strong>{ctx.robotName}</strong>
         <span className={`dot ${status.state}`} />
         <span className="muted">
@@ -138,7 +140,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         </section>
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
-            onRan={() => void reload(active?.id)} />
+            onRan={(id) => void reload(id)} onRunning={(r) => { if (mounted.current) setRunning(r); }} />
         </section>
       </div>
     </div>

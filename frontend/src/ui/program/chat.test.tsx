@@ -32,6 +32,13 @@ describe("Chat", () => {
     expect(screen.getByText(/trace\.\.\./)).toBeTruthy();
   });
 
+  it("expands a manual run to its output", () => {
+    render(<Chat messages={msgs} live={null} running={false} disabled={false} onSend={() => {}} />);
+    expect(screen.queryByText("RESULT: ok", { selector: "pre" })).toBeNull();
+    fireEvent.click(screen.getByText(/You ran/));
+    expect(screen.getByText("RESULT: ok", { selector: "pre" })).toBeTruthy();
+  });
+
   it("sends with Enter, keeps Shift+Enter for new lines, and is disabled while running", () => {
     const onSend = vi.fn();
     const { rerender } = render(<Chat messages={[]} live={null} running={false} disabled={false} onSend={onSend} />);

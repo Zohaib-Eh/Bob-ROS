@@ -9,6 +9,7 @@ import { POLL } from "./useRosSession";
 vi.mock("../../ros/rosbridge", () => ({
   RosBridge: class { ready = Promise.resolve(); subscribe() {} call() { return Promise.resolve({ scene: {} }); } close() {} },
 }));
+vi.mock("./Editor", () => ({ default: ({ value }: { value: string }) => <textarea data-testid="editor" value={value} readOnly /> }));
 beforeEach(() => { POLL.starting = 10; POLL.ready = 10_000; });
 afterEach(() => vi.restoreAllMocks());
 
@@ -18,7 +19,7 @@ function ui() {
     ui={(ctx) => <ProgramMode ctx={ctx} preview={<div data-testid="viewer" />} />} />);
 }
 async function ready() {
-  vi.spyOn(api, "sessionStatus").mockResolvedValue({ state: "ready", robot: "bot" });
+  vi.spyOn(api, "sessionStatus").mockResolvedValueOnce({ state: "stopped" }).mockResolvedValue({ state: "ready", robot: "bot" });  // first call: the mount refresh
   vi.spyOn(api, "startSession").mockResolvedValue({ state: "starting", robot: "bot" });
   ui();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /start ros/i })); });
@@ -128,4 +129,64 @@ it("a stream keeps writing into the conversation it started in", async () => {
   expect(screen.getByText("streaming for A")).toBeTruthy();
   expect((screen.getByText("B") as HTMLButtonElement).disabled).toBe(true);   // switching is locked while running
   await act(async () => { finish(); });
+});
+
+it("shows ROS ready and the conversations on mount when a session is already running", async () => {
+  vi.spyOn(api, "sessionStatus").mockResolvedValue({ state: "ready", robot: "bot" });
+  const start = vi.spyOn(api, "startSession");
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "Existing" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "Existing"));
+  ui();
+  expect(await screen.findByText(/ROS ready/)).toBeTruthy();
+  expect(await screen.findByText("Existing")).toBeTruthy();
+  expect(start).not.toHaveBeenCalled();
+});
+
+it("disables Back to robot while a task runs", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "A"));
+  let finish!: () => void;
+  vi.spyOn(api, "runConversation").mockImplementation(async () => { await new Promise<void>((r) => { finish = r; }); });
+  await ready();
+  await screen.findByText("A");
+  fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
+  await act(async () => { fireEvent.keyDown(screen.getByLabelText(/describe a task/i), { key: "Enter" }); });
+  expect((screen.getByRole("button", { name: /back to robot/i }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => { finish(); });
+});
+
+it("clears the top error when a new task is sent", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "A"));
+  vi.spyOn(api, "createConversation").mockRejectedValue(new Error("old failure"));
+  vi.spyOn(api, "runConversation").mockImplementation(async () => { await new Promise<void>(() => {}); });
+  await ready();
+  await screen.findByText("A");
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /new/i })); });
+  expect(await screen.findByText("old failure")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
+  await act(async () => { fireEvent.keyDown(screen.getByLabelText(/describe a task/i), { key: "Enter" }); });
+  expect(screen.queryByText("old failure")).toBeNull();
+});
+
+it("locks the chat and Run while a manual run is pending", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "A"));
+  vi.spyOn(api, "listFiles").mockResolvedValue([{ path: "bot_tasks/programs/task_001.py", editable: true }]);
+  vi.spyOn(api, "readFile").mockImplementation(async (p) => ({ path: p, content: "x", editable: true }));
+  let done!: (v: { ok: boolean; output: string }) => void;
+  vi.spyOn(api, "runFile").mockImplementation(() => new Promise((r) => { done = r; }));
+  await ready();
+  await screen.findByText("A");
+  await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "Code" })); });
+  await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+  const box = () => screen.getByLabelText(/describe a task/i) as HTMLTextAreaElement;
+  const runBtn = () => screen.getByRole("button", { name: /^run$/i }) as HTMLButtonElement;
+  expect(box().disabled).toBe(false);
+  await act(async () => { fireEvent.click(runBtn()); });
+  expect(box().disabled).toBe(true);
+  expect(runBtn().disabled).toBe(true);
+  await act(async () => { done({ ok: true, output: "" }); });
+  expect(box().disabled).toBe(false);
+  expect(runBtn().disabled).toBe(false);
 });

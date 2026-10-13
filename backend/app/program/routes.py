@@ -65,7 +65,7 @@ def run_conversation(cid: str, req: ConvRun) -> StreamingResponse:
         raise HTTPException(409, "A task is already running.")
     try:
         robot = session.current()["robot"]
-        notes = [f"The user edited {p} since your last turn." for p in conv["edited"]]
+        notes = [f"The user edited {p.removeprefix(robot + '_tasks/')} since your last turn." for p in conv["edited"]]
         prompt = ("\n".join(notes) + "\n\n" + req.task) if notes else req.task
         conv["messages"].append({"role": "user", "text": req.task})
         if conv["title"] == "New conversation":

@@ -47,6 +47,8 @@ export function useRosSession(ctx: Ctx) {
     catch (e) { if (mounted.current) setError((e as Error).message); }
   }
 
+  useEffect(() => { void refresh(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {  // poll while starting (fast) and ready (detects a dead session)
     if (status.state !== "starting" && status.state !== "ready") return;
     const t = setInterval(refresh, status.state === "starting" ? POLL.starting : POLL.ready);

@@ -51,7 +51,7 @@ def test_user_edits_are_announced_once(setup):
     c["edited"] = ["bot_tasks/programs/task_001.py"]
     conversations.save(src, c)
     client.post(f"/program/conversations/{c['id']}/run", json={"task": "go"})
-    assert seen["task"] == "The user edited bot_tasks/programs/task_001.py since your last turn.\n\ngo"
+    assert seen["task"] == "The user edited programs/task_001.py since your last turn.\n\ngo"
     assert conversations.load(src, c["id"])["edited"] == []
 
 
