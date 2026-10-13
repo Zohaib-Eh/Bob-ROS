@@ -22,7 +22,7 @@ r = Robot()                                    # connected; robot at home, scene
 r.add_box(name, size_xyz, xyz, rpy=(0, 0, 0))  # box centred at xyz
 r.add_cylinder(name, radius, height, xyz, rpy=(0, 0, 0))  # axis along its local z
 r.move_to(xyz, rpy=None)  # tool link to a position; with rpy also that orientation; planned around obstacles
-r.move_line(xyz, rpy=None)  # straight line; without rpy keeps the current orientation
+r.move_line(xyz, rpy=None)  # straight line; without rpy keeps the current orientation (under 6 joints: any orientation, short steps)
 r.tool_down()             # an orientation (rpy) with the tool pointing straight down, for this robot
 r.move_joints(q)          # joint values in joint order
 r.home()

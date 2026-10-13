@@ -243,14 +243,14 @@ class Robot:
         except NotImplementedError:
             pass  # no closed form for this robot: MoveIt's own IK decides
 
-    def _position_ik(self, xyz, tries: int = 8) -> list:
+    def _position_ik(self, xyz, tries: int = 8, seed=None) -> list:
         """Joint solutions that put the tool link at xyz with any orientation, computed on the model
-        (damped least squares from the current state and random seeds); nearest to the current state first."""
+        (damped least squares from `seed` (default: the current state) and random seeds); nearest to the seed first."""
         target = np.asarray(xyz, float)
         lo = np.array([j.lower if j.lower is not None else -math.pi for j in self.chain.joints])
         hi = np.array([j.upper if j.upper is not None else math.pi for j in self.chain.joints])
         rng = np.random.default_rng(0)
-        cur = self._current()
+        cur = self._current() if seed is None else np.asarray(seed, float)
         sols = []
         for q in [cur] + [rng.uniform(lo, hi) for _ in range(tries - 1)]:
             q = np.clip(np.asarray(q, float), lo, hi)
@@ -353,6 +353,23 @@ class Robot:
         self._plan_execute(Constraints(position_constraints=[pc], orientation_constraints=[oc]),
                            f"pose {_fmt(xyz)}")
 
+    def _step_line(self, xyz, step: float = 0.02):
+        """Arms with fewer than 6 joints cannot keep an orientation along a line: follow it in short
+        collision-checked joint moves, each to the position solution nearest the previous one."""
+        # ponytail: stops briefly every `step` metres; one stitched joint trajectory if smooth motion matters
+        start = np.asarray(self.tool_pose()[0], float)
+        end = np.asarray(xyz, float)
+        n = max(1, int(math.ceil(np.linalg.norm(end - start) / step)))
+        q = self._current()
+        for k in range(1, n + 1):
+            p = start + (end - start) * k / n
+            sols = self._position_ik(p, seed=q)
+            if not sols or np.abs(sols[0] - q).max() > 0.5:
+                raise PlanningFailed(f"a straight line to {_fmt(xyz)} is only possible for {(k - 1) / n * 100:.0f}% "
+                                     "of the way (the arm cannot follow it there); try move_to")
+            q = sols[0]
+            self.move_joints(list(q))
+
     def move_joints(self, q):
         q = [float(v) for v in q]
         if len(q) != len(self.joint_names):
@@ -372,6 +389,8 @@ class Robot:
         self.move_joints(_home(self.chain))
 
     def move_line(self, xyz, rpy=None):
+        if rpy is None and len(self.chain.joints) < 6:
+            return self._step_line(xyz)
         if rpy is None:
             rpy = self.tool_pose()[1]                    # keep the current orientation along the line
         self._check_reach(xyz, rpy)
