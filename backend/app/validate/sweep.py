@@ -36,7 +36,7 @@ def _mesh(bodies: list[Body]) -> trimesh.Trimesh | None:
     return trimesh.Trimesh(np.vstack(vs), np.vstack(fs), process=False)
 
 
-def _object(vertices, faces) -> fcl.CollisionObject:
+def fcl_object(vertices, faces) -> fcl.CollisionObject:
     bvh = fcl.BVHModel()
     bvh.beginModel(len(vertices), len(faces))
     bvh.addSubModel(np.asarray(vertices, dtype=float), np.asarray(faces, dtype=int))
@@ -49,7 +49,7 @@ def _sphere(m: trimesh.Trimesh) -> tuple[np.ndarray, float]:
     return (lo + hi) / 2, float(np.linalg.norm(hi - lo)) / 2
 
 
-def _collides(a: fcl.CollisionObject, b: fcl.CollisionObject) -> bool:
+def collides(a: fcl.CollisionObject, b: fcl.CollisionObject) -> bool:
     return fcl.collide(a, b, fcl.CollisionRequest(), fcl.CollisionResult()) > 0
 
 
@@ -87,7 +87,7 @@ def sweep_limits(kind: str, origin, axis, moving: list[Body],
     mv = _mesh(moving)
     if mv is None:
         raise ValueError("the moving parts have no geometry")
-    mobj = _object(mv.vertices - mv.vertex_normals * TOL, mv.faces)
+    mobj = fcl_object(mv.vertices - mv.vertex_normals * TOL, mv.faces)
     mc, mr = _sphere(mv)
     travel = float(np.linalg.norm(mv.extents))
 
@@ -96,10 +96,10 @@ def sweep_limits(kind: str, origin, axis, moving: list[Body],
         m = _mesh(bodies)
         if m is not None:
             oc, orad = _sphere(m)
-            obs.append((link_id, _object(m.vertices, m.faces), oc, orad))
+            obs.append((link_id, fcl_object(m.vertices, m.faces), oc, orad))
 
     mobj.setTransform(fcl.Transform())
-    overlap = [lid for lid, obj, _, _ in obs if _collides(mobj, obj)]
+    overlap = [lid for lid, obj, _, _ in obs if collides(mobj, obj)]
     if overlap:
         return {"lower": None, "upper": None, "free": False,
                 "blocked_by": {"lower": None, "upper": None}, "at_rest_overlap": overlap}
@@ -109,7 +109,7 @@ def sweep_limits(kind: str, origin, axis, moving: list[Body],
         T = translation_matrix(a * value) if kind == "prismatic" else rotation_matrix(value, a, o)
         mobj.setTransform(fcl.Transform(T[:3, :3], T[:3, 3]))
         for lid, obj, _, _ in obs:
-            if _collides(mobj, obj):
+            if collides(mobj, obj):
                 return lid
         return None
 
