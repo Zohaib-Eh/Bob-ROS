@@ -11,12 +11,12 @@ import { downloadBlob } from "./download";
 
 export const STEPS: { id: StepId; label: string }[] = [
   { id: "parts", label: "Parts" }, { id: "group", label: "Group" },
-  { id: "connect", label: "Connect" }, { id: "export", label: "Export" },
+  { id: "connect", label: "Connect" }, { id: "export", label: "Export" }, { id: "program", label: "Program" },
 ];
 
 export function stepBadges(ctx: Pick<Ctx, "model" | "robotName">): Record<StepId, number> {
   const m = ctx.model;
-  if (!m.links.length) return { parts: 0, group: 0, connect: 0, export: 0 };
+  if (!m.links.length) return { parts: 0, group: 0, connect: 0, export: 0, program: 0 };
   const checks = exportChecklist(m, ctx.robotName);
   const depth = chainDepth(m);
   return {
@@ -24,6 +24,7 @@ export function stepBadges(ctx: Pick<Ctx, "model" | "robotName">): Record<StepId
     group: checks.find((c) => c.id === "names")!.linkIds.length,
     connect: m.links.filter((l) => !depth.has(l.id)).length,
     export: checks.filter((c) => !c.ok).length,
+    program: 0,
   };
 }
 

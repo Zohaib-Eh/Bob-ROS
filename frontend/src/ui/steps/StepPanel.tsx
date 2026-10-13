@@ -4,6 +4,7 @@ import ConnectStep from "./ConnectStep";
 import ExportStep from "./ExportStep";
 import GroupStep from "./GroupStep";
 import PartsStep from "./PartsStep";
+import ProgramStep from "./ProgramStep";
 
 export default function StepPanel({ ctx }: { ctx: Ctx }) {
   if (!Object.keys(ctx.model.bodies).length) {
@@ -19,5 +20,6 @@ export default function StepPanel({ ctx }: { ctx: Ctx }) {
     case "group": return <GroupStep ctx={ctx} />;
     case "connect": return <ConnectStep ctx={ctx} />;
     case "export": return <ExportStep ctx={ctx} />;
+    case "program": return <ProgramStep ctx={ctx} />;
   }
 }

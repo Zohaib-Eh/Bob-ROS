@@ -15,7 +15,7 @@ export function errorText(detail: unknown): string {
   return "Request failed";
 }
 
-async function send(path: string, init: RequestInit): Promise<Response> {
+export async function send(path: string, init: RequestInit): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(`/api${path}`, init);
@@ -31,7 +31,7 @@ async function send(path: string, init: RequestInit): Promise<Response> {
   return res;
 }
 
-const json = (body: unknown): RequestInit => ({
+export const json = (body: unknown): RequestInit => ({
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
 

@@ -2,7 +2,7 @@ import { partProblems } from "./problems";
 import { directJoints } from "./tree";
 import { NAME_RE, type ModelState } from "./types";
 
-export type StepId = "parts" | "group" | "connect" | "export";
+export type StepId = "parts" | "group" | "connect" | "export" | "program";
 
 export interface CheckItem {
   id: "connected" | "mass" | "names" | "joints";
