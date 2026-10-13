@@ -13,15 +13,6 @@ from app.routes.export_routes import ExportRequest
 router = APIRouter(prefix="/program")
 
 
-class RunRequest(BaseModel):
-    task: str
-    resume: str | None = None
-
-
-class RerunRequest(BaseModel):
-    program: str
-
-
 @router.post("/session")
 def start_session(req: ExportRequest) -> dict:
     try:
@@ -49,39 +40,53 @@ def stop_session() -> dict:
     return {"state": "stopped"}
 
 
-@router.post("/run")
-def run(req: RunRequest) -> StreamingResponse:
+class ConvRun(BaseModel):
+    task: str
+
+
+@router.post("/conversations/{cid}/run")
+def run_conversation(cid: str, req: ConvRun) -> StreamingResponse:
     try:
         st = session.status()
     except session.SessionError as exc:
         raise HTTPException(503, str(exc))
-    cur = session.current()
-    if not cur or st["state"] != "ready":
+    src, conv = _conv(cid)
+    if st["state"] != "ready":
         detail = "Start the ROS session first and wait until it is ready."
         if st.get("log"):
             detail += "\n" + st["log"]
         raise HTTPException(409, detail)
+    robot = session.current()["robot"]
+    notes = [f"The user edited {p} since your last turn." for p in conv["edited"]]
+    prompt = ("\n".join(notes) + "\n\n" + req.task) if notes else req.task
+    conv["messages"].append({"role": "user", "text": req.task})
+    if conv["title"] == "New conversation":
+        conv["title"] = conversations.title_from(req.task)
+    conv["edited"] = []
+    conversations.save(src, conv)
     cancel = threading.Event()
-    events = agent.run_agent(cur["robot"], cur["src"], req.task, req.resume, cancel=cancel)
+    events = agent.run_agent(robot, src, prompt, conv["claude_session_id"], cancel=cancel)
+    collected: list[dict] = []
 
     async def stream():
         try:
             async for e in iterate_in_threadpool(events):
+                collected.append(e)
                 yield f"data: {json.dumps(e)}\n\n"
         finally:
             cancel.set()  # client gone or stream done: stop the agent's child process
+            try:
+                latest = conversations.load(src, cid)
+            except KeyError:
+                latest = None  # conversation deleted mid-run: nothing to save into
+            if latest is not None:
+                latest["messages"].append(conversations.fold(collected))
+                done = next((e for e in reversed(collected) if e.get("kind") == "done"), None)
+                if done and done.get("session_id"):
+                    latest["claude_session_id"] = done["session_id"]
+                conversations.save(src, latest)
 
     return StreamingResponse(stream(), media_type="text/event-stream")
-
-
-@router.post("/rerun")
-def rerun(req: RerunRequest) -> dict:
-    try:
-        return session.run_program(req.program)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except session.SessionError as exc:
-        raise HTTPException(503, str(exc))
 
 
 class NewConversation(BaseModel):
