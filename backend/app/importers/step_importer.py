@@ -6,13 +6,15 @@ import uuid
 import numpy as np
 import trimesh
 from OCC.Core.BRep import BRep_Builder, BRep_Tool
-from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+from OCC.Core.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCC.Core.BRepGProp import brepgprop
+from OCC.Core.GProp import GProp_GProps
 from OCC.Core.BRepBuilderAPI import (
     BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing, BRepBuilderAPI_Transform,
 )
 from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
 from OCC.Core.BRepTools import breptools
-from OCC.Core.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Sphere
+from OCC.Core.GeomAbs import GeomAbs_Circle, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Sphere
 from OCC.Core.gp import gp_Pnt, gp_Trsf
 from OCC.Core.IFSelect import IFSelect_RetDone
 from OCC.Core.IGESControl import IGESControl_Reader
@@ -22,7 +24,7 @@ from OCC.Core.STEPCAFControl import STEPCAFControl_Reader
 from OCC.Core.STEPControl import STEPControl_Reader
 from OCC.Core.TDF import TDF_Label, TDF_LabelSequence
 from OCC.Core.TDocStd import TDocStd_Document
-from OCC.Core.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SHELL, TopAbs_SOLID
+from OCC.Core.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED, TopAbs_SHELL, TopAbs_SOLID
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopLoc import TopLoc_Location
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Shell, topods
@@ -102,15 +104,34 @@ def _read_step_named(file_path: str) -> list[tuple[str | None, object]]:
     return parts
 
 
+def _plane_face_point(face) -> tuple[float, float, float]:
+    """A meaningful point on a flat face: the shared centre of its circular edges (a hole or a
+    ring face, where a rotation axis passes), else its area centroid. The plane's own parametric
+    origin is wherever the CAD tool put it, often a corner."""
+    centres = []
+    ex = TopExp_Explorer(face, TopAbs_EDGE)
+    while ex.More():
+        curve = BRepAdaptor_Curve(topods.Edge(ex.Current()))
+        if curve.GetType() == GeomAbs_Circle:
+            p = curve.Circle().Location()
+            centres.append((p.X(), p.Y(), p.Z()))
+        ex.Next()
+    if centres and np.ptp(np.asarray(centres), axis=0).max() < 1e-6:
+        return centres[0]
+    props = GProp_GProps()
+    brepgprop.SurfaceProperties(face, props)
+    c = props.CentreOfMass()
+    return (c.X(), c.Y(), c.Z())
+
+
 def _face_to_model(face, triangle_indices: list[int]) -> Face:
     adaptor = BRepAdaptor_Surface(face, True)
     t = adaptor.GetType()
     if t == GeomAbs_Plane:
-        pl = adaptor.Plane()
-        loc, n = pl.Location(), pl.Axis().Direction()
+        n = adaptor.Plane().Axis().Direction()
         s = -1.0 if face.Orientation() == TopAbs_REVERSED else 1.0  # outward
         return Face(kind="plane", origin="brep", normal=(s * n.X(), s * n.Y(), s * n.Z()),
-                    center=(loc.X(), loc.Y(), loc.Z()), residual=0.0,
+                    center=_plane_face_point(face), residual=0.0,
                     triangle_indices=triangle_indices)
     if t == GeomAbs_Cylinder:
         cyl = adaptor.Cylinder()
