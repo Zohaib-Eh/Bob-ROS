@@ -2,6 +2,7 @@ import { Anchor, ArrowRight, Check, Crosshair, Link2 } from "lucide-react";
 import { draftForPair, emptyDraft } from "../../model/jointDraft";
 import { chainDepth, nextJoint } from "../../model/nextJoint";
 import { pairKey } from "../../model/pairs";
+import AllLimits from "../AllLimits";
 import type { Ctx } from "../ctx";
 import { shortName } from "../format";
 import Info from "../Info";
@@ -30,6 +31,7 @@ export default function ConnectStep({ ctx }: { ctx: Ctx }) {
         <p className="muted small">The part that sits on the ground. We guessed the lowest one.</p>
       </div>
       <div className="muted small" data-testid="connected-count">{connected} of {model.links.length} links connected</div>
+      {!jointDraft && <AllLimits ctx={ctx} />}
       {jointDraft ? (
         <div className="card muted">Finish the joint in the Joint tool over the 3D view.</div>
       ) : next ? (

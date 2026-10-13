@@ -22,7 +22,10 @@ function start() {
 }
 const fakeViewer = () => ({ setPreview: vi.fn(), onDrive: vi.fn(), setWarning: vi.fn(), focus: vi.fn(),
   screenPoint: () => ({ x: 10, y: 10 }), onCameraChange: () => () => {} }) as unknown as Viewer;
-function open(viewer: Viewer | null = fakeViewer()) {
+function open(viewer: Viewer | null = fakeViewer(), sweep?: SweepResult) {
+  // a new revolute draft sweeps itself; tests that click Find limits start from an offline backend
+  const auto = vi.spyOn(client, "sweepLimits");
+  if (sweep) auto.mockResolvedValue(sweep); else auto.mockRejectedValue(new Error("offline"));
   const h = start();
   render(<Harness start={h} step="connect" viewer={viewer} ui={(ctx) => (
     <>
@@ -33,12 +36,19 @@ function open(viewer: Viewer | null = fakeViewer()) {
   fireEvent.click(screen.getByTestId("next-joint"));
   return { viewer, block: h.present.links[0].id };
 }
+/** open, then let the automatic sweep settle (offline by default) */
+async function openReady(viewer: Viewer | null = fakeViewer(), sweep?: SweepResult) {
+  const out = open(viewer, sweep);
+  await act(async () => {});
+  return out;
+}
+const openSettled = (sweep: SweepResult) => openReady(fakeViewer(), sweep);
 const result = (r: Partial<SweepResult>): SweepResult =>
   ({ lower: -1, upper: 1.5, free: false, blocked_by: { lower: null, upper: null }, at_rest_overlap: [], ...r });
 
 describe("Find limits from geometry", () => {
   it("fills the limits from the sweep and names what blocks each side", async () => {
-    const { block } = open();
+    const { block } = await openReady();
     const spy = vi.spyOn(client, "sweepLimits").mockResolvedValue(result({ blocked_by: { lower: block, upper: null } }));
     await act(async () => { fireEvent.click(screen.getByTestId("find-limits")); });
     expect(spy).toHaveBeenCalledWith({ type: "revolute", origin_xyz: [1, 0.5, 0.5], axis: [1, 0, 0] },
@@ -48,7 +58,7 @@ describe("Find limits from geometry", () => {
   });
 
   it("a free spin offers No limits", async () => {
-    open();
+    await openReady();
     vi.spyOn(client, "sweepLimits").mockResolvedValue(result({ free: true, lower: -Math.PI, upper: Math.PI }));
     await act(async () => { fireEvent.click(screen.getByTestId("find-limits")); });
     fireEvent.click(screen.getByTestId("use-no-limits"));
@@ -56,7 +66,7 @@ describe("Find limits from geometry", () => {
   });
 
   it("parts overlapping at rest leave the limits alone", async () => {
-    const { block } = open();
+    const { block } = await openReady();
     vi.spyOn(client, "sweepLimits").mockResolvedValue(result({ lower: null, upper: null, at_rest_overlap: [block] }));
     await act(async () => { fireEvent.click(screen.getByTestId("find-limits")); });
     expect(screen.getByTestId("sweep-status").textContent).toMatch(/overlap where they sit.*block/);
@@ -64,19 +74,19 @@ describe("Find limits from geometry", () => {
   });
 
   it("a result for an outdated draft is ignored", async () => {
-    open();
+    await openReady();
     let resolve!: (r: SweepResult) => void;
-    vi.spyOn(client, "sweepLimits").mockReturnValue(new Promise((r) => { resolve = r; }));
+    vi.spyOn(client, "sweepLimits").mockReturnValueOnce(new Promise((r) => { resolve = r; }));
     fireEvent.click(screen.getByTestId("find-limits"));
     expect(screen.getByTestId("find-limits").textContent).toMatch(/Sweeping/);
-    fireEvent.click(screen.getByTestId("flip"));
+    fireEvent.click(screen.getByTestId("flip"));   // the new axis sweeps itself (offline here)
     await act(async () => { resolve(result({ lower: -0.2, upper: 0.2 })); });
     expect(state().jointDraft).toMatchObject({ lower: -Math.PI, upper: Math.PI });
-    expect(screen.queryByTestId("sweep-status")).toBeNull();
+    expect(screen.queryByTestId("sweep-status")?.textContent ?? "").not.toMatch(/Stops at/);
   });
 
   it("a result arriving after the tool closed is ignored", async () => {
-    open();
+    await openReady();
     let resolve!: (r: SweepResult) => void;
     vi.spyOn(client, "sweepLimits").mockReturnValue(new Promise((r) => { resolve = r; }));
     fireEvent.click(screen.getByTestId("find-limits"));
@@ -87,24 +97,49 @@ describe("Find limits from geometry", () => {
   });
 
   it("found limits switch No limits off so they are actually used", async () => {
-    open();
+    await openReady();
     fireEvent.click(screen.getByTestId("no-limits"));
     vi.spyOn(client, "sweepLimits").mockResolvedValue(result({ lower: -1, upper: 1 }));
     await act(async () => { fireEvent.click(screen.getByTestId("find-limits")); });
     expect(state().jointDraft).toMatchObject({ noLimits: false, lower: -1, upper: 1 });
   });
 
-  it("is not offered for Rigid", () => {
-    open();
+  it("is not offered for Rigid", async () => {
+    await openReady();
     fireEvent.click(screen.getByTestId("motion-rigid"));
     expect(screen.queryByTestId("find-limits")).toBeNull();
     expect(screen.queryByTestId("drive-slider")).toBeNull();
   });
 });
 
+describe("automatic limits", () => {
+  it("a new revolute draft finds its limits by itself, once", async () => {
+    await openSettled(result({ lower: -1, upper: 1.5 }));
+    expect(client.sweepLimits).toHaveBeenCalledTimes(1);
+    expect(state().jointDraft).toMatchObject({ lower: -1, upper: 1.5 });
+    expect(screen.getByTestId("sweep-status").textContent).toBe("Stops at -57° (no contact) and +86° (no contact).");
+  });
+
+  it("does not sweep over limits the user typed", async () => {
+    await openSettled(result({ lower: -1, upper: 1 }));
+    vi.mocked(client.sweepLimits).mockClear();
+    fireEvent.change(screen.getByTestId("limit-lower"), { target: { value: "-30" } });
+    await act(async () => {});
+    expect(client.sweepLimits).not.toHaveBeenCalled();
+  });
+
+  it("sweeps again after the axis changes while the limits are still the defaults", async () => {
+    await openSettled(result({ free: true, lower: -Math.PI, upper: Math.PI }));
+    expect(state().jointDraft).toMatchObject({ lower: -Math.PI, upper: Math.PI });  // free: defaults kept
+    fireEvent.click(screen.getByTestId("flip"));
+    await act(async () => {});
+    expect(client.sweepLimits).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("Drive", () => {
-  it("the slider poses the moving part, the label shows it, and the viewer can drive it", () => {
-    const { viewer } = open();
+  it("the slider poses the moving part, the label shows it, and the viewer can drive it", async () => {
+    const { viewer } = await openReady();
     expect(viewer!.onDrive).toHaveBeenLastCalledWith(expect.objectContaining({ bodyIds: ["peg"], value: 0 }));
     fireEvent.change(screen.getByTestId("drive-slider"), { target: { value: "1" } });
     expect(viewer!.setPreview).toHaveBeenLastCalledWith(["peg"], expect.anything());
@@ -113,7 +148,7 @@ describe("Drive", () => {
   });
 
   it("past a limit the part turns red and the label names the blocker", async () => {
-    const { viewer, block } = open();
+    const { viewer, block } = await openReady();
     vi.spyOn(client, "sweepLimits").mockResolvedValue(result({ lower: -0.5, upper: 0.5, blocked_by: { lower: null, upper: block } }));
     await act(async () => { fireEvent.click(screen.getByTestId("find-limits")); });
     fireEvent.change(screen.getByTestId("drive-slider"), { target: { value: "1" } });
@@ -123,16 +158,16 @@ describe("Drive", () => {
     expect(viewer!.setWarning).toHaveBeenLastCalledWith([]);
   });
 
-  it("driving pauses while picking, so a click on the moving part picks it", () => {
-    const { viewer } = open();
+  it("driving pauses while picking, so a click on the moving part picks it", async () => {
+    const { viewer } = await openReady();
     fireEvent.click(screen.getByTestId("pick-origin"));
     expect(viewer!.onDrive).toHaveBeenLastCalledWith(null);
     fireEvent.click(screen.getByTestId("pick-origin"));
     expect(viewer!.onDrive).toHaveBeenLastCalledWith(expect.objectContaining({ bodyIds: ["peg"] }));
   });
 
-  it("Set lower/upper here copy the pose", () => {
-    open();
+  it("Set lower/upper here copy the pose", async () => {
+    await openReady();
     fireEvent.change(screen.getByTestId("drive-slider"), { target: { value: "1" } });
     fireEvent.click(screen.getByTestId("set-upper-here"));
     expect(state().jointDraft.upper).toBe(1);
@@ -141,8 +176,8 @@ describe("Drive", () => {
     expect(state().jointDraft.lower).toBe(-0.5);
   });
 
-  it("set-here never makes lower exceed upper", () => {
-    open();
+  it("set-here never makes lower exceed upper", async () => {
+    await openReady();
     fireEvent.change(screen.getByTestId("limit-upper"), { target: { value: "10" } });
     fireEvent.change(screen.getByTestId("drive-slider"), { target: { value: "1" } });
     expect((screen.getByTestId("set-lower-here") as HTMLButtonElement).disabled).toBe(true);
@@ -150,7 +185,7 @@ describe("Drive", () => {
   });
 
   it("closing the tool clears the pose, tint and drive", async () => {
-    const { viewer } = open();
+    const { viewer } = await openReady();
     fireEvent.change(screen.getByTestId("drive-slider"), { target: { value: "1" } });
     fireEvent.click(screen.getByTestId("cancel"));
     await waitFor(() => expect(viewer!.onDrive).toHaveBeenLastCalledWith(null));

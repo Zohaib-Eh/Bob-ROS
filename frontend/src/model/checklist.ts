@@ -1,3 +1,4 @@
+import { jointAtDefaultLimits } from "./jointDraft";
 import { partProblems } from "./problems";
 import { directJoints } from "./tree";
 import { NAME_RE, type ModelState } from "./types";
@@ -5,9 +6,11 @@ import { NAME_RE, type ModelState } from "./types";
 export type StepId = "parts" | "group" | "connect" | "export";
 
 export interface CheckItem {
-  id: "connected" | "mass" | "names" | "joints";
+  id: "connected" | "mass" | "names" | "joints" | "limits";
   label: string;
   ok: boolean;
+  /** advice only: shown, but does not block export */
+  warning?: boolean;
   detail: string | null;
   linkIds: string[];
   jointIds: string[];
@@ -30,6 +33,7 @@ export function exportChecklist(m: ModelState, robotName: string): CheckItem[] {
   const badJoints = m.joints.filter((j) => (j.type !== "fixed" && !j.axis) || j.type === "cylindrical"
     || j.type === "spherical" || ((j.type === "revolute" || j.type === "prismatic")
       && (j.limit_lower === null || j.limit_upper === null || j.limit_lower > j.limit_upper)));
+  const defaults = m.joints.filter(jointAtDefaultLimits);
   const empty = m.links.length === 0;
   return [
     { id: "connected", label: "Every link is connected to the base", ok: !empty && tree.errors.length === 0,
@@ -46,5 +50,9 @@ export function exportChecklist(m: ModelState, robotName: string): CheckItem[] {
     { id: "joints", label: "Every moving joint has an axis and limits", ok: badJoints.length === 0,
       detail: badJoints.length ? `${badJoints.length} joint(s) need an axis or limits.` : null,
       linkIds: [], jointIds: badJoints.map((j) => j.id), step: "connect" },
+    { id: "limits", label: "Joint limits found from geometry (recommended)", ok: defaults.length === 0, warning: true,
+      detail: defaults.length
+        ? `${defaults.length} joint(s) still use the default limits; find them from geometry in the Connect step.` : null,
+      linkIds: [], jointIds: defaults.map((j) => j.id), step: "connect" },
   ];
 }

@@ -25,7 +25,11 @@ export type Action =
   | { type: "addJoint"; joint: Joint }
   | { type: "updateJoint"; joint: Joint }
   | { type: "removeJoint"; jointId: string }
+  | { type: "setLimits"; changes: LimitChange[] }
   | { type: "load"; model: ModelState };
+
+/** New limits for one joint; `continuous` turns a revolute that spins freely into a no-limit joint. */
+export interface LimitChange { jointId: string; lower: number | null; upper: number | null; continuous: boolean }
 
 export function sanitizeName(raw: string): string {
   let n = raw.trim().replace(/[^A-Za-z0-9_-]/g, "_");
@@ -193,6 +197,16 @@ export function modelReducer(s: ModelState, a: Action): ModelState {
       return tidy({ ...s, joints: [...s.joints, a.joint] });
     case "updateJoint":
       return { ...s, joints: s.joints.map((j) => (j.id === a.joint.id ? a.joint : j)) };
+    case "setLimits": {
+      if (!a.changes.length) return s;
+      const byId = new Map(a.changes.map((c) => [c.jointId, c]));
+      return { ...s, joints: s.joints.map((j) => {
+        const c = byId.get(j.id);
+        if (!c) return j;
+        return c.continuous ? { ...j, type: "continuous", limit_lower: null, limit_upper: null }
+          : { ...j, limit_lower: c.lower, limit_upper: c.upper };
+      }) };
+    }
     case "removeJoint": {
       const suggestions = Object.fromEntries(Object.entries(s.suggestions).map(([k, g]) =>
         [k, g.result.joint?.id === a.jointId && g.status === "accepted" ? { ...g, status: "review" as const } : g]));

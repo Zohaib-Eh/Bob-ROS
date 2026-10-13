@@ -93,7 +93,7 @@ describe("exportChecklist", () => {
   it("reports unconnected links, mass decisions, names and joint settings", () => {
     let m = imported([boxBody("a", [0, 0, 0], [1, 1, 1]), boxBody("b", [1, 0, 0], [2, 1, 1], { status: "approximate" })]);
     let c = exportChecklist(m, "robot");
-    expect(c.map((i) => [i.id, i.ok])).toEqual([["connected", false], ["mass", false], ["names", true], ["joints", true]]);
+    expect(c.map((i) => [i.id, i.ok])).toEqual([["connected", false], ["mass", false], ["names", true], ["joints", true], ["limits", true]]);
     expect(c[0].linkIds).toEqual([id(m, "b")]);
     expect(c[0].step).toBe("connect");
     expect(c[1].detail).toMatch(/b/);
@@ -101,7 +101,7 @@ describe("exportChecklist", () => {
     m = modelReducer(m, { type: "setLinkProps", linkId: id(m, "b"), props: { mass_override_kg: 1 } });
     m = modelReducer(m, { type: "renameLink", linkId: id(m, "b"), name: "a" });
     c = exportChecklist(m, "bad name");
-    expect(c.map((i) => [i.id, i.ok])).toEqual([["connected", true], ["mass", true], ["names", false], ["joints", false]]);
+    expect(c.map((i) => [i.id, i.ok])).toEqual([["connected", true], ["mass", true], ["names", false], ["joints", false], ["limits", true]]);
     expect(c[3].jointIds).toEqual(["j"]);
   });
   it("an empty project asks for an import", () => {

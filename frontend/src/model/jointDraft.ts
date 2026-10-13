@@ -45,6 +45,18 @@ export function jointType(d: Pick<JointDraft, "motion" | "noLimits">): JointType
   }
 }
 
+/** True while a revolute/slider still has the untouched default range (never typed, never swept). */
+export function isDefaultLimits(motion: Motion | null, lower: number | null, upper: number | null): boolean {
+  if (motion !== "revolute" && motion !== "slider") return false;
+  const [lo, hi] = DEFAULT_LIMITS[motion];
+  return lower === lo && upper === hi;
+}
+
+export function jointAtDefaultLimits(j: Joint): boolean {
+  const motion = j.type === "revolute" ? "revolute" : j.type === "prismatic" ? "slider" : null;
+  return isDefaultLimits(motion, j.limit_lower, j.limit_upper);
+}
+
 export function emptyDraft(fixed: string | null = null, moving: string | null = null): JointDraft {
   return { id: crypto.randomUUID(), fixed, moving, origin: null, axis: null, motion: null, noLimits: false,
     lower: null, upper: null, suggestionKey: null, detected: null, ambiguous: false, source: "manual" };
