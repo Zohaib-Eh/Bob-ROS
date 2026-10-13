@@ -32,6 +32,7 @@ describe("RosBridge", () => {
     await ros.ready;
     const p = ros.call("/s", "t/srv/T", {});
     expect(() => FakeSocket.last.onmessage?.({ data: "not json" })).not.toThrow();
+    expect(() => FakeSocket.last.onmessage?.({ data: "null" })).not.toThrow();
     FakeSocket.last.onclose?.();
     await expect(p).rejects.toThrow("ROS connection closed");
   });
@@ -43,5 +44,14 @@ describe("RosBridge", () => {
     await ros.ready;
     await Promise.resolve();
     expect(FakeSocket.last.sent).toHaveLength(1);
+  });
+
+  it("rejects calls made after the socket closed, sending nothing", async () => {
+    const ros = new RosBridge("ws://x", FakeSocket as unknown as typeof WebSocket);
+    await ros.ready;
+    FakeSocket.last.onclose?.();
+    await expect(ros.call("/s", "t/srv/T", {})).rejects.toThrow("ROS connection closed");
+    ros.subscribe("/tf", "t", () => {});
+    expect(FakeSocket.last.sent).toEqual([]);
   });
 });

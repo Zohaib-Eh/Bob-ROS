@@ -6,6 +6,7 @@ export class RosBridge {
   private subs = new Map<string, (msg: any) => void>();
   private calls = new Map<string, { resolve: (m: any) => void; reject: (e: Error) => void }>();
   private open = false;
+  private closed = false;
 
   constructor(url: string, Socket: typeof WebSocket = WebSocket) {
     this.ws = new Socket(url);
@@ -18,6 +19,7 @@ export class RosBridge {
     this.ws.onmessage = (e: MessageEvent) => {
       let m: any;
       try { m = JSON.parse(e.data as string); } catch { return; }
+      if (!m || typeof m !== "object") return;
       if (m.op === "publish") this.subs.get(m.topic)?.(m.msg);
       else if (m.op === "service_response") { this.calls.get(m.id)?.resolve(m); this.calls.delete(m.id); }
     };
@@ -42,6 +44,7 @@ export class RosBridge {
   close() { this.ws.close(); this.failCalls(); }
 
   private failCalls() {
+    this.closed = true; this.open = false;
     for (const c of this.calls.values()) c.reject(new Error("ROS connection closed"));
     this.calls.clear();
   }
@@ -49,7 +52,8 @@ export class RosBridge {
   /** Run now if the socket is open, else once it opens; `onFail` if it never does or send throws. */
   private whenOpen(fn: () => void, onFail: (e: Error) => void = () => {}) {
     const run = () => { try { fn(); } catch (e) { onFail(e as Error); } };
-    if (this.open) run(); else this.ready.then(run, onFail);
+    if (this.closed) onFail(new Error("ROS connection closed"));
+    else if (this.open) run(); else this.ready.then(run, onFail);
   }
 
   private send(o: object) { this.ws.send(JSON.stringify(o)); }
