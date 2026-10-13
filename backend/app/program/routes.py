@@ -135,6 +135,11 @@ def rename_conversation(cid: str, req: Rename) -> dict:
 
 @router.delete("/conversations/{cid}")
 def delete_conversation(cid: str) -> dict:
-    src, _ = _conv(cid)
-    conversations.delete(src, cid)
+    src = _src()
+    try:
+        conversations.delete(src, cid)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except KeyError:
+        raise HTTPException(404, "No such conversation.")
     return {"deleted": cid}

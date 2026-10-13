@@ -1,3 +1,4 @@
+import itertools
 import json
 
 import pytest
@@ -17,7 +18,9 @@ def src(tmp_path, monkeypatch):
     return s
 
 
-def test_create_list_rename_delete(src):
+def test_create_list_rename_delete(src, monkeypatch):
+    ticks = itertools.count(1000)  # distinct timestamps: Windows time.time() can tie
+    monkeypatch.setattr(conv.time, "time", lambda: float(next(ticks)))
     a = client.post("/program/conversations", json={}).json()
     b = client.post("/program/conversations", json={"title": "Square"}).json()
     assert a["title"] == "New conversation" and len(a["id"]) == 12 and a["messages"] == []
@@ -38,8 +41,27 @@ def test_corrupt_files_are_listed_as_broken(src):
         "id": "0123456789ab", "title": "Unreadable conversation", "broken": True}
 
 
+def test_wrong_shapes_are_listed_as_broken(src):
+    d = src.parent / "conversations"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "aaaaaaaaaaaa.json").write_text("[]")
+    (d / "bbbbbbbbbbbb.json").write_text(json.dumps({"id": "bbbbbbbbbbbb", "title": "x"}))
+    items = client.get("/program/conversations").json()
+    assert sorted(items, key=lambda i: i["id"]) == [
+        {"id": "aaaaaaaaaaaa", "title": "Unreadable conversation", "broken": True},
+        {"id": "bbbbbbbbbbbb", "title": "Unreadable conversation", "broken": True}]
+    assert client.get("/program/conversations/aaaaaaaaaaaa").status_code == 404
+
+
+def test_broken_conversation_can_be_deleted(src):
+    (src.parent / "conversations").mkdir(parents=True, exist_ok=True)
+    (src.parent / "conversations" / "0123456789ab.json").write_text("{not json")
+    assert client.delete("/program/conversations/0123456789ab").status_code == 200
+    assert client.get("/program/conversations").json() == []
+
+
 def test_bad_ids_and_no_session(src, monkeypatch):
-    assert client.get("/program/conversations/../x").status_code in (400, 404)
+    assert client.get("/program/conversations/..%2Fx").status_code in (400, 404)
     assert client.get("/program/conversations/NOTHEX123456").status_code == 400
     monkeypatch.setattr(routes.session, "current", lambda: None)
     r = client.get("/program/conversations")

@@ -14,7 +14,7 @@ def folder(src) -> Path:
 
 
 def _path(src, cid: str) -> Path:
-    if not ID_RE.match(cid):
+    if not ID_RE.fullmatch(cid):
         raise ValueError("Bad conversation id.")
     return folder(src) / f"{cid}.json"
 
@@ -23,16 +23,27 @@ def title_from(task: str) -> str:
     return " ".join(task.split()[:6])[:60] or "New conversation"
 
 
+KEYS = ("id", "title", "created", "updated")
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 def list_all(src) -> list[dict]:
     out = []
     d = folder(src)
     for p in sorted(d.glob("*.json")) if d.exists() else []:
-        if not ID_RE.match(p.stem):
+        if not ID_RE.fullmatch(p.stem):
             continue
         try:
             c = json.loads(p.read_text(encoding="utf-8"))
-            out.append({k: c[k] for k in ("id", "title", "created", "updated")})
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, OSError):
+            c = None
+        if (isinstance(c, dict) and all(k in c for k in KEYS) and c["id"] == p.stem
+                and _is_num(c["updated"])):
+            out.append({k: c[k] for k in KEYS})
+        else:
             out.append({"id": p.stem, "title": "Unreadable conversation", "broken": True})
     return sorted(out, key=lambda c: c.get("updated", 0), reverse=True)
 
@@ -59,9 +70,12 @@ def load(src, cid: str) -> dict:
     if not p.exists():
         raise KeyError(cid)
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except ValueError:
+        c = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
         raise KeyError(cid)
+    if not isinstance(c, dict):
+        raise KeyError(cid)
+    return c
 
 
 def rename(src, cid: str, title: str) -> dict:
