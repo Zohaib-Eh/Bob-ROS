@@ -1,11 +1,12 @@
 import { ArrowLeft, Play, RotateCcw, Square } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { Conversation, ConversationInfo } from "../../api/program";
 import type { Ctx } from "../ctx";
 import { applyEvent, emptyClaude, type ClaudeMessage } from "../../model/chat";
 import Chat from "./Chat";
 import ConversationList from "./ConversationList";
+import Workspace from "./Workspace";
 import { useRosSession } from "./useRosSession";
 
 export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: ReactNode }) {
@@ -98,6 +99,15 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     } catch (e) { fail(e); }
   }
 
+  const changed = useMemo(() => {
+    const out = new Set<string>();
+    const lastClaude = [...(active?.messages ?? [])].reverse().find((m) => m.role === "claude");
+    if (lastClaude && lastClaude.role === "claude" && status.robot) {
+      for (const it of lastClaude.items) if (it.kind === "file") out.add(`${status.robot}_tasks/${it.path}`);
+    }
+    return out;
+  }, [active, status.robot]);
+
   return (
     <div className="program-mode">
       <header className="program-bar">
@@ -126,7 +136,10 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         <section className="chat-column" data-testid="chat-slot">
           <Chat messages={active?.messages ?? []} live={live} running={running} disabled={status.state !== "ready"} onSend={(t) => void send(t)} />
         </section>
-        <section className="workspace-column" data-testid="workspace-slot">{preview}</section>
+        <section className="workspace-column" data-testid="workspace-slot">
+          <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
+            onRan={() => void reload(active?.id)} />
+        </section>
       </div>
     </div>
   );

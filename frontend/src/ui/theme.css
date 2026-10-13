@@ -174,3 +174,20 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .answer p { margin: 4px 0; } .result { font-weight: 600; font-size: 13px; }
 .prompt { border-top: 1px solid var(--border); padding: 8px; display: flex; gap: 8px; align-items: flex-end; }
 .prompt textarea { flex: 1; resize: none; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); padding: 4px 8px 0; }
+.tabs button { background: none; border: 0; padding: 6px 12px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
+.tabs button.active { color: inherit; border-bottom-color: var(--accent); }
+.tab-body { flex: 1; min-height: 0; }
+.code-tab { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px 1fr; }
+.file-tree { border-right: 1px solid var(--border); overflow: auto; padding: 8px; font-size: 13px; }
+.file-tree ul { list-style: none; margin: 0 0 8px; padding: 0; }
+.file-tree .tree-group { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 6px 0 2px; }
+.file-tree button { background: none; border: 0; color: inherit; padding: 3px 6px; cursor: pointer; width: 100%; text-align: left; }
+.file-tree li.open button { background: var(--accent-soft); border-radius: 4px; }
+.file-tree li.readonly button { color: var(--muted); }
+.file-tree li.changed button::after { content: " \25CF"; color: var(--warning); }
+.code-pane { min-width: 0; display: flex; flex-direction: column; }
+.code-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.editor { flex: 1; min-height: 0; overflow: auto; } .editor .cm-editor { height: 100%; }
+.pad { padding: 12px; }
