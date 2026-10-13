@@ -1,5 +1,5 @@
 import { Play, Save } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { FileEntry } from "../../api/program";
 import Editor from "./Editor";
@@ -19,13 +19,25 @@ export default function Workspace({ preview, conversation, running, changed, onR
   useEffect(() => { if (tab === "code") void api.listFiles().then(setFiles).catch((e) => setNote(e.message)); }, [tab, running]);
   useEffect(() => { if (!running && file && !dirty) void openFile(file.path); }, [running]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  const opens = useRef(0);
   async function openFile(path: string) {
-    try { const f = await api.readFile(path); setFile(f); setText(f.content); setNote(null); }
-    catch (e) { setNote((e as Error).message); }
+    const n = ++opens.current;
+    try { const f = await api.readFile(path); if (n === opens.current) { setFile(f); setText(f.content); setNote(null); } }
+    catch (e) { if (n === opens.current) setNote((e as Error).message); }
+  }
+  function requestOpen(path: string) {
+    if (file && dirty && path !== file.path && !window.confirm(`Discard unsaved changes to ${file.path.split("/").pop()}?`)) return;
+    void openFile(path);
   }
   async function save(): Promise<boolean> {
     if (!file) return false;
-    try { await api.saveFile(file.path, text, conversation); setFile({ ...file, content: text }); setNote("Saved"); return true; }
+    const { path } = file, saved = text;
+    try {
+      await api.saveFile(path, saved, conversation);
+      setFile((f) => (f && f.path === path ? { ...f, content: saved } : f));
+      setNote("Saved");
+      return true;
+    }
     catch (e) { setNote((e as Error).message); return false; }
   }
   async function run() {
@@ -44,7 +56,7 @@ export default function Workspace({ preview, conversation, running, changed, onR
       <div className="tab-body" style={{ display: tab === "preview" ? "flex" : "none" }}>{preview}</div>
       {tab === "code" && (
         <div className="code-tab">
-          <FileTree files={files} open={file?.path ?? null} changed={changed} onOpen={(p) => void openFile(p)} />
+          <FileTree files={files} open={file?.path ?? null} changed={changed} onOpen={requestOpen} />
           <div className="code-pane">
             {file ? (
               <>
@@ -57,7 +69,7 @@ export default function Workspace({ preview, conversation, running, changed, onR
                     <button className="btn" onClick={() => void run()} disabled={running}><Play size={14} />Run</button>
                   </>}
                 </div>
-                <Editor value={text} readOnly={!file.editable || running} onChange={setText} />
+                <Editor key={file.path} value={text} readOnly={!file.editable || running} onChange={(v) => { setText(v); setNote(null); }} />
               </>
             ) : <p className="muted pad">Pick a file. Programs under Programs can be edited and run.</p>}
           </div>

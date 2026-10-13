@@ -51,4 +51,59 @@ describe("Workspace", () => {
     await act(async () => { fireEvent.click(screen.getByText("task_001.py")); });
     expect((screen.getByRole("button", { name: /save/i }) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  async function openCode() {
+    await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "Code" })); });
+  }
+
+  it("asks before discarding unsaved edits when switching files", async () => {
+    vi.spyOn(api, "listFiles").mockResolvedValue([...files, { path: "bot_tasks/programs/task_002.py", editable: true }]);
+    vi.spyOn(api, "readFile").mockImplementation(async (p) => ({ path: p, content: `# ${p}`, editable: true }));
+    render(<Workspace preview={<div />} conversation="aaaaaaaaaaaa" running={false} changed={new Set()} onRan={vi.fn()} />);
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "edited" } });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await act(async () => { fireEvent.click(screen.getByText("task_002.py")); });
+    expect(confirm).toHaveBeenCalledWith("Discard unsaved changes to task_001.py?");
+    expect((screen.getByTestId("editor") as HTMLTextAreaElement).value).toBe("edited");
+    confirm.mockReturnValue(true);
+    await act(async () => { fireEvent.click(screen.getByText("task_002.py")); });
+    expect((screen.getByTestId("editor") as HTMLTextAreaElement).value).toBe("# bot_tasks/programs/task_002.py");
+  });
+
+  it("a slow earlier open cannot replace a later one", async () => {
+    vi.spyOn(api, "listFiles").mockResolvedValue(files);
+    let resolveA!: (v: { path: string; content: string; editable: boolean }) => void;
+    vi.spyOn(api, "readFile").mockImplementation((p) => p.includes("robot.py")
+      ? new Promise((r) => { resolveA = r; })
+      : Promise.resolve({ path: p, content: `# ${p}`, editable: true }));
+    render(<Workspace preview={<div />} conversation="aaaaaaaaaaaa" running={false} changed={new Set()} onRan={vi.fn()} />);
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByText("robot.py")); });
+    await act(async () => { fireEvent.click(screen.getByText("task_001.py")); });
+    await act(async () => { resolveA({ path: "bot_program/robot.py", content: "# A", editable: false }); });
+    expect((screen.getByTestId("editor") as HTMLTextAreaElement).value).toBe("# bot_tasks/programs/task_001.py");
+  });
+
+  it("clears 'Saved' once the buffer changes again", async () => {
+    vi.spyOn(api, "saveFile").mockResolvedValue();
+    ui();
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "x" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /save/i })); });
+    expect(screen.getByText("Saved")).toBeTruthy();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "xy" } });
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("shows the error when a run is refused", async () => {
+    vi.spyOn(api, "runFile").mockRejectedValue(new Error("A task is already running."));
+    ui();
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+    expect(screen.getByText("A task is already running.")).toBeTruthy();
+  });
 });
