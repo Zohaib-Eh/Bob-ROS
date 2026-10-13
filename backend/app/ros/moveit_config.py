@@ -252,7 +252,7 @@ ament_package()
 
 
 def generate(robot: str, description_dir: Path, out_src: Path, source: str, samples: int = 10000) -> None:
-    """Write <robot>, <robot>_moveit_config (and <robot>_kinematics) into out_src.
+    """Write <robot>, <robot>_moveit_config and <robot>_kinematics into out_src.
     Everything is built in a temp folder first: an error leaves out_src untouched."""
     if not ROS_NAME.match(robot):
         raise ValueError(f"Robot name '{robot}' is not a valid ROS package name; use lowercase "
@@ -270,6 +270,8 @@ def generate(robot: str, description_dir: Path, out_src: Path, source: str, samp
         shutil.copytree(description_dir, tmp / robot)
         write_files(tmp / robot, {"package.xml": package_xml(robot), "CMakeLists.txt": cmakelists(robot)})
         write_files(tmp / f"{robot}_moveit_config", moveit_files(chain, robot, source, pairs))
+        from .kinematics_pkg import kinematics_files  # local: kinematics_pkg imports this module
+        write_files(tmp / f"{robot}_kinematics", kinematics_files(robot, source))
         _swap_in(Path(out_src), tmp, sorted(p.name for p in tmp.iterdir()))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
