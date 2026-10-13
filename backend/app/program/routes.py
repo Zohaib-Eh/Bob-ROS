@@ -1,12 +1,13 @@
 import json
 import threading
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
 
-from app.program import agent, session
+from app.program import agent, conversations, session
 from app.routes.export_routes import ExportRequest
 
 router = APIRouter(prefix="/program")
@@ -81,3 +82,59 @@ def rerun(req: RerunRequest) -> dict:
         raise HTTPException(400, str(exc))
     except session.SessionError as exc:
         raise HTTPException(503, str(exc))
+
+
+class NewConversation(BaseModel):
+    title: str | None = None
+
+
+class Rename(BaseModel):
+    title: str
+
+
+def _src() -> Path:
+    try:
+        cur = session.current()
+    except session.SessionError as exc:
+        raise HTTPException(503, str(exc))
+    if not cur:
+        raise HTTPException(409, "Start the ROS session first.")
+    return Path(cur["src"])
+
+
+def _conv(cid: str) -> tuple[Path, dict]:
+    src = _src()
+    try:
+        return src, conversations.load(src, cid)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except KeyError:
+        raise HTTPException(404, "No such conversation.")
+
+
+@router.get("/conversations")
+def list_conversations() -> list:
+    return conversations.list_all(_src())
+
+
+@router.post("/conversations")
+def new_conversation(req: NewConversation) -> dict:
+    return conversations.create(_src(), req.title or "New conversation")
+
+
+@router.get("/conversations/{cid}")
+def get_conversation(cid: str) -> dict:
+    return _conv(cid)[1]
+
+
+@router.patch("/conversations/{cid}")
+def rename_conversation(cid: str, req: Rename) -> dict:
+    src, _ = _conv(cid)
+    return conversations.rename(src, cid, req.title)
+
+
+@router.delete("/conversations/{cid}")
+def delete_conversation(cid: str) -> dict:
+    src, _ = _conv(cid)
+    conversations.delete(src, cid)
+    return {"deleted": cid}
