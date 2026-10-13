@@ -116,3 +116,43 @@ def test_irb1300_generates(irb1300_zip, tmp_path):
     srdf = ET.parse(src / "irb1300_moveit_config" / "config" / "irb1300.srdf").getroot()
     assert srdf.find("group/chain").attrib == {"base_link": "base", "tip_link": "link6"}
     assert len(srdf.findall("group_state/joint")) == 6
+
+
+def test_pilz_cartesian_limits_file_is_written(ws):
+    p = ws / "bot_moveit_config" / "config" / "pilz_cartesian_limits.yaml"
+    assert _yaml(p) == {"cartesian_limits": {"max_trans_vel": 1.0, "max_trans_acc": 2.25,
+                                             "max_trans_dec": -5.0, "max_rot_vel": 1.57}}
+
+
+def test_package_declares_launch_dependencies(ws):
+    deps = [e.text for e in ET.parse(ws / "bot_moveit_config" / "package.xml").getroot().findall("exec_depend")]
+    assert "launch" in deps and "launch_ros" in deps
+
+
+def test_failed_regeneration_leaves_workspace_untouched(tmp_path, monkeypatch):
+    import app.ros.moveit_config as mc
+
+    d = unzip(two_joint_zip(tmp_path), tmp_path / "x")
+    src = tmp_path / "ws" / "src"
+    generate("bot", d / "bot", src, source="bot.zip", samples=50)
+    (src / "bot_moveit_config" / "marker.txt").write_text("keep")
+    (src / "bot_tasks").mkdir()
+    (src / "bot_tasks" / "mine.py").write_text("print('mine')")
+    before = sorted(str(p.relative_to(src)) for p in src.rglob("*"))
+
+    real_move, calls = mc.shutil.move, []
+
+    def flaky_move(a, b):
+        calls.append(a)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        return real_move(a, b)
+
+    monkeypatch.setattr(mc.shutil, "move", flaky_move)
+    with pytest.raises(OSError, match="disk full"):
+        generate("bot", d / "bot", src, source="bot.zip", samples=50)
+    monkeypatch.setattr(mc.shutil, "move", real_move)
+
+    assert sorted(str(p.relative_to(src)) for p in src.rglob("*")) == before
+    assert (src / "bot_moveit_config" / "marker.txt").read_text() == "keep"
+    assert (src / "bot_tasks" / "mine.py").read_text() == "print('mine')"

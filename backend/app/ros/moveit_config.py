@@ -3,6 +3,7 @@ MoveIt config and (via kinematics_pkg) the exact-IK package. Plain text: no ROS 
 import re
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
 from app.export.urdf_writer import cmakelists, package_xml
@@ -200,7 +201,7 @@ def _package_xml(robot: str, note: str) -> str:
     deps = [robot, "moveit_ros_move_group", "moveit_configs_utils", "moveit_kinematics",
             "moveit_planners_ompl", "moveit_simple_controller_manager", "trac_ik_kinematics_plugin",
             "controller_manager", "joint_state_broadcaster", "joint_trajectory_controller",
-            "robot_state_publisher", "xacro"]
+            "robot_state_publisher", "xacro", "launch", "launch_ros"]
     dep_lines = "\n".join(f"  <exec_depend>{d}</exec_depend>" for d in deps)
     return f"""<?xml version="1.0"?>
 {note}<package format="3">
@@ -230,6 +231,13 @@ def moveit_files(chain: Chain, robot: str, source: str, pairs) -> dict[str, str]
         "config/moveit_controllers.yaml": _moveit_controllers_yaml(names, h),
         "config/ompl_planning.yaml": _ompl_yaml(h),
         "config/initial_positions.yaml": h + f"initial_positions:\n{initial}\n",
+        "config/pilz_cartesian_limits.yaml": h + """# Cartesian limits for the Pilz planner (MoveIt Setup Assistant defaults): set from datasheet.
+cartesian_limits:
+  max_trans_vel: 1.0
+  max_trans_acc: 2.25
+  max_trans_dec: -5.0
+  max_rot_vel: 1.57
+""",
         f"config/{robot}.ros2_control.xacro": _ros2_control_xacro(chain, robot, x),
         f"config/{robot}.urdf.xacro": _urdf_xacro(robot, x),
         "launch/demo.launch.py": _launch(robot, h),
@@ -262,10 +270,34 @@ def generate(robot: str, description_dir: Path, out_src: Path, source: str, samp
         shutil.copytree(description_dir, tmp / robot)
         write_files(tmp / robot, {"package.xml": package_xml(robot), "CMakeLists.txt": cmakelists(robot)})
         write_files(tmp / f"{robot}_moveit_config", moveit_files(chain, robot, source, pairs))
-        out_src = Path(out_src)
-        out_src.mkdir(parents=True, exist_ok=True)
-        for pkg in sorted(p.name for p in tmp.iterdir()):
-            shutil.rmtree(out_src / pkg, ignore_errors=True)
-            shutil.move(str(tmp / pkg), str(out_src / pkg))
+        _swap_in(Path(out_src), tmp, sorted(p.name for p in tmp.iterdir()))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _swap_in(out_src: Path, tmp: Path, pkgs: list[str]) -> None:
+    """Move each generated package from tmp into out_src. An existing copy is renamed aside
+    first; any failure puts every package back as it was. Other folders are never touched."""
+    created = not out_src.exists()
+    out_src.mkdir(parents=True, exist_ok=True)
+    backups: dict[str, Path] = {}
+    new: list[str] = []
+    try:
+        for pkg in pkgs:
+            dest = out_src / pkg
+            if dest.exists():
+                backups[pkg] = out_src / f".{pkg}.old-{uuid.uuid4().hex[:8]}"
+                shutil.move(str(dest), str(backups[pkg]))
+            new.append(pkg)
+            shutil.move(str(tmp / pkg), str(dest))
+    except BaseException:
+        for pkg in new:
+            if (out_src / pkg).exists():
+                shutil.rmtree(out_src / pkg)
+        for pkg, bak in backups.items():
+            shutil.move(str(bak), str(out_src / pkg))
+        if created:
+            shutil.rmtree(out_src, ignore_errors=True)
+        raise
+    for bak in backups.values():
+        shutil.rmtree(bak, ignore_errors=True)  # new packages are in place; a leftover backup is harmless
