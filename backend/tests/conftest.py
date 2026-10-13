@@ -164,3 +164,22 @@ def mixed_topology_brep_path(tmp_path) -> str:
     path = str(tmp_path / "mixed.brep")
     breptools.Write(comp, path)
     return path
+
+
+from pathlib import Path as _Path
+
+_IRB_STEP = _Path(__file__).resolve().parents[2] / "corpus" / "irb1300_asm.stp"
+
+
+@pytest.fixture(scope="session")
+def irb1300_zip(tmp_path_factory):
+    """The ABB IRB 1300 through the real pipeline (~15 s). Skips if the STEP file is absent."""
+    if not _IRB_STEP.exists():
+        pytest.skip("corpus/irb1300_asm.stp not present")
+    import yaml
+    from corpus import run
+    exp = yaml.safe_load((run.HERE / "expected" / "irb1300.yaml").read_text())
+    out = tmp_path_factory.mktemp("irb") / "irb1300.zip"
+    s = run.score_model(exp, _IRB_STEP, robot_name="irb1300", zip_out=out)
+    assert s["export_ok"], s.get("export_error")
+    return out
