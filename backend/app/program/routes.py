@@ -41,6 +41,8 @@ def stop_session() -> dict:
 
 
 _busy = threading.Lock()  # one agent/program run at a time
+# ponytail: a client that drops before the stream is first iterated leaves _busy held until restart; add a
+# timestamp + stale takeover if that ever shows up
 
 
 class ConvRun(BaseModel):
