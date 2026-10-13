@@ -20,7 +20,7 @@ fi
 echo "$N" > "$TASKS/.run_count"
 echo "run $N/$MAX_RUNS"
 MSYS_NO_PATHCONV=1 docker exec __CONTAINER__ timeout __TIMEOUT__ bash -c \
-  "source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && cd /ws/src/__ROBOT___tasks && PYTHONPATH=/ws/src/__ROBOT___program python3 -u -m runner $PROG"
+  "source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && cd /ws/src/__ROBOT___tasks && PYTHONPATH=/ws/src/__ROBOT___program:\$PYTHONPATH python3 -u -m runner $PROG"
 CODE=$?
 if [ "$CODE" -eq 124 ]; then echo "RESULT: failed: timed out after __TIMEOUT__ s"; fi
 exit $CODE

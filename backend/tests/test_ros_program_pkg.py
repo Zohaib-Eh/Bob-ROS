@@ -88,3 +88,7 @@ def test_generated_library_compiles_and_names_the_robot(ws):
                 "def home", "def attach", "def detach", "def solutions", "def tool_pose", "def reset",
                 "class Unreachable", "class Collision", "class PlanningFailed", "class UnknownObject"):
         assert api in lib, api
+
+
+def test_run_task_keeps_the_ros_pythonpath(ws):
+    assert "_program:\$PYTHONPATH" in (ws / "bot_program" / "run_task.sh").read_text()

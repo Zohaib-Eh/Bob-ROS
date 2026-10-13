@@ -22,6 +22,7 @@ _kin = importlib.import_module(f"{ROBOT}_kinematics")
 _home = importlib.import_module(f"{ROBOT}_kinematics._chain").home
 _ERRORS = {v: k for k, v in vars(MoveItErrorCodes).items() if k.isupper() and isinstance(v, int)}
 _UNREACHABLE = {"NO_IK_SOLUTION", "INVALID_GOAL_CONSTRAINTS", "GOAL_CONSTRAINTS_VIOLATED"}
+_NO_PATH = {"FAILURE", "PLANNING_FAILED", "TIMED_OUT"}
 _COLLISION = {"GOAL_IN_COLLISION", "START_STATE_IN_COLLISION", "INVALID_MOTION_PLAN",
               "MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE"}
 
@@ -65,11 +66,18 @@ def _rpy(R) -> tuple:
 
 
 def _quat(R) -> tuple:
-    w = math.sqrt(max(0.0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
-    x = math.copysign(math.sqrt(max(0.0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2, R[2, 1] - R[1, 2])
-    y = math.copysign(math.sqrt(max(0.0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2, R[0, 2] - R[2, 0])
-    z = math.copysign(math.sqrt(max(0.0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2, R[1, 0] - R[0, 1])
-    return x, y, z, w
+    t = R[0, 0] + R[1, 1] + R[2, 2]
+    if t > 0:
+        k = 2 * math.sqrt(t + 1)
+        return (R[2, 1] - R[1, 2]) / k, (R[0, 2] - R[2, 0]) / k, (R[1, 0] - R[0, 1]) / k, k / 4
+    if R[0, 0] >= R[1, 1] and R[0, 0] >= R[2, 2]:
+        k = 2 * math.sqrt(1 + R[0, 0] - R[1, 1] - R[2, 2])
+        return k / 4, (R[0, 1] + R[1, 0]) / k, (R[0, 2] + R[2, 0]) / k, (R[2, 1] - R[1, 2]) / k
+    if R[1, 1] >= R[2, 2]:
+        k = 2 * math.sqrt(1 - R[0, 0] + R[1, 1] - R[2, 2])
+        return (R[0, 1] + R[1, 0]) / k, k / 4, (R[1, 2] + R[2, 1]) / k, (R[0, 2] - R[2, 0]) / k
+    k = 2 * math.sqrt(1 - R[0, 0] - R[1, 1] + R[2, 2])
+    return (R[0, 2] + R[2, 0]) / k, (R[1, 2] + R[2, 1]) / k, k / 4, (R[1, 0] - R[0, 1]) / k
 
 
 def _pose(xyz, rpy) -> Pose:
@@ -117,8 +125,9 @@ class Robot:
         self._apply = n.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self._get = n.create_client(GetPlanningScene, "/get_planning_scene")
         self._joints = {}
+        self._stamp = 0
         n.create_subscription(JointState, "/joint_states",
-                              lambda m: self._joints.update(zip(m.name, m.position)), 10)
+                              self._on_joints, 10)
         for c in (self._cartesian, self._apply, self._get):
             if not c.wait_for_service(timeout_sec=30):
                 raise PlanningFailed(f"MoveIt service {c.srv_name} is not available")
@@ -194,6 +203,16 @@ class Robot:
             self._diff(world=removals)
         self.home()
 
+    def _on_joints(self, m):
+        self._joints.update(zip(m.name, m.position))
+        self._stamp += 1
+
+    def _settle(self):
+        """Wait for a joint state that arrived after the motion finished."""
+        seen, end = self._stamp, time.time() + 2
+        while self._stamp == seen and time.time() < end:
+            rclpy.spin_once(_node(), timeout_sec=0.05)
+
     # --- state -------------------------------------------------------------------------------
     def _current(self) -> np.ndarray:
         end = time.time() + 5
@@ -238,6 +257,12 @@ class Robot:
             world, attached = self._scene()
             return Collision(f"{what} collides with the robot or the scene ({name}); "
                              f"objects: {', '.join(world + attached) or 'none'}")
+        if name in _NO_PATH:
+            world, attached = self._scene()
+            return PlanningFailed(f"{what}: MoveIt found no collision-free path ({name}). The target may be inside "
+                                  "or touching an object or the robot itself; keep a few centimetres of clearance "
+                                  "(the tool's own geometry extends past the tool frame); "
+                                  f"objects: {', '.join(world + attached) or 'none'}")
         return PlanningFailed(f"{what}: MoveIt could not plan it ({name})")
 
     def _plan_execute(self, constraints: Constraints, what: str):
@@ -254,6 +279,7 @@ class Robot:
         res = self._run(self._move, goal, 120)
         if res.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(res.error_code.val, what)
+        self._settle()
 
     def move_to(self, xyz, rpy):
         self._check_reach(xyz, rpy)
@@ -313,3 +339,4 @@ class Robot:
         out = self._run(self._exec, ExecuteTrajectory.Goal(trajectory=res.solution), 120)
         if out.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(out.error_code.val, f"straight line to {_fmt(xyz)}")
+        self._settle()
