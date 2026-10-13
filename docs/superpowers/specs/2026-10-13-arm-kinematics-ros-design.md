@@ -25,6 +25,8 @@ Success criteria:
 5. Real hardware: vendor drivers (e.g. ABB via `abb_ros2`), calibration options, simulation-first and explicit confirmation before the first real motion.
 6. Mobile bases (differential, skid-steer, mecanum/omni, Ackermann; via `ros2_control` drive controllers), then mobile manipulators.
 
+Order update (2026-10-13): prompt to program (4) comes next, on the existing mock-hardware MoveIt setup with joint states streamed to the browser viewer; physics simulation (2) follows. Before real hardware (5): snap revolute hinge lines to round features (bores, bosses, housings) when several of different sizes share one line, and mark joints whose hinge is only estimated so the user checks them in the joint tool.
+
 Later, unordered: native CAD mates as input (Onshape API first, then SolidWorks); grippers with mimic joints and closed loops; part classes (fasteners, bearings) for auto-grouping; MuJoCo RL; cross-simulator comparison.
 
 Competitive notes (2026-10-13): closest tools are Drift (prompt → ROS 2 sim workspace, no CAD import, no hardware), Jointly and arugoa/cad-to-urdf (CAD → URDF/MJCF/USD), Trener Robotics (natural-language programming of commercial arms only). The gap is custom robots with no existing URDF; the edge is correctness without hand fixes (sweep-derived limits, verified kinematics) and local processing of private CAD.
