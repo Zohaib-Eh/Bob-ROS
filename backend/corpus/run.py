@@ -1,6 +1,7 @@
 """Run every model with expectations through the pipeline and score it.
 Usage: python -m corpus.run [--corpus-dir DIR] [--expected-dir DIR] [--baseline FILE]
-                            [--report FILE] [--update-baseline] [--list-parts NAME]"""
+                            [--report FILE] [--update-baseline] [--list-parts NAME]
+                            [--export-dir DIR]"""
 import argparse
 import hashlib
 import json
@@ -50,7 +51,7 @@ def _confirmed(joint: Joint, exp: dict) -> Joint:
     return joint.model_copy(update={"type": t, "source": "confirmed", "axis": axis, **extra})
 
 
-def score_model(exp: dict, path: Path) -> dict:
+def score_model(exp: dict, path: Path, robot_name: str = "corpus_robot", zip_out: Path | None = None) -> dict:
     t0 = time.time()
     bodies, _, file_warnings = import_path(str(path), path.suffix.lower(), exp.get("scale", 0.001))
     s = {"parts": len(bodies), "failed": sum(b.status == "failed" for b in bodies),
@@ -89,8 +90,11 @@ def score_model(exp: dict, path: Path) -> dict:
         model_links = [Link(id=n, name=n, body_ids=[n], density_kg_m3=2700.0,
                             accept_approximate_mass=True) for n in links]
         try:
-            export_package("corpus_robot", model_links, joints, {n: [b] for n, b in links.items()})
+            data = export_package(robot_name, model_links, joints, {n: [b] for n, b in links.items()})
             s["export_ok"] = True
+            if zip_out is not None:
+                zip_out.parent.mkdir(parents=True, exist_ok=True)
+                zip_out.write_bytes(data)
         except ValueError as exc:
             s["export_error"] = str(exc)[:200]
     else:
@@ -137,6 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--report", default=str(REPO / "corpus" / "report.json"))
     p.add_argument("--update-baseline", action="store_true")
     p.add_argument("--list-parts")
+    p.add_argument("--export-dir", help="write each exported model as <dir>/<model>.zip")
     a = p.parse_args(argv)
     corpus, baseline_path = Path(a.corpus_dir), Path(a.baseline)
 
@@ -162,7 +167,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name}: skipped (sha256 mismatch)")
             continue
         try:
-            s = score_model(exp, path)
+            s = score_model(exp, path, robot_name=name,
+                            zip_out=Path(a.export_dir) / f"{name}.zip" if a.export_dir else None)
         except Exception as exc:  # a crashing model is a result, not a runner crash
             s = {"parts": 0, "failed": 0, "joints": 0, "type_ok": 0, "axis_ok": 0,
                  "warnings": 0, "export_ok": False, "seconds": 0.0,

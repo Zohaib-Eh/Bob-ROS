@@ -30,6 +30,17 @@ def test_scorecard_runs_and_detects_regression(tmp_path, capsys):
     assert run.main(args) == 1                                        # regressed
 
 
+def test_export_dir_writes_one_zip_per_exported_model(tmp_path):
+    corpus = tmp_path / "corpus"; generate.main([str(corpus)])
+    out = tmp_path / "zips"
+    run.main(["--corpus-dir", str(corpus), "--expected-dir", str(EXPECTED),
+              "--baseline", str(tmp_path / "b.json"), "--report", str(tmp_path / "r.json"),
+              "--export-dir", str(out)])
+    import zipfile
+    names = zipfile.ZipFile(out / "peg_in_hole.zip").namelist()
+    assert "peg_in_hole/urdf/peg_in_hole.urdf" in names
+
+
 def test_ambiguous_and_unknown_body_names_are_reported(tmp_path, capsys):
     corpus, exp = tmp_path / "corpus", tmp_path / "expected"
     generate.main([str(corpus)]); exp.mkdir()
@@ -93,3 +104,4 @@ def test_update_baseline_still_prints_regressions(tmp_path, capsys):
     capsys.readouterr()
     assert run.main(args + ["--update-baseline"]) == 0
     assert "REGRESSION m: parts 5 -> 1" in capsys.readouterr().out
+

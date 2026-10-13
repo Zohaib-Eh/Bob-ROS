@@ -253,3 +253,25 @@ def test_accept_approximate_on_unmeasurable_geometry_asks_for_override():
     link = Link(id="a", name="a", body_ids=["b"], density_kg_m3=1000.0, accept_approximate_mass=True)
     with pytest.raises(ValueError, match=r"Link 'a'.*mass_override_kg"):
         export_package("r", [link], [], {"a": [body]})
+
+
+def test_export_package_is_a_ros2_ament_package():
+    links, joints = [_link("base"), _link("arm")], [_joint("j1", "base", "arm")]
+    data = export_package("bot", links, joints, {l.id: [_body(l.id)] for l in links})
+    z = zipfile.ZipFile(io.BytesIO(data))
+    pkg = ET.fromstring(z.read("bot/package.xml"))
+    assert pkg.attrib["format"] == "3"
+    assert pkg.find("buildtool_depend").text == "ament_cmake"
+    assert pkg.find("export/build_type").text == "ament_cmake"
+    cmake = z.read("bot/CMakeLists.txt").decode()
+    assert "project(bot)" in cmake
+    assert "install(DIRECTORY urdf meshes DESTINATION share/${PROJECT_NAME})" in cmake
+
+
+def test_joints_are_named_after_their_child_link():
+    links = [_link("base"), _link("my-arm"), _link("a_b"), _link("a-b")]
+    joints = [_joint("j1", "base", "my-arm"), _joint("j2", "my-arm", "a_b"),
+              _joint("j3", "a_b", "a-b")]
+    root = _export(links, joints)
+    names = [j.attrib["name"] for j in root.findall("joint")]
+    assert names == ["my_arm_joint", "a_b_joint", "a_b_joint_2"]
