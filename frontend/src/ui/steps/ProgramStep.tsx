@@ -11,31 +11,60 @@ import { withNames } from "../useLinkMass";
 const MAX_RUNS = 3;
 interface TaskCard { task: string; lines: string[]; runs: number; done?: Extract<ProgramEvent, { kind: "done" }>; error?: string }
 
+// Chat survives step switches (the component unmounts when you leave the step).
+const memory = { cards: [] as TaskCard[], resume: null as string | null };
+export function resetProgramMemory() { memory.cards = []; memory.resume = null; }
+export const POLL = { starting: 1000, ready: 5000 };  // ms; mutable so tests can shorten
+
 export default function ProgramStep({ ctx }: { ctx: Ctx }) {
   const { model, robotName, viewer } = ctx;
   const [status, setStatus] = useState<SessionStatus>({ state: "stopped" });
   const [error, setError] = useState<string | null>(null);
-  const [cards, setCards] = useState<TaskCard[]>([]);
+  const [cards, setCards] = useState<TaskCard[]>(memory.cards);
   const [task, setTask] = useState("");
   const [busy, setBusy] = useState(false);
-  const [resume, setResume] = useState<string | null>(null);
+  const [resume, setResume] = useState<string | null>(memory.resume);
   const [rerunOut, setRerunOut] = useState<string | null>(null);
   const ros = useRef<RosBridge | null>(null);
+  const mounted = useRef(true);
+  const abort = useRef<AbortController | null>(null);
+  useEffect(() => { memory.cards = cards; }, [cards]);
+  useEffect(() => { memory.resume = resume; }, [resume]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; abort.current?.abort(); }; }, []);
+  const msg = (e: unknown) => withNames((e as Error).message, model.links);
   const last = [...cards].reverse().find((c) => c.done?.code);
 
   async function start() {
     setError(null);
     try {
       const req = buildExportRequest(model);
-      setStatus(await api.startSession(robotName, req.links, req.joints, req.bodiesByLink));
-    } catch (e) { setError(withNames((e as Error).message, model.links)); }
+      const s = await api.startSession(robotName, req.links, req.joints, req.bodiesByLink);
+      if (mounted.current) setStatus(s);
+    } catch (e) { if (mounted.current) setError(msg(e)); }
   }
 
-  useEffect(() => {  // poll until ready or failed
-    if (status.state !== "starting") return;
-    const t = setInterval(async () => {
-      try { setStatus(await api.sessionStatus()); } catch (e) { setError((e as Error).message); }
-    }, 1000);
+  async function restart() {
+    setBusy(true); setError(null);
+    try { await api.stopSession(); await start(); }
+    catch (e) { if (mounted.current) setError(msg(e)); }
+    if (mounted.current) setBusy(false);
+  }
+
+  async function stop() {
+    setBusy(true); setError(null);
+    try { await api.stopSession(); if (mounted.current) setStatus({ state: "stopped" }); }
+    catch (e) { if (mounted.current) setError(msg(e)); }
+    if (mounted.current) setBusy(false);
+  }
+
+  async function refresh() {
+    try { const s = await api.sessionStatus(); if (mounted.current) setStatus(s); }
+    catch (e) { if (mounted.current) setError((e as Error).message); }
+  }
+
+  useEffect(() => {  // poll while starting (fast) and ready (detects a dead session)
+    if (status.state !== "starting" && status.state !== "ready") return;
+    const t = setInterval(refresh, status.state === "starting" ? POLL.starting : POLL.ready);
     return () => clearInterval(t);
   }, [status.state]);
 
@@ -67,17 +96,25 @@ export default function ProgramStep({ ctx }: { ctx: Ctx }) {
     if (!text || busy) return;
     setTask(""); setBusy(true); setRerunOut(null);
     setCards((cs) => [...cs, { task: text, lines: [], runs: 0 }]);
-    const update = (f: (c: TaskCard) => TaskCard) => setCards((cs) => cs.map((c, i) => (i === cs.length - 1 ? f(c) : c)));
+    const update = (f: (c: TaskCard) => TaskCard) => { if (mounted.current) setCards((cs) => cs.map((c, i) => (i === cs.length - 1 ? f(c) : c))); };
+    const ctl = new AbortController();
+    abort.current = ctl;
+    let failed = false;
     try {
       await api.runTask(text, resume, (e) => {
         if (e.kind === "text") update((c) => ({ ...c, lines: [...c.lines, e.text] }));
         else if (e.kind === "run") update((c) => ({ ...c, runs: e.n }));
         else if (e.kind === "run_result") update((c) => ({ ...c, lines: [...c.lines, `Run ${c.runs}: ${e.message}`] }));
-        else if (e.kind === "done") { update((c) => ({ ...c, done: e })); if (e.session_id) setResume(e.session_id); }
-        else if (e.kind === "error") update((c) => ({ ...c, error: e.message }));
-      });
-    } catch (e) { update((c) => ({ ...c, error: (e as Error).message })); }
+        else if (e.kind === "done") { update((c) => ({ ...c, done: e })); if (e.session_id && mounted.current) setResume(e.session_id); }
+        else if (e.kind === "error") { failed = true; update((c) => ({ ...c, error: e.message })); }
+      }, ctl.signal);
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      failed = true; update((c) => ({ ...c, error: (e as Error).message }));
+    }
+    if (!mounted.current) return;
     setBusy(false);
+    if (failed) await refresh();
   }
 
   async function runAgain() {
@@ -92,9 +129,10 @@ export default function ProgramStep({ ctx }: { ctx: Ctx }) {
       <div className="row">
         {status.state === "stopped" || status.state === "failed"
           ? <button onClick={start}><Play size={14} /> Start ROS</button>
-          : <button onClick={async () => { await api.stopSession(); setStatus({ state: "stopped" }); }}><Square size={14} /> Stop ROS</button>}
+          : <button onClick={stop} disabled={busy}><Square size={14} /> Stop ROS</button>}
+        {(status.state === "ready" || status.state === "failed") && <button onClick={restart} disabled={busy}><RotateCcw size={14} /> Restart session</button>}
         <span className="muted">
-          {status.state === "starting" && "Starting ROS… (the first start builds the workspace)"}
+          {status.state === "starting" && "Starting ROS… (first start builds the workspace)"}
           {ready && "ROS ready"}
           {status.state === "failed" && "ROS session stopped"}
         </span>

@@ -19,4 +19,22 @@ describe("program api", () => {
     expect(events).toEqual([{ kind: "run", n: 1 }]);
     expect(rest).toBe('data: {"kind"');
   });
+
+  it("parses CRLF-framed events", () => {
+    const { events } = parseSse('data: {"kind":"run","n":1}\r\n\r\ndata: {"kind":"run","n":2}\r\n\r\n');
+    expect(events).toEqual([{ kind: "run", n: 1 }, { kind: "run", n: 2 }]);
+  });
+
+  it("skips a bad frame between good ones", () => {
+    const { events } = parseSse('data: {"kind":"run","n":1}\n\ndata: {oops\n\ndata: {"kind":"run","n":2}\n\n');
+    expect(events).toEqual([{ kind: "run", n: 1 }, { kind: "run", n: 2 }]);
+  });
+
+  it("delivers a final event without a trailing blank line", async () => {
+    const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: {"kind":"run","n":7}')); c.close(); } });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+    const got: ProgramEvent[] = [];
+    await runTask("go", null, (e) => got.push(e));
+    expect(got).toEqual([{ kind: "run", n: 7 }]);
+  });
 });

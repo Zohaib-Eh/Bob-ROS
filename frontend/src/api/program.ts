@@ -25,9 +25,13 @@ export async function rerun(program: string): Promise<{ ok: boolean; output: str
 }
 
 export function parseSse(buffer: string): { events: ProgramEvent[]; rest: string } {
-  const parts = buffer.split("\n\n");
+  const parts = buffer.replace(/\r\n/g, "\n").split("\n\n");
   const rest = parts.pop() ?? "";
-  const events = parts.filter((p) => p.startsWith("data: ")).map((p) => JSON.parse(p.slice(6)) as ProgramEvent);
+  const events: ProgramEvent[] = [];
+  for (const p of parts) {
+    if (!p.startsWith("data: ")) continue;
+    try { events.push(JSON.parse(p.slice(6)) as ProgramEvent); } catch { /* skip bad frame */ }
+  }
   return { events, rest };
 }
 
@@ -45,4 +49,5 @@ export async function runTask(task: string, resume: string | null, onEvent: (e: 
     events.forEach(onEvent);
     if (done) break;
   }
+  parseSse(buffer + "\n\n").events.forEach(onEvent);
 }

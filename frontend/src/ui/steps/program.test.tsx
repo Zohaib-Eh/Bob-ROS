@@ -1,13 +1,14 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as program from "../../api/program";
 import { boxBody } from "../../model/testBodies";
 import { Harness, imported } from "../testing";
-import ProgramStep from "./ProgramStep";
+import ProgramStep, { POLL, resetProgramMemory } from "./ProgramStep";
 
 vi.mock("../../ros/rosbridge", () => ({
   RosBridge: class { ready = Promise.resolve(); subscribe() {} call() { return Promise.resolve({ scene: {} }); } close() {} },
 }));
+beforeEach(() => { resetProgramMemory(); POLL.starting = 10; POLL.ready = 20; });
 afterEach(() => vi.restoreAllMocks());
 
 const ui = () => render(<Harness start={imported([boxBody("base", [0, 0, 0], [1, 1, 1])])} step="program"
@@ -44,5 +45,57 @@ describe("ProgramStep", () => {
     ui();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /start ros/i })); });
     expect(await screen.findByText("Start Docker Desktop.")).toBeTruthy();
+  });
+
+  const startReady = async () => {
+    vi.spyOn(program, "startSession").mockResolvedValue({ state: "ready", robot: "bot" });
+    const view = ui();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /start ros/i })); });
+    await screen.findByText(/ROS ready/i);
+    return view;
+  };
+
+  it("detects a session that dies after ready", async () => {
+    const status = vi.spyOn(program, "sessionStatus").mockResolvedValue({ state: "ready", robot: "bot" });
+    await startReady();
+    status.mockResolvedValue({ state: "failed", log: "boom" });
+    expect(await screen.findByText("boom")).toBeTruthy();
+  });
+
+  it("restart session stops then starts", async () => {
+    vi.spyOn(program, "sessionStatus").mockResolvedValue({ state: "ready", robot: "bot" });
+    const order: string[] = [];
+    const stop = vi.spyOn(program, "stopSession").mockImplementation(async () => { order.push("stop"); });
+    await startReady();
+    (program.startSession as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => { order.push("start"); return { state: "ready" }; });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /restart session/i })); });
+    expect(stop).toHaveBeenCalled();
+    expect(order).toEqual(["stop", "start"]);
+  });
+
+  it("shows a stop error", async () => {
+    vi.spyOn(program, "sessionStatus").mockResolvedValue({ state: "ready", robot: "bot" });
+    vi.spyOn(program, "stopSession").mockRejectedValue(new Error("docker gone"));
+    await startReady();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /stop ros/i })); });
+    expect(await screen.findByText("docker gone")).toBeTruthy();
+  });
+
+  it("aborts a run on unmount and keeps the chat on remount", async () => {
+    vi.spyOn(program, "sessionStatus").mockResolvedValue({ state: "ready", robot: "bot" });
+    let signal: AbortSignal | undefined;
+    vi.spyOn(program, "runTask").mockImplementation((_t, _r, on, sig) => {
+      signal = sig; on({ kind: "text", text: "working" });
+      return new Promise<void>((_, rej) => sig!.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" }))));
+    });
+    const view = await startReady();
+    fireEvent.change(screen.getByLabelText(/task/i), { target: { value: "move it" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^send$/i })); });
+    expect(signal!.aborted).toBe(false);
+    view.unmount();
+    expect(signal!.aborted).toBe(true);
+    ui();
+    expect(screen.getByText("move it")).toBeTruthy();
+    expect(screen.getByText("working")).toBeTruthy();
   });
 });
