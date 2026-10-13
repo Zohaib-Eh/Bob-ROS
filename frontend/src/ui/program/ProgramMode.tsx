@@ -1,5 +1,5 @@
 import { ArrowLeft, Play, RotateCcw, Square } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { Conversation, ConversationInfo } from "../../api/program";
 import type { Ctx } from "../ctx";
@@ -14,20 +14,50 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
   const [running] = useState(false);  // wired by the chat task
   const known = status.state === "ready" || status.state === "starting";
 
-  async function reload(select?: string) {
+  const activeId = useRef<string | null>(null);
+  const req = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { activeId.current = active?.id ?? null; }, [active]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const fail = (e: unknown) => ros.setError((e as Error).message);
+
+  // select: id = switch to it, null = first non-broken of the fresh list, undefined = keep current
+  async function reload(select?: string | null) {
+    const token = ++req.current;
     try {
       const list = await api.listConversations();
+      if (token !== req.current || !mounted.current) return;
       setConvs(list);
-      const id = select ?? active?.id ?? list.find((c) => !c.broken)?.id;
-      if (id) setActive(await api.getConversation(id));
-    } catch (e) { ros.setError((e as Error).message); }
+      const id = select === null ? list.find((c) => !c.broken)?.id : select ?? activeId.current ?? list.find((c) => !c.broken)?.id;
+      if (!id) { if (select === null) setActive(null); return; }
+      const c = await api.getConversation(id);
+      if (token === req.current && mounted.current) setActive(c);
+    } catch (e) { if (token === req.current && mounted.current) fail(e); }
   }
   useEffect(() => { if (known) void reload(); }, [known]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function newConversation() {
-    const c = await api.createConversation();
-    setActive(c);
-    setConvs((cs) => [{ id: c.id, title: c.title, created: c.created, updated: c.updated }, ...cs]);
+    try {
+      const c = await api.createConversation();
+      req.current++;
+      setActive(c);
+      setConvs((cs) => [{ id: c.id, title: c.title, created: c.created, updated: c.updated }, ...cs]);
+    } catch (e) { fail(e); }
+  }
+
+  async function rename(id: string, title: string) {
+    try {
+      await api.renameConversation(id, title);
+      setConvs((cs) => cs.map((c) => (c.id === id ? { ...c, title } : c)));
+      setActive((a) => (a?.id === id ? { ...a, title } : a));
+    } catch (e) { fail(e); }
+  }
+
+  async function remove(id: string) {
+    try {
+      await api.deleteConversation(id);
+      await reload(activeId.current === id ? null : undefined);
+    } catch (e) { fail(e); }
   }
 
   return (
@@ -54,8 +84,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
       <div className="program-columns">
         <ConversationList items={convs} active={active?.id ?? null} disabled={running || !known}
           onSelect={(id) => void reload(id)} onNew={() => void newConversation()}
-          onRename={async (id, title) => { await api.renameConversation(id, title); await reload(id); }}
-          onDelete={async (id) => { await api.deleteConversation(id); if (active?.id === id) setActive(null); await reload(); }} />
+          onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
         <section className="chat-column" data-testid="chat-slot" />
         <section className="workspace-column" data-testid="workspace-slot">{preview}</section>
       </div>

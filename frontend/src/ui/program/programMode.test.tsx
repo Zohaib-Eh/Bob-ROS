@@ -56,3 +56,58 @@ describe("ProgramMode", () => {
     expect((await screen.findByText("Unreadable conversation")).closest("li")!.className).toMatch(/broken/);
   });
 });
+
+describe("ProgramMode sidebar fixes", () => {
+  const two = [{ id: "aaaaaaaaaaaa", title: "Alpha" }, { id: "bbbbbbbbbbbb", title: "Beta" }];
+  const activeIds = () => two.filter((c) => screen.queryByTestId(`conv-${c.id}`)?.className.includes("active")).map((c) => c.id);
+
+  it("deleting the active conversation selects the next one", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(api, "listConversations").mockResolvedValueOnce(two).mockResolvedValue([two[1]]);
+    const get = vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, id));
+    vi.spyOn(api, "deleteConversation").mockResolvedValue(undefined as never);
+    await ready();
+    await vi.waitFor(() => expect(activeIds()).toEqual(["aaaaaaaaaaaa"]));
+    await act(async () => { fireEvent.click(screen.getByLabelText("Delete Alpha")); });
+    await vi.waitFor(() => expect(activeIds()).toEqual(["bbbbbbbbbbbb"]));
+    expect(get).not.toHaveBeenLastCalledWith("aaaaaaaaaaaa");
+    expect(document.querySelector(".error")).toBeNull();
+  });
+
+  it("a slow earlier switch cannot override a later one", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue(two);
+    const slow: Record<string, (c: ReturnType<typeof conv>) => void> = {};
+    vi.spyOn(api, "getConversation").mockImplementationOnce(async (id) => conv(id, id))
+      .mockImplementation((id) => new Promise((r) => { slow[id] = r; }));
+    await ready();
+    await vi.waitFor(() => expect(activeIds()).toEqual(["aaaaaaaaaaaa"]));
+    await act(async () => { fireEvent.click(screen.getByText("Alpha")); });
+    await act(async () => { fireEvent.click(screen.getByText("Beta")); });
+    await act(async () => { slow.bbbbbbbbbbbb(conv("bbbbbbbbbbbb", "Beta")); });
+    await act(async () => { slow.aaaaaaaaaaaa(conv("aaaaaaaaaaaa", "Alpha")); });
+    expect(activeIds()).toEqual(["bbbbbbbbbbbb"]);
+  });
+
+  it("shows an error when creating fails", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    vi.spyOn(api, "createConversation").mockRejectedValue(new Error("boom"));
+    await ready();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /new/i })); });
+    expect(await screen.findByText("boom")).toBeTruthy();
+  });
+
+  it("renaming another conversation keeps the active one", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue(two);
+    const get = vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, id));
+    vi.spyOn(api, "renameConversation").mockResolvedValue(conv("bbbbbbbbbbbb", "Gamma"));
+    await ready();
+    await vi.waitFor(() => expect(activeIds()).toEqual(["aaaaaaaaaaaa"]));
+    get.mockClear();
+    await act(async () => { fireEvent.doubleClick(screen.getByText("Beta")); });
+    fireEvent.change(screen.getByDisplayValue("Beta"), { target: { value: "Gamma" } });
+    await act(async () => { fireEvent.keyDown(screen.getByDisplayValue("Gamma"), { key: "Enter" }); });
+    expect(await screen.findByText("Gamma")).toBeTruthy();
+    expect(activeIds()).toEqual(["aaaaaaaaaaaa"]);
+    expect(get).not.toHaveBeenCalled();
+  });
+});
