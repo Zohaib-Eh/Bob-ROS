@@ -12,18 +12,22 @@ Success criteria:
 
 - `python -m app.ros.cli irb1300.zip -o ws/` writes `ws/src/` with `irb1300` (description), `irb1300_moveit_config` and `irb1300_kinematics`.
 - In a ROS 2 Jazzy container, `colcon build` of that workspace succeeds.
-- `demo.launch.py` on mock hardware, headless, plans and executes a move to a reachable pose; MoveIt reports success and `/joint_states` reaches the target.
+- `demo.launch.py` on mock hardware, headless: both controllers report `active`, the TF tree reaches the tip link from the base, and MoveIt plans and executes a move to a reachable pose; MoveIt reports success and `/joint_states` reaches the target.
 - On 200 random reachable IRB 1300 poses, every EAIK solution reproduces its pose through the numpy FK within 1e-6 m / 1e-6 rad, and TRAC-IK's answer matches one of EAIK's solutions.
 - A branching or wheeled robot is declined with a one-sentence reason and no partial output.
 
 ## 2. Roadmap (context, not scope)
 
 1. **Arm kinematics and ROS 2 packages** — this spec.
-2. Simulation container: Gazebo and/or MuJoCo, headless, joint states streamed to the browser viewer (not video).
+2. Simulation container: Gazebo and/or MuJoCo, headless, joint states streamed to the browser viewer (not video). Adds convex collision shapes (primitives where they fit, CoACD convex decomposition elsewhere; MuJoCo otherwise hulls concave links), MJCF export, and a "stable after spawn" physics check.
 3. Workspace UI: prompt on one side, live robot plus file tree on the other.
-4. Prompt to program: an LLM writes MoveIt task code into `<robot>_tasks/`, run in simulation.
+4. Prompt to program: an LLM writes MoveIt task code into `<robot>_tasks/`, run in simulation. Intent-file pattern: the LLM edits a small intent file (limits, materials, tasks), deterministic generators rebuild everything else; it never edits generated config.
 5. Real hardware: vendor drivers (e.g. ABB via `abb_ros2`), calibration options, simulation-first and explicit confirmation before the first real motion.
 6. Mobile bases (differential, skid-steer, mecanum/omni, Ackermann; via `ros2_control` drive controllers), then mobile manipulators.
+
+Later, unordered: native CAD mates as input (Onshape API first, then SolidWorks); grippers with mimic joints and closed loops; part classes (fasteners, bearings) for auto-grouping; MuJoCo RL; cross-simulator comparison.
+
+Competitive notes (2026-10-13): closest tools are Drift (prompt → ROS 2 sim workspace, no CAD import, no hardware), Jointly and arugoa/cad-to-urdf (CAD → URDF/MJCF/USD), Trener Robotics (natural-language programming of commercial arms only). The gap is custom robots with no existing URDF; the edge is correctness without hand fixes (sweep-derived limits, verified kinematics) and local processing of private CAD.
 
 ## 3. Decisions (from the design conversation)
 
@@ -36,6 +40,7 @@ Success criteria:
 | MoveIt IK plugin | TRAC-IK (`trac_ik_kinematics_plugin`, Jazzy binary 2.0.2), `solve_type: Distance`, 50 ms timeout. Commented pick_ik (Jazzy binary 1.1.3) alternative. |
 | All-solutions IK | EAIK (BSD-3, pip, reads URDF): exact closed-form for any 6R, 5R and 1–4R arm. Wrapped in a generated `<robot>_kinematics` Python package for task programs. |
 | Simulator hardware | `ros2_control` xacro takes a `hardware` argument. Project 1 ships `mock` only; `gz` and `mujoco` values come with project 2, where they are tested. |
+| Launch | Own `demo.launch.py` (robot_state_publisher, ros2_control_node, controller spawners, move_group). No RViz: the browser viewer replaces it in project 3, and `moveit_configs_utils`' stock demo launch needs an RViz config we would otherwise have to generate. |
 | File readability | Every generated file has a header comment saying it is generated, that regenerating overwrites it, and that user code goes in `<robot>_tasks/`. Detection results are written as comments. |
 
 ### Why not OPW (researched 2026-10-13)
@@ -49,6 +54,8 @@ The plan started with the OPW closed-form plugin for spherical-wrist 6-axis arms
 - `package.xml` becomes format 3 with `ament_cmake` and `<export><build_type>ament_cmake</build_type></export>`.
 - New `CMakeLists.txt` installs `urdf/` and `meshes/` to `share/<robot>/`.
 - Mesh references already use `package://<robot>/meshes/<link>.stl`; unchanged.
+- Joint names change from `joint_<uuid>` (hyphens; ugly in every generated file and risky as ROS parameter keys) to `<child link>_joint`, with characters outside `[A-Za-z0-9_]` replaced by `_` and a numeric suffix on collision.
+- The CLI also rejects robot names that are not valid ROS package names (`^[a-z][a-z0-9_]*$`); the app allows uppercase and hyphens.
 
 ## 5. Backend module `backend/app/ros/`
 
@@ -77,7 +84,7 @@ ws/src/
 │   │   ├── initial_positions.yaml    home
 │   │   ├── <robot>.ros2_control.xacro  hardware arg: mock (mock_components/GenericSystem)
 │   │   └── <robot>.urdf.xacro        includes description URDF + ros2_control xacro
-│   ├── launch/demo.launch.py     moveit_configs_utils demo; rviz:=false default for headless
+│   ├── launch/demo.launch.py     robot_state_publisher + ros2_control_node + spawners + move_group; no RViz
 │   ├── CMakeLists.txt
 │   └── package.xml
 └── <robot>_kinematics/           ament_python
@@ -99,6 +106,7 @@ The CLI writes nothing partial and exits non-zero with one sentence:
 - Unsupported joint type: names the joint and type.
 - Revolute or prismatic joint without limits: "Joint '<j>' has no limits; set them in the app and export again."
 - No `<robot>/urdf/<robot>.urdf` in the zip: "Not a cad-to-urdf export."
+- Robot name not a valid ROS package name: "Robot name '<n>' is not a valid ROS package name; use lowercase letters, digits and underscores, starting with a letter."
 
 ## 8. Testing
 
@@ -108,11 +116,11 @@ The CLI writes nothing partial and exits non-zero with one sentence:
 - `fk`: 2-link fixture matches hand-computed poses; IRB 1300 at zero puts the tip where the URDF says.
 - `collisions`: adjacent pairs skipped; overlapping-at-home pair → `Default`; a pair that never meets → `Never`.
 - `moveit_config`: IRB 1300 generation; SRDF and YAML parse; joint names match the URDF; every file has the header; an error leaves no output folder.
-- Export: `package.xml` is ament_cmake; `CMakeLists.txt` present.
+- Export: `package.xml` is ament_cmake; `CMakeLists.txt` present; joint names are `<child>_joint`.
 
 **Layer 2 — Docker (on request, `scripts/ros_check.sh <zip>`):**
 
-`docker/jazzy/Dockerfile` from `ros:jazzy` plus MoveIt, `trac_ik_kinematics_plugin`, `ros2_control`, `ros2_controllers`, mock components, `pip install EAIK`. The script runs the CLI, `colcon build`, launches the demo headless, plans and executes to a reachable pose, and runs the 200-pose IK check (§1). Prints pass/fail with solutions per pose, worst error, TRAC-IK success rate.
+`docker/jazzy/Dockerfile` from `ros:jazzy` plus MoveIt, `trac_ik_kinematics_plugin`, `ros2_control`, `ros2_controllers`, mock components, `pip install EAIK`. The script runs the CLI, `colcon build`, launches the demo headless, checks both controllers are `active` and the TF tree reaches the tip, plans and executes to a reachable pose, and runs the 200-pose IK check (§1). Prints pass/fail with solutions per pose, worst error, TRAC-IK success rate.
 
 **Host risk:** the Windows host has about 1 GB free commit memory; MoveIt plus `colcon build` in WSL2 typically wants 4 GB or more. The plan's first task checks that the container runs here. Fallbacks: free memory, raise the WSL2 limit in `.wslconfig`, or run layer 2 on GitHub Actions.
 
