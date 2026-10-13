@@ -4,7 +4,7 @@ import { RosBridge } from "./rosbridge";
 class FakeSocket {
   static last: FakeSocket;
   sent: any[] = [];
-  onopen?: () => void; onerror?: () => void; onmessage?: (e: { data: string }) => void;
+  onopen?: () => void; onerror?: () => void; onclose?: () => void; onmessage?: (e: { data: string }) => void;
   constructor(public url: string) { FakeSocket.last = this; setTimeout(() => this.onopen?.(), 0); }
   send(s: string) { this.sent.push(JSON.parse(s)); }
   close() {}
@@ -25,5 +25,23 @@ describe("RosBridge", () => {
     expect(req.op).toBe("call_service");
     FakeSocket.last.emit({ op: "service_response", id: req.id, result: true, values: { scene: 7 } });
     expect(await p).toEqual({ scene: 7 });
+  });
+
+  it("rejects pending calls when the socket closes, and ignores malformed frames", async () => {
+    const ros = new RosBridge("ws://x", FakeSocket as unknown as typeof WebSocket);
+    await ros.ready;
+    const p = ros.call("/s", "t/srv/T", {});
+    expect(() => FakeSocket.last.onmessage?.({ data: "not json" })).not.toThrow();
+    FakeSocket.last.onclose?.();
+    await expect(p).rejects.toThrow("ROS connection closed");
+  });
+
+  it("sends a subscribe made before the socket opens once it opens", async () => {
+    const ros = new RosBridge("ws://x", FakeSocket as unknown as typeof WebSocket);
+    ros.subscribe("/tf", "tf2_msgs/msg/TFMessage", () => {});
+    expect(FakeSocket.last.sent).toEqual([]);
+    await ros.ready;
+    await Promise.resolve();
+    expect(FakeSocket.last.sent).toHaveLength(1);
   });
 });

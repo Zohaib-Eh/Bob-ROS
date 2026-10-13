@@ -33,6 +33,18 @@ describe("liveRobot", () => {
     expect(p[0]).toBeCloseTo(0); expect(p[1]).toBeCloseTo(2); expect(p[2]).toBeCloseTo(1);
   });
 
+  it("joint origins are world poses: a downstream link stays put at zero and turns about its own frame", () => {
+    const links = [link("base", ["b0"]), link("arm", ["b1"]), link("hand", ["b2"])];
+    const home = homeFrames(links, [joint("arm", [0, 0, 1]), joint("hand", [1, 0, 1])], "base");
+    const tree = new FrameTree();
+    tree.update([tf("base", "arm", [0, 0, 1]), tf("arm", "hand", [1, 0, 0])]);
+    expect(at(bodyPoses(links, tree, home, "base").b2, [2, 0, 1])).toEqual([2, 0, 1]);
+    const s = Math.SQRT1_2;
+    tree.update([tf("arm", "hand", [1, 0, 0], [0, 0, s, s])]);
+    const p = at(bodyPoses(links, tree, home, "base").b2, [2, 0, 1]);
+    expect(p[0]).toBeCloseTo(1); expect(p[1]).toBeCloseTo(1); expect(p[2]).toBeCloseTo(1);
+  });
+
   it("places world boxes and attached cylinders", () => {
     const tree = new FrameTree();
     tree.update([tf("base", "hand", [1, 0, 0])]);
