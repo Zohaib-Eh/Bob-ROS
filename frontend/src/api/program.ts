@@ -1,11 +1,12 @@
 import { json, send } from "./client";
+import type { Message } from "../model/chat";
 import type { Body, Joint, Link } from "./types";
 
 export type ProgramEvent =
   | { kind: "text"; text: string }
   | { kind: "file"; path: string }
   | { kind: "run"; n: number }
-  | { kind: "run_result"; ok: boolean; message: string }
+  | { kind: "run_result"; ok: boolean; message: string; output?: string }
   | { kind: "done"; summary: string; runs: number; ok: boolean; session_id: string | null; program: string | null; code: string | null }
   | { kind: "error"; message: string };
 export interface SessionStatus { state: "stopped" | "starting" | "ready" | "failed"; robot?: string | null; log?: string }
@@ -20,8 +21,45 @@ export async function sessionStatus(): Promise<SessionStatus> {
 export async function stopSession(): Promise<void> {
   await send("/program/session", { method: "DELETE" });
 }
-export async function rerun(program: string): Promise<{ ok: boolean; output: string }> {
-  return (await send("/program/rerun", json({ program }))).json();
+
+export interface ConversationInfo { id: string; title: string; created?: number; updated?: number; broken?: boolean }
+export interface Conversation { id: string; title: string; created: number; updated: number;
+  claude_session_id: string | null; edited: string[]; messages: Message[] }
+export interface FileEntry { path: string; editable: boolean }
+
+const put = (body: unknown): RequestInit => ({ ...json(body), method: "PUT" });
+const patch = (body: unknown): RequestInit => ({ ...json(body), method: "PATCH" });
+
+export async function listConversations(): Promise<ConversationInfo[]> {
+  return (await send("/program/conversations", { method: "GET" })).json();
+}
+export async function createConversation(title?: string): Promise<Conversation> {
+  return (await send("/program/conversations", json(title ? { title } : {}))).json();
+}
+export async function getConversation(id: string): Promise<Conversation> {
+  return (await send(`/program/conversations/${id}`, { method: "GET" })).json();
+}
+export async function renameConversation(id: string, title: string): Promise<Conversation> {
+  return (await send(`/program/conversations/${id}`, patch({ title }))).json();
+}
+export async function deleteConversation(id: string): Promise<void> {
+  await send(`/program/conversations/${id}`, { method: "DELETE" });
+}
+export async function runConversation(id: string, task: string, onEvent: (e: ProgramEvent) => void,
+  signal?: AbortSignal): Promise<void> {
+  await streamEvents(`/program/conversations/${id}/run`, { task }, onEvent, signal);
+}
+export async function listFiles(): Promise<FileEntry[]> {
+  return (await send("/program/files", { method: "GET" })).json();
+}
+export async function readFile(path: string): Promise<{ path: string; content: string; editable: boolean }> {
+  return (await send(`/program/files/content?path=${encodeURIComponent(path)}`, { method: "GET" })).json();
+}
+export async function saveFile(path: string, content: string, conversation: string | null): Promise<void> {
+  await send("/program/files/content", put({ path, content, conversation }));
+}
+export async function runFile(path: string, conversation: string | null): Promise<{ ok: boolean; output: string }> {
+  return (await send("/program/files/run", json({ path, conversation }))).json();
 }
 
 export function parseSse(buffer: string): { events: ProgramEvent[]; rest: string } {
@@ -35,9 +73,9 @@ export function parseSse(buffer: string): { events: ProgramEvent[]; rest: string
   return { events, rest };
 }
 
-export async function runTask(task: string, resume: string | null, onEvent: (e: ProgramEvent) => void,
+async function streamEvents(path: string, body: unknown, onEvent: (e: ProgramEvent) => void,
   signal?: AbortSignal): Promise<void> {
-  const res = await send("/program/run", { ...json({ task, resume }), signal });
+  const res = await send(path, { ...json(body), signal });
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSse, runTask, type ProgramEvent } from "./program";
+import { parseSse, runConversation, saveFile, type ProgramEvent } from "./program";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -10,7 +10,7 @@ describe("program api", () => {
     const body = new ReadableStream({ start(c) { for (const k of chunks) c.enqueue(new TextEncoder().encode(k)); c.close(); } });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
     const got: ProgramEvent[] = [];
-    await runTask("go", null, (e) => got.push(e));
+    await runConversation("abc123abc123", "go", (e) => got.push(e));
     expect(got.map((e) => e.kind)).toEqual(["text", "run", "done"]);
   });
 
@@ -34,7 +34,24 @@ describe("program api", () => {
     const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: {"kind":"run","n":7}')); c.close(); } });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
     const got: ProgramEvent[] = [];
-    await runTask("go", null, (e) => got.push(e));
+    await runConversation("abc123abc123", "go", (e) => got.push(e));
     expect(got).toEqual([{ kind: "run", n: 7 }]);
+  });
+});
+
+describe("conversation client", () => {
+  it("runs a conversation over SSE", async () => {
+    const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: {"kind":"run","n":1}\n\n')); c.close(); } });
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200 }));
+    const got: unknown[] = [];
+    await runConversation("abc123abc123", "go", (e) => got.push(e));
+    expect(got).toEqual([{ kind: "run", n: 1 }]);
+    expect(f.mock.calls[0][0]).toBe("/api/program/conversations/abc123abc123/run");
+  });
+  it("saves a file with its conversation", async () => {
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    await saveFile("bot_tasks/programs/a.py", "x", "abc123abc123");
+    expect(JSON.parse(f.mock.calls[0][1]!.body as string)).toEqual({ path: "bot_tasks/programs/a.py", content: "x", conversation: "abc123abc123" });
+    expect(f.mock.calls[0][1]!.method).toBe("PUT");
   });
 });
