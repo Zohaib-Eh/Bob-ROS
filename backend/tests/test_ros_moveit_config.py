@@ -156,3 +156,32 @@ def test_failed_regeneration_leaves_workspace_untouched(tmp_path, monkeypatch):
     assert sorted(str(p.relative_to(src)) for p in src.rglob("*")) == before
     assert (src / "bot_moveit_config" / "marker.txt").read_text() == "keep"
     assert (src / "bot_tasks" / "mine.py").read_text() == "print('mine')"
+
+
+def test_failed_backup_rename_restores_earlier_backups_and_reraises_original(tmp_path, monkeypatch):
+    import app.ros.moveit_config as mc
+    from pathlib import Path
+
+    d = unzip(two_joint_zip(tmp_path), tmp_path / "x")
+    src = tmp_path / "ws" / "src"
+    generate("bot", d / "bot", src, source="bot.zip", samples=50)
+    (src / "bot_tasks").mkdir()
+    (src / "bot_tasks" / "mine.py").write_text("print('mine')")
+    before = sorted(str(p.relative_to(src)) for p in src.rglob("*"))
+
+    real_move = mc.shutil.move
+
+    def locked_second_backup(a, b):
+        # Fail the rename aside of the second existing package (after bot's backup succeeded).
+        if Path(a) == src / "bot_moveit_config":
+            raise OSError("file locked")
+        return real_move(a, b)
+
+    monkeypatch.setattr(mc.shutil, "move", locked_second_backup)
+    with pytest.raises(OSError, match="file locked"):
+        generate("bot", d / "bot", src, source="bot.zip", samples=50)
+    monkeypatch.setattr(mc.shutil, "move", real_move)
+
+    assert sorted(str(p.relative_to(src)) for p in src.rglob("*")) == before
+    assert not list(src.glob(".*"))
+    assert (src / "bot_tasks" / "mine.py").read_text() == "print('mine')"

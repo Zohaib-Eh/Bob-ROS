@@ -286,16 +286,25 @@ def _swap_in(out_src: Path, tmp: Path, pkgs: list[str]) -> None:
         for pkg in pkgs:
             dest = out_src / pkg
             if dest.exists():
-                backups[pkg] = out_src / f".{pkg}.old-{uuid.uuid4().hex[:8]}"
-                shutil.move(str(dest), str(backups[pkg]))
+                bak = out_src / f".{pkg}.old-{uuid.uuid4().hex[:8]}"
+                shutil.move(str(dest), str(bak))
+                backups[pkg] = bak  # recorded only once the rename has succeeded
             new.append(pkg)
             shutil.move(str(tmp / pkg), str(dest))
     except BaseException:
+        # Best effort per item so one failure cannot strand the rest; the original error is re-raised.
         for pkg in new:
-            if (out_src / pkg).exists():
-                shutil.rmtree(out_src / pkg)
+            try:
+                if (out_src / pkg).exists():
+                    shutil.rmtree(out_src / pkg)
+            except OSError:
+                pass
         for pkg, bak in backups.items():
-            shutil.move(str(bak), str(out_src / pkg))
+            try:
+                if bak.exists():
+                    shutil.move(str(bak), str(out_src / pkg))
+            except OSError:
+                pass
         if created:
             shutil.rmtree(out_src, ignore_errors=True)
         raise
