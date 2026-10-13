@@ -5,12 +5,13 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Iterable, Iterator
 
 SIGN_IN = "Run `claude` once in a terminal to sign in."
 NOT_FOUND = "Claude Code was not found. Install it, then run `claude` once in a terminal to sign in."
-_SIGNED_OUT = re.compile(r"(invalid api key|/login|not logged in|authentication)", re.I)
+_SIGNED_OUT = re.compile(r"(invalid api key|not logged in|please run /login)", re.I)
 
 
 def claude_command(exe: str, robot: str, brief_file: Path, resume: str | None) -> list[str]:
@@ -81,7 +82,10 @@ def parse_stream(lines: Iterable[str], tasks_dir: Path) -> Iterator[dict]:
                 yield {"kind": "error", "message": SIGN_IN if _SIGNED_OUT.search(text) else text}
                 return
             count = tasks_dir / ".run_count"
-            runs = int(count.read_text().strip() or 0) if count.exists() else len(runs_seen)
+            try:
+                runs = int(count.read_text().strip() or 0)
+            except (OSError, ValueError):
+                runs = len(runs_seen)
             code = None
             if last_program and (tasks_dir / last_program).exists():
                 code = (tasks_dir / last_program).read_text(encoding="utf-8")
@@ -104,19 +108,35 @@ def run_agent(robot: str, src: Path, task: str, resume: str | None = None,
     cmd = claude_command(exe, robot, brief, resume)
     if extra:
         cmd = [exe, *extra]
-    proc = subprocess.Popen(cmd, cwd=tasks_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
-    proc.stdin.write(task)
-    proc.stdin.close()
-    finished = False
-    for ev in parse_stream(proc.stdout, tasks_dir):
-        finished = finished or ev["kind"] in ("done", "error")
-        yield ev
-    err = proc.stderr.read()
-    code = proc.wait()
-    if not finished:
-        if _SIGNED_OUT.search(err):
-            yield {"kind": "error", "message": SIGN_IN}
-        else:
-            last = err.strip().splitlines()[-1] if err.strip() else f"Claude exited with code {code}."
-            yield {"kind": "error", "message": last}
+    try:
+        proc = subprocess.Popen(cmd, cwd=tasks_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        yield {"kind": "error", "message": f"Could not start Claude Code: {exc}"}
+        return
+    err_lines: list[str] = []
+    drain = threading.Thread(target=lambda: err_lines.extend(proc.stderr), daemon=True)
+    drain.start()
+    try:
+        try:
+            proc.stdin.write(task)
+            proc.stdin.close()
+        except OSError:
+            pass  # claude exited early; its stderr explains why
+        finished = False
+        for ev in parse_stream(proc.stdout, tasks_dir):
+            finished = finished or ev["kind"] in ("done", "error")
+            yield ev
+        code = proc.wait()
+        drain.join(timeout=5)
+        err = "".join(err_lines)
+        if not finished:
+            if _SIGNED_OUT.search(err):
+                yield {"kind": "error", "message": SIGN_IN}
+            else:
+                last = err.strip().splitlines()[-1] if err.strip() else f"Claude exited with code {code}."
+                yield {"kind": "error", "message": last}
+    finally:
+        if proc.poll() is None:  # client disconnected mid-run: don't leave claude editing files
+            proc.kill()
+            proc.wait()

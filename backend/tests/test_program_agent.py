@@ -49,3 +49,34 @@ def test_signed_out_claude_maps_to_sign_in_message(tmp_path):
     fake.write_text("import sys; sys.stdin.read(); print('Invalid API key · Please run /login', file=sys.stderr); sys.exit(1)", encoding="utf-8")
     events = list(agent.run_agent("bot", tmp_path, "do it", exe=sys.executable, extra=[str(fake)]))
     assert events[-1] == {"kind": "error", "message": "Run `claude` once in a terminal to sign in."}
+
+
+def _fake(tmp_path, body):
+    (tmp_path / "bot_tasks").mkdir(exist_ok=True)
+    f = tmp_path / "fake.py"
+    f.write_text(body, encoding="utf-8")
+    return [str(f)]
+
+
+def test_closing_the_generator_kills_the_child(tmp_path, monkeypatch):
+    import subprocess
+    procs = []
+    real = subprocess.Popen
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: procs.append(real(*a, **k)) or procs[-1])
+    extra = _fake(tmp_path, "import time\nprint('{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}', flush=True)\ntime.sleep(30)")
+    gen = agent.run_agent("bot", tmp_path, "x", exe=sys.executable, extra=extra)
+    assert next(gen)["kind"] == "text"
+    gen.close()
+    assert procs[0].poll() is not None
+
+
+def test_child_exiting_without_reading_stdin_is_one_error_event(tmp_path):
+    extra = _fake(tmp_path, "import sys; print('boom', file=sys.stderr); sys.exit(1)")
+    events = list(agent.run_agent("bot", tmp_path, "x" * 1_000_000, exe=sys.executable, extra=extra))
+    assert [e["kind"] for e in events] == ["error"] and events[0]["message"] == "boom"
+
+
+def test_usage_limit_error_passes_through():
+    line = '{"type":"result","is_error":true,"result":"Claude AI usage limit reached|1791900000"}'
+    events = list(agent.parse_stream([line], Path(".")))
+    assert events == [{"kind": "error", "message": "Claude AI usage limit reached|1791900000"}]
