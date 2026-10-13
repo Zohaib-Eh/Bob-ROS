@@ -1,10 +1,11 @@
 import {
-  Box3, BufferAttribute, BufferGeometry, DirectionalLight, EdgesGeometry, GridHelper, Group,
+  Box3, BoxGeometry, BufferAttribute, BufferGeometry, CylinderGeometry, DirectionalLight, EdgesGeometry, GridHelper, Group,
   HemisphereLight, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D,
   PerspectiveCamera, Raycaster, Scene, Sphere, Vector2, Vector3, WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Body, Joint, Vec3 } from "../api/types";
+import type { SceneObject } from "../ros/liveRobot";
 import { bodyArrays, isClick } from "./meshData";
 import {
   angleAroundAxis, buildGlyph, buildLooseLine, buildSnap, closestParamOnAxis, disposeTree, rayPlaneHit, unwrapStep,
@@ -198,6 +199,34 @@ export class Viewer {
       mesh.matrixAutoUpdate = false;
       mesh.matrix.copy(m && bodyIds.includes(id) ? m : new Matrix4());
       mesh.matrixWorldNeedsUpdate = true;
+    }
+    this.requestRender();
+  }
+
+  private objects = new Group();
+
+  /** Per-body poses (e.g. a live robot); bodies not listed stay at their CAD pose. */
+  setBodyPoses(poses: Record<string, Matrix4>) {
+    for (const [id, mesh] of this.meshes) {
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(poses[id] ?? new Matrix4());
+      mesh.matrixWorldNeedsUpdate = true;
+    }
+    this.requestRender();
+  }
+
+  setSceneObjects(objs: SceneObject[]) {
+    if (!this.objects.parent) this.scene.add(this.objects);
+    for (const c of [...this.objects.children] as Mesh[]) {
+      this.objects.remove(c); c.geometry.dispose(); (c.material as Material).dispose();
+    }
+    for (const o of objs) {
+      const geo = o.shape === "box" ? new BoxGeometry(o.dims[0], o.dims[1], o.dims[2])
+        : new CylinderGeometry(o.dims[1], o.dims[1], o.dims[0], 32).rotateX(Math.PI / 2); // ROS cylinders stand on z
+      const mesh = new Mesh(geo, new MeshStandardMaterial({ color: o.attached ? 0xf59e0b : 0x60a5fa }));
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(o.matrix);
+      this.objects.add(mesh);
     }
     this.requestRender();
   }
