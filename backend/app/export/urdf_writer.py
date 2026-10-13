@@ -70,8 +70,21 @@ def _add_link_element(robot, robot_name: str, link: Link, T: np.ndarray) -> None
         ET.SubElement(geometry, "mesh", {"filename": _mesh_ref(robot_name, link)})
 
 
-def _add_joint_element(robot, joint: Joint, links_by_id, frames) -> None:
-    joint_el = ET.SubElement(robot, "joint", {"name": f"joint_{joint.id}", "type": joint.type})
+def _joint_names(joints: list[Joint], links_by_id) -> dict[str, str]:
+    """`<child link>_joint`, ROS-safe characters, numbered on collision."""
+    names, taken = {}, set()
+    for j in joints:
+        base = re.sub(r"[^A-Za-z0-9_]", "_", links_by_id[j.child_link_id].name) + "_joint"
+        name, n = base, 2
+        while name in taken:
+            name, n = f"{base}_{n}", n + 1
+        taken.add(name)
+        names[j.id] = name
+    return names
+
+
+def _add_joint_element(robot, joint: Joint, name: str, links_by_id, frames) -> None:
+    joint_el = ET.SubElement(robot, "joint", {"name": name, "type": joint.type})
     ET.SubElement(joint_el, "parent", {"link": links_by_id[joint.parent_link_id].name})
     ET.SubElement(joint_el, "child", {"link": links_by_id[joint.child_link_id].name})
     rel = np.linalg.inv(frames[joint.parent_link_id]) @ frames[joint.child_link_id]
@@ -139,22 +152,35 @@ def export_urdf(
 
     for link in links:
         _add_link_element(robot, robot_name, link, frames[link.id])
+    names = _joint_names(joints, links_by_id)
     for joint in joints:
-        _add_joint_element(robot, joint, links_by_id, frames)
+        _add_joint_element(robot, joint, names[joint.id], links_by_id, frames)
 
     return minidom.parseString(ET.tostring(robot, encoding="unicode")).toprettyxml(indent="  ")
 
 
-def _package_xml(robot_name: str) -> str:
+def package_xml(robot_name: str) -> str:
     return f"""<?xml version="1.0"?>
-<package format="2">
+<package format="3">
   <name>{escape(robot_name)}</name>
   <version>0.1.0</version>
   <description>URDF package for {escape(robot_name)}</description>
   <maintainer email="none@example.com">cad-to-urdf</maintainer>
   <license>BSD</license>
-  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>
+"""
+
+
+def cmakelists(robot_name: str) -> str:
+    return f"""cmake_minimum_required(VERSION 3.8)
+project({robot_name})
+find_package(ament_cmake REQUIRED)
+install(DIRECTORY urdf meshes DESTINATION share/${{PROJECT_NAME}})
+ament_package()
 """
 
 
@@ -244,7 +270,8 @@ def export_package(
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{robot_name}/urdf/{robot_name}.urdf", urdf)
-        z.writestr(f"{robot_name}/package.xml", _package_xml(robot_name))
+        z.writestr(f"{robot_name}/package.xml", package_xml(robot_name))
+        z.writestr(f"{robot_name}/CMakeLists.txt", cmakelists(robot_name))
         for link in links:
             meshes = [
                 trimesh.Trimesh(vertices=b.vertices, faces=b.triangles, process=False)
