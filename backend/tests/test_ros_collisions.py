@@ -62,3 +62,30 @@ def test_irb1300_tip_frame_sits_on_link6(irb1300_zip, tmp_path):
     v, _ = link_meshes(urdf, tmp_path / "irb1300")["link6"]
     lo, hi = v.min(axis=0) - 0.01, v.max(axis=0) + 0.01
     assert np.all(lo <= 0) and np.all(0 <= hi)     # joint 6's origin lies on link6's geometry
+
+
+def test_a_link_fixed_to_the_tool_is_not_adjacent_to_the_previous_link(tmp_path):
+    (tmp_path / "meshes").mkdir()
+    for n, (size, _) in _LINKS.items():
+        trimesh.creation.box(extents=(size, size, size)).export(tmp_path / "meshes" / f"{n}.stl")
+    trimesh.creation.box(extents=(0.1, 0.1, 0.1)).export(tmp_path / "meshes" / "tool.stl")
+    urdf = _urdf().replace("</robot>", (
+        "<link name='tool'><collision><origin xyz='-0.45 0 0'/><geometry>"
+        "<mesh filename='package://r/meshes/tool.stl'/></geometry></collision></link>"
+        "<joint name='fx' type='fixed'><parent link='l4'/><child link='tool'/></joint></robot>"))
+    pairs = disabled_pairs(parse_chain(urdf), link_meshes(urdf, tmp_path), samples=200)
+    assert pairs[("l3", "l4")] == "Adjacent"
+    assert pairs[("l3", "tool")] == "Default"      # overlaps l3 at home; not joined to it by a joint
+    assert pairs[("l4", "tool")] == "Adjacent"
+
+
+def test_empty_or_garbage_mesh_is_refused(robot, tmp_path):
+    (tmp_path / "meshes" / "l2.stl").write_bytes(b"garbage")
+    with pytest.raises(ValueError, match="Mesh for link 'l2' is empty or unreadable."):
+        link_meshes(_urdf(), tmp_path)
+
+
+def test_mesh_path_cannot_leave_the_package(robot, tmp_path):
+    urdf = _urdf().replace("package://r/meshes/l2.stl", "package://r/../../x.stl")
+    with pytest.raises(ValueError, match="leaves the package"):
+        link_meshes(urdf, tmp_path)

@@ -25,8 +25,17 @@ def link_meshes(urdf_text: str, package_root: Path) -> dict[str, tuple[np.ndarra
             mesh = col.find("geometry/mesh")
             if mesh is None:
                 continue
-            rel = mesh.get("filename").split("://", 1)[-1].split("/", 1)[1]
-            m = trimesh.load(Path(package_root) / rel, file_type="stl", force="mesh")
+            uri = mesh.get("filename")
+            root = Path(package_root).resolve()
+            path = (root / uri.split("://", 1)[-1].split("/", 1)[1]).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError(f"Mesh path '{uri}' leaves the package.")
+            try:
+                m = trimesh.load(path, file_type="stl", force="mesh")
+                if len(m.faces) == 0:
+                    raise ValueError
+            except Exception:
+                raise ValueError(f"Mesh for link '{link.get('name')}' is empty or unreadable.") from None
             m.apply_transform(origin_matrix(col.find("origin")))
             parts.append(m)
         if parts:
@@ -49,9 +58,10 @@ def disabled_pairs(chain: Chain, meshes, samples: int = 10000, seed: int = 0) ->
             if n in objs:
                 objs[n].setTransform(fcl.Transform(T[:3, :3], T[:3, 3]))
 
+    joined = {frozenset((j.parent, j.child)) for j in chain.joints}
     out, open_pairs = {}, []
     for a, b in combinations(names, 2):
-        if abs(chain.links[a][0] - chain.links[b][0]) <= 1:
+        if chain.links[a][0] == chain.links[b][0] or frozenset((a, b)) in joined:
             out[(a, b)] = "Adjacent"
         else:
             open_pairs.append((a, b))

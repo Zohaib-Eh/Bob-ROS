@@ -185,3 +185,21 @@ def test_failed_backup_rename_restores_earlier_backups_and_reraises_original(tmp
     assert sorted(str(p.relative_to(src)) for p in src.rglob("*")) == before
     assert not list(src.glob(".*"))
     assert (src / "bot_tasks" / "mine.py").read_text() == "print('mine')"
+
+
+@pytest.mark.parametrize("name", ["bot__x", "bot_"])
+def test_ros_names_with_double_or_trailing_underscore_are_refused(tmp_path, name):
+    d = unzip(two_joint_zip(tmp_path), tmp_path / "x")
+    with pytest.raises(ValueError, match="is not a valid ROS package name"):
+        generate(name, d / "bot", tmp_path / "ws" / "src", source="bot.zip", samples=50)
+
+
+def test_source_name_with_dash_runs_still_yields_valid_xml(tmp_path):
+    d = unzip(two_joint_zip(tmp_path), tmp_path / "x")
+    src = tmp_path / "ws" / "src"
+    generate("bot", d / "bot", src, source="a---b.zip", samples=50)
+    cfg = src / "bot_moveit_config"
+    files = [cfg / "package.xml", *cfg.rglob("*.srdf"), *cfg.rglob("*.xacro")]
+    assert len(files) >= 4
+    for f in files:
+        ET.parse(f)

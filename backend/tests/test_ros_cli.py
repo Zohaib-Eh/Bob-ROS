@@ -34,3 +34,26 @@ def test_cli_reports_unsupported_robots_in_one_sentence(tmp_path, capsys):
     err = capsys.readouterr().err
     assert err.startswith("error: Robot name 'Bot' is not a valid ROS package name")
     assert err.count("\n") == 1
+
+
+def _rezip(src, dest, edit):
+    with zipfile.ZipFile(src) as a, zipfile.ZipFile(dest, "w") as b:
+        for n in a.namelist():
+            b.writestr(n, edit(n, a.read(n)))
+    return dest
+
+
+def test_cli_reports_an_unreadable_mesh(tmp_path, capsys):
+    z = _rezip(two_joint_zip(tmp_path), tmp_path / "g.zip",
+               lambda n, d: b"garbage" if n.endswith("hand.stl") else d)
+    assert main([str(z), "-o", str(tmp_path / "ws")]) == 1
+    assert capsys.readouterr().err == "error: Mesh for link 'hand' is empty or unreadable.\n"
+    assert not (tmp_path / "ws").exists()
+
+
+def test_cli_reports_malformed_urdf(tmp_path, capsys):
+    z = _rezip(two_joint_zip(tmp_path), tmp_path / "t.zip",
+               lambda n, d: d[:100] if n.endswith(".urdf") else d)
+    assert main([str(z), "-o", str(tmp_path / "ws")]) == 1
+    assert capsys.readouterr().err == "error: The URDF is not valid XML.\n"
+    assert not (tmp_path / "ws").exists()

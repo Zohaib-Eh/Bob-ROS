@@ -7,6 +7,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ZIP=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 WS=$(mktemp -d)
+trap 'rm -rf "$WS"' EXIT
 PY=${PYTHON:-$HOME/miniforge3/envs/cad-to-urdf/python.exe}
 host() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
 

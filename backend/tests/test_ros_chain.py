@@ -93,3 +93,15 @@ def test_irb1300_is_a_six_joint_chain(irb1300_zip):
         c = parse_chain(z.read("irb1300/urdf/irb1300.urdf").decode())
     assert c.base == "base" and c.tip == "link6"
     assert [j.name for j in c.joints] == [f"link{i}_joint" for i in range(1, 7)]
+
+
+def test_joint_without_child_is_declined():
+    urdf = _robot("<joint name='j' type='revolute'><parent link='base'/></joint>")
+    with pytest.raises(UnsupportedRobot, match="Joint 'j' has no parent or child link."):
+        parse_chain(urdf)
+
+
+def test_zero_length_axis_is_declined():
+    urdf = _robot(_rev("j", "base", "a").replace("0 0 1", "0 0 0"), links=("base", "a"))
+    with pytest.raises(UnsupportedRobot, match="Joint 'j' has a zero-length axis."):
+        parse_chain(urdf)

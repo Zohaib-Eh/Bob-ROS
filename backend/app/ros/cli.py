@@ -5,6 +5,7 @@ import argparse
 import re
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -31,8 +32,11 @@ def main(argv: list[str] | None = None) -> int:
             robot = _robot_name(z)
             z.extractall(tmp)
             generate(robot, Path(tmp) / robot, src, source=Path(a.zip).name, samples=a.samples)
-    except zipfile.BadZipFile:
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError, RecursionError):
         print("error: Not a cad-to-urdf export.", file=sys.stderr)
+        return 1
+    except ET.ParseError:
+        print("error: The URDF is not valid XML.", file=sys.stderr)
         return 1
     except (ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

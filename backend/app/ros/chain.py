@@ -57,6 +57,8 @@ def parse_chain(urdf_text: str) -> Chain:
     children: dict[str, list] = {}
     has_parent = set()
     for j in joints:
+        if j.find("parent") is None or j.find("child") is None:
+            raise UnsupportedRobot(f"Joint '{j.get('name')}' has no parent or child link.")
         children.setdefault(j.find("parent").get("link"), []).append(j)
         has_parent.add(j.find("child").get("link"))
     roots = [l.get("name") for l in root.findall("link") if l.get("name") not in has_parent]
@@ -105,6 +107,8 @@ def parse_chain(urdf_text: str) -> Chain:
                 lower, upper = float(lim.get("lower")), float(lim.get("upper"))
             ax_el = j.find("axis")
             axis = np.array([float(v) for v in (ax_el.get("xyz") if ax_el is not None else "1 0 0").split()])
+            if not np.linalg.norm(axis):
+                raise UnsupportedRobot(f"Joint '{j.get('name')}' has a zero-length axis.")
             chain_joints.append(ChainJoint(j.get("name"), j.get("type"), link, child, O,
                                            axis / np.linalg.norm(axis), lower, upper))
             walk(child, len(chain_joints), np.eye(4))
