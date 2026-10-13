@@ -40,6 +40,9 @@ def stop_session() -> dict:
     return {"state": "stopped"}
 
 
+_busy = threading.Lock()  # one agent/program run at a time
+
+
 class ConvRun(BaseModel):
     task: str
 
@@ -56,16 +59,22 @@ def run_conversation(cid: str, req: ConvRun) -> StreamingResponse:
         if st.get("log"):
             detail += "\n" + st["log"]
         raise HTTPException(409, detail)
-    robot = session.current()["robot"]
-    notes = [f"The user edited {p} since your last turn." for p in conv["edited"]]
-    prompt = ("\n".join(notes) + "\n\n" + req.task) if notes else req.task
-    conv["messages"].append({"role": "user", "text": req.task})
-    if conv["title"] == "New conversation":
-        conv["title"] = conversations.title_from(req.task)
-    conv["edited"] = []
-    conversations.save(src, conv)
-    cancel = threading.Event()
-    events = agent.run_agent(robot, src, prompt, conv["claude_session_id"], cancel=cancel)
+    if not _busy.acquire(blocking=False):
+        raise HTTPException(409, "A task is already running.")
+    try:
+        robot = session.current()["robot"]
+        notes = [f"The user edited {p} since your last turn." for p in conv["edited"]]
+        prompt = ("\n".join(notes) + "\n\n" + req.task) if notes else req.task
+        conv["messages"].append({"role": "user", "text": req.task})
+        if conv["title"] == "New conversation":
+            conv["title"] = conversations.title_from(req.task)
+        conv["edited"] = []
+        conversations.save(src, conv)
+        cancel = threading.Event()
+        events = agent.run_agent(robot, src, prompt, conv["claude_session_id"], cancel=cancel)
+    except BaseException:
+        _busy.release()
+        raise
     collected: list[dict] = []
 
     async def stream():
@@ -74,17 +83,20 @@ def run_conversation(cid: str, req: ConvRun) -> StreamingResponse:
                 collected.append(e)
                 yield f"data: {json.dumps(e)}\n\n"
         finally:
-            cancel.set()  # client gone or stream done: stop the agent's child process
             try:
-                latest = conversations.load(src, cid)
-            except KeyError:
-                latest = None  # conversation deleted mid-run: nothing to save into
-            if latest is not None:
-                latest["messages"].append(conversations.fold(collected))
-                done = next((e for e in reversed(collected) if e.get("kind") == "done"), None)
-                if done and done.get("session_id"):
-                    latest["claude_session_id"] = done["session_id"]
-                conversations.save(src, latest)
+                cancel.set()  # client gone or stream done: stop the agent's child process
+                try:
+                    latest = conversations.load(src, cid)
+                except KeyError:
+                    latest = None  # conversation deleted mid-run: nothing to save into
+                if latest is not None and collected:
+                    latest["messages"].append(conversations.fold(collected))
+                    done = next((e for e in reversed(collected) if e.get("kind") == "done"), None)
+                    if done and done.get("session_id"):
+                        latest["claude_session_id"] = done["session_id"]
+                    conversations.save(src, latest)
+            finally:
+                _busy.release()
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
@@ -218,12 +230,16 @@ def run_file(req: RunFile) -> dict:
         raise HTTPException(400, str(exc))
     if not files.safe(src, req.path).is_file():
         raise HTTPException(404, "No such file.")
+    if not _busy.acquire(blocking=False):
+        raise HTTPException(409, "A task is already running.")
     try:
         result = session.run_program(req.path.split("/", 1)[1])
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except session.SessionError as exc:
         raise HTTPException(503, str(exc))
+    finally:
+        _busy.release()
     if req.conversation:
         _, conv = _conv(req.conversation)  # re-load so a concurrent edit isn't overwritten
         conv["messages"].append({"role": "run", "path": req.path, **result})

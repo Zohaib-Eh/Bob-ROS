@@ -99,3 +99,64 @@ def test_not_ready_is_409_with_log_and_docker_error_is_503(setup, monkeypatch):
 def test_old_endpoints_are_gone():
     assert client.post("/program/run", json={"task": "x"}).status_code in (404, 405)
     assert client.post("/program/rerun", json={"program": "x"}).status_code in (404, 405)
+
+
+def _start(cid):
+    resp = routes.run_conversation(cid, routes.ConvRun(task="go"))
+    return resp.body_iterator
+
+
+def test_disconnect_cancels_and_saves_partial(setup, monkeypatch):
+    import asyncio
+    src, _ = setup
+    seen = {}
+
+    def slow(robot, src_, task, resume=None, cancel=None):
+        seen["cancel"] = cancel
+        yield {"kind": "text", "text": "Part"}
+        yield {"kind": "text", "text": "More"}
+    monkeypatch.setattr(routes.agent, "run_agent", slow)
+    cid = conversations.create(src)["id"]
+
+    async def go():
+        it = _start(cid)
+        await it.__anext__()
+        await it.aclose()
+    asyncio.run(go())
+    assert seen["cancel"].is_set()
+    last = conversations.load(src, cid)["messages"][-1]
+    assert last["role"] == "claude" and last["items"][0] == {"kind": "text", "text": "Part"}
+
+
+def test_one_run_at_a_time(setup):
+    import asyncio
+    src, _ = setup
+    cid = conversations.create(src)["id"]
+    (src / "bot_tasks" / "programs").mkdir(parents=True)
+    (src / "bot_tasks" / "programs" / "task_001.py").write_text("x")
+
+    async def go():
+        it = _start(cid)
+        await it.__anext__()
+        r = client.post(f"/program/conversations/{cid}/run", json={"task": "again"})
+        assert r.status_code == 409 and "already running" in r.json()["detail"]
+        r = client.post("/program/files/run", json={"path": "bot_tasks/programs/task_001.py"})
+        assert r.status_code == 409 and "already running" in r.json()["detail"]
+        await it.aclose()
+        it2 = _start(cid)
+        await it2.__anext__()
+        await it2.aclose()
+    asyncio.run(go())
+
+
+def test_done_without_session_id_keeps_the_old_one(setup, monkeypatch):
+    src, _ = setup
+
+    def agent_(robot, src_, task, resume=None, cancel=None):
+        yield {"kind": "done", "summary": "s", "runs": 0, "ok": True, "program": None, "code": None}
+    monkeypatch.setattr(routes.agent, "run_agent", agent_)
+    c = conversations.create(src)
+    c["claude_session_id"] = "old"
+    conversations.save(src, c)
+    client.post(f"/program/conversations/{c['id']}/run", json={"task": "go"})
+    assert conversations.load(src, c["id"])["claude_session_id"] == "old"
