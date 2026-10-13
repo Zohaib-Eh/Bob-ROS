@@ -20,6 +20,18 @@ def _robot_name(z: zipfile.ZipFile) -> str:
     return found[0]
 
 
+def workspace_from_zip(zip_source: Path | bytes, out_dir: Path, samples: int = 10000) -> str:
+    """Generate <out_dir>/src from a cad-to-urdf export zip (path or bytes). Returns the robot name."""
+    import io
+    src = io.BytesIO(zip_source) if isinstance(zip_source, bytes) else zip_source
+    with zipfile.ZipFile(src) as z, tempfile.TemporaryDirectory() as tmp:
+        robot = _robot_name(z)
+        z.extractall(tmp)
+        name = "upload.zip" if isinstance(zip_source, bytes) else Path(zip_source).name
+        generate(robot, Path(tmp) / robot, Path(out_dir) / "src", source=name, samples=samples)
+    return robot
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m app.ros.cli")
     p.add_argument("zip")
@@ -28,10 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     src = Path(a.out) / "src"
     try:
-        with zipfile.ZipFile(a.zip) as z, tempfile.TemporaryDirectory() as tmp:
-            robot = _robot_name(z)
-            z.extractall(tmp)
-            generate(robot, Path(tmp) / robot, src, source=Path(a.zip).name, samples=a.samples)
+        robot = workspace_from_zip(Path(a.zip), Path(a.out), a.samples)
     except (zipfile.BadZipFile, RuntimeError, NotImplementedError, RecursionError):
         print("error: Not a cad-to-urdf export.", file=sys.stderr)
         return 1

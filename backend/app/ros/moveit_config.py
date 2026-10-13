@@ -272,7 +272,10 @@ def generate(robot: str, description_dir: Path, out_src: Path, source: str, samp
         write_files(tmp / f"{robot}_moveit_config", moveit_files(chain, robot, source, pairs))
         from .kinematics_pkg import kinematics_files  # local: kinematics_pkg imports this module
         write_files(tmp / f"{robot}_kinematics", kinematics_files(robot, source))
+        from .program_pkg import program_files  # local: program_pkg imports this module
+        write_files(tmp / f"{robot}_program", program_files(chain, robot, source))
         _swap_in(Path(out_src), tmp, sorted(p.name for p in tmp.iterdir()))
+        (Path(out_src) / f"{robot}_tasks" / "programs").mkdir(parents=True, exist_ok=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

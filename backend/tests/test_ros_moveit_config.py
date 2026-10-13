@@ -82,7 +82,7 @@ def test_description_package_is_ament_even_from_an_old_zip(tmp_path):
 
 
 def test_regenerating_replaces_generated_packages_and_keeps_user_tasks(ws, tmp_path):
-    (ws / "bot_tasks").mkdir()
+    (ws / "bot_tasks").mkdir(exist_ok=True)
     (ws / "bot_tasks" / "mine.py").write_text("print('mine')")
     (ws / "bot_moveit_config" / "stale.txt").write_text("old")
     generate("bot", tmp_path / "x" / "bot", ws, source="bot.zip", samples=50)
@@ -136,7 +136,7 @@ def test_failed_regeneration_leaves_workspace_untouched(tmp_path, monkeypatch):
     src = tmp_path / "ws" / "src"
     generate("bot", d / "bot", src, source="bot.zip", samples=50)
     (src / "bot_moveit_config" / "marker.txt").write_text("keep")
-    (src / "bot_tasks").mkdir()
+    (src / "bot_tasks").mkdir(exist_ok=True)
     (src / "bot_tasks" / "mine.py").write_text("print('mine')")
     before = sorted(str(p.relative_to(src)) for p in src.rglob("*"))
 
@@ -165,7 +165,7 @@ def test_failed_backup_rename_restores_earlier_backups_and_reraises_original(tmp
     d = unzip(two_joint_zip(tmp_path), tmp_path / "x")
     src = tmp_path / "ws" / "src"
     generate("bot", d / "bot", src, source="bot.zip", samples=50)
-    (src / "bot_tasks").mkdir()
+    (src / "bot_tasks").mkdir(exist_ok=True)
     (src / "bot_tasks" / "mine.py").write_text("print('mine')")
     before = sorted(str(p.relative_to(src)) for p in src.rglob("*"))
 
