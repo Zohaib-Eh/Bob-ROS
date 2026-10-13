@@ -55,18 +55,34 @@ def test_fk_matches_the_exporters_world_frames(tmp_path):
 
 
 
+
+def _wrist_gaps(c, q):
+    """Distances between the axis lines of the last three joints at pose q (all 0 = spherical wrist)."""
+    from app.ros.fk import segment_poses
+    seg = segment_poses(c, q)
+    lines = []
+    for i in (-3, -2, -1):
+        T = seg[len(c.joints) + i] @ c.joints[i].origin  # joint frame in the base frame
+        lines.append((T[:3, 3], T[:3, :3] @ c.joints[i].axis))
+    gaps = []
+    for (p, a), (r, b) in [(lines[0], lines[1]), (lines[1], lines[2]), (lines[0], lines[2])]:
+        n = np.cross(a, b)
+        gaps.append(abs((r - p) @ n) / np.linalg.norm(n) if np.linalg.norm(n) > 1e-9
+                    else np.linalg.norm(np.cross(r - p, a)))
+    return gaps
+
+
 def test_six_axis_helper_has_an_exact_spherical_wrist(tmp_path):
     """Joints 4-6 must meet at one point at any pose, or EAIK has no closed form."""
-    from app.ros.fk import segment_poses
     from tests.ros_helpers import six_axis_zip
     d = unzip(six_axis_zip(tmp_path), tmp_path / "x")
     c = parse_chain((d / "six" / "urdf" / "six.urdf").read_text())
-    seg = segment_poses(c, [0.3, -0.2, 0.4, 0.5, -0.6, 0.7])
-    lines = []
-    for i in (3, 4, 5):
-        T = seg[i] @ c.joints[i].origin          # joint i's frame in the base frame
-        lines.append((T[:3, 3], T[:3, :3] @ c.joints[i].axis))
-    for (p, a), (r, b) in [(lines[0], lines[1]), (lines[1], lines[2]), (lines[0], lines[2])]:
-        n = np.cross(a, b)
-        gap = abs((r - p) @ n) / np.linalg.norm(n) if np.linalg.norm(n) > 1e-9 else np.linalg.norm(np.cross(r - p, a))
-        assert gap < 1e-9
+    assert max(_wrist_gaps(c, [0.3, -0.2, 0.4, 0.5, -0.6, 0.7])) < 1e-9
+
+
+def test_irb1300_export_has_a_spherical_wrist(irb1300_zip):
+    """The real IRB 1300's wrist axes meet at one point; joint 6 is located by a ring of bolt holes."""
+    import zipfile
+    with zipfile.ZipFile(irb1300_zip) as z:
+        c = parse_chain(z.read("irb1300/urdf/irb1300.urdf").decode())
+    assert max(_wrist_gaps(c, [0.0] * 6)) < 1e-4
