@@ -78,8 +78,8 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     }
     if (!mounted.current) return;
     setRunning(false);
-    setLive(null);
     await reload(id);
+    if (mounted.current) setLive(null);  // keep the streamed answer on screen until the saved one is loaded
     if (failed || msg.error) await ros.refresh();
   }
 
