@@ -111,3 +111,21 @@ describe("ProgramMode sidebar fixes", () => {
     expect(get).not.toHaveBeenCalled();
   });
 });
+
+it("a stream keeps writing into the conversation it started in", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }, { id: "bbbbbbbbbbbb", title: "B" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, id === "aaaaaaaaaaaa" ? "A" : "B"));
+  let finish!: () => void;
+  const run = vi.spyOn(api, "runConversation").mockImplementation(async (_id, _t, on) => {
+    on({ kind: "text", text: "streaming for A" });
+    await new Promise<void>((r) => { finish = r; });
+  });
+  await ready();
+  await screen.findByText("A");
+  fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
+  await act(async () => { fireEvent.keyDown(screen.getByLabelText(/describe a task/i), { key: "Enter" }); });
+  expect(run.mock.calls[0][0]).toBe("aaaaaaaaaaaa");
+  expect(screen.getByText("streaming for A")).toBeTruthy();
+  expect((screen.getByText("B") as HTMLButtonElement).disabled).toBe(true);   // switching is locked while running
+  await act(async () => { finish(); });
+});

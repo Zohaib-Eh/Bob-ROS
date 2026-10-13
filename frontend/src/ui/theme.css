@@ -162,3 +162,15 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .chat-column { width: 440px; min-width: 320px; max-width: 70vw; resize: horizontal; overflow: hidden; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
 .workspace-column { min-width: 0; display: flex; flex-direction: column; }
 .viewer-pane { position: relative; flex: 1; min-height: 0; }
+
+.chat-scroll { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.bubble { align-self: flex-end; max-width: 85%; background: var(--accent, #6366f1); color: #fff; padding: 8px 12px; border-radius: 12px 12px 2px 12px; white-space: pre-wrap; }
+.claude-msg { display: flex; flex-direction: column; gap: 4px; }
+.narration { color: var(--muted); font-size: 13px; } .narration p { margin: 2px 0; }
+.step { font-size: 12px; display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
+.step.ok, .result.ok { color: var(--success); } .step.bad, .result.bad { color: var(--danger); }
+.step-head { background: none; border: 0; padding: 2px 0; color: inherit; cursor: pointer; display: flex; align-items: center; gap: 4px; text-align: left; }
+.step-output { font-size: 11px; max-height: 240px; overflow: auto; background: var(--panel); padding: 6px; border-radius: 6px; }
+.answer p { margin: 4px 0; } .result { font-weight: 600; font-size: 13px; }
+.prompt { border-top: 1px solid var(--border); padding: 8px; display: flex; gap: 8px; align-items: flex-end; }
+.prompt textarea { flex: 1; resize: none; }

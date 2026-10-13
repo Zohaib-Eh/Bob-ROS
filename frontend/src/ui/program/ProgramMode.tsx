@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { Conversation, ConversationInfo } from "../../api/program";
 import type { Ctx } from "../ctx";
+import { applyEvent, emptyClaude, type ClaudeMessage } from "../../model/chat";
+import Chat from "./Chat";
 import ConversationList from "./ConversationList";
 import { useRosSession } from "./useRosSession";
 
@@ -11,14 +13,16 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
   const { status } = ros;
   const [convs, setConvs] = useState<ConversationInfo[]>([]);
   const [active, setActive] = useState<Conversation | null>(null);
-  const [running] = useState(false);  // wired by the chat task
+  const [running, setRunning] = useState(false);
+  const [live, setLive] = useState<ClaudeMessage | null>(null);
+  const abort = useRef<AbortController | null>(null);
   const known = status.state === "ready" || status.state === "starting";
 
   const activeId = useRef<string | null>(null);
   const req = useRef(0);
   const mounted = useRef(true);
   useEffect(() => { activeId.current = active?.id ?? null; }, [active]);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; abort.current?.abort(); }; }, []);
   const fail = (e: unknown) => ros.setError((e as Error).message);
 
   // select: id = switch to it, null = first non-broken of the fresh list, undefined = keep current
@@ -43,6 +47,40 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
       setActive(c);
       setConvs((cs) => [{ id: c.id, title: c.title, created: c.created, updated: c.updated }, ...cs]);
     } catch (e) { fail(e); }
+  }
+
+  async function send(task: string) {
+    let c = active;
+    if (!c) {
+      try {
+        c = await api.createConversation();
+        if (!mounted.current) return;
+        req.current++;
+        setActive(c);
+        const n = c;
+        setConvs((cs) => [{ id: n.id, title: n.title, created: n.created, updated: n.updated }, ...cs]);
+      } catch (e) { fail(e); return; }
+    }
+    const id = c.id;  // the stream writes only into this conversation; the sidebar is locked while running
+    setActive((a) => (a && a.id === id ? { ...a, messages: [...a.messages, { role: "user", text: task }] } : a));
+    setRunning(true);
+    let msg = emptyClaude();
+    setLive(msg);
+    const ctl = new AbortController();
+    abort.current = ctl;
+    let failed = false;
+    try {
+      await api.runConversation(id, task, (e) => { msg = applyEvent(msg, e); if (mounted.current) setLive(msg); }, ctl.signal);
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      failed = true;
+      if (mounted.current) fail(e);
+    }
+    if (!mounted.current) return;
+    setRunning(false);
+    setLive(null);
+    await reload(id);
+    if (failed || msg.error) await ros.refresh();
   }
 
   async function rename(id: string, title: string) {
@@ -85,7 +123,9 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         <ConversationList items={convs} active={active?.id ?? null} disabled={running || !known}
           onSelect={(id) => void reload(id)} onNew={() => void newConversation()}
           onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
-        <section className="chat-column" data-testid="chat-slot" />
+        <section className="chat-column" data-testid="chat-slot">
+          <Chat messages={active?.messages ?? []} live={live} running={running} disabled={status.state !== "ready"} onSend={(t) => void send(t)} />
+        </section>
         <section className="workspace-column" data-testid="workspace-slot">{preview}</section>
       </div>
     </div>
