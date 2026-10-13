@@ -1,8 +1,10 @@
 import json
+import threading
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import iterate_in_threadpool
 
 from app.program import agent, session
 from app.routes.export_routes import ExportRequest
@@ -39,17 +41,36 @@ def get_session() -> dict:
 
 @router.delete("/session")
 def stop_session() -> dict:
-    session.stop()
+    try:
+        session.stop()
+    except session.SessionError as exc:
+        raise HTTPException(503, str(exc))
     return {"state": "stopped"}
 
 
 @router.post("/run")
 def run(req: RunRequest) -> StreamingResponse:
+    try:
+        st = session.status()
+    except session.SessionError as exc:
+        raise HTTPException(503, str(exc))
     cur = session.current()
-    if not cur or session.status()["state"] != "ready":
-        raise HTTPException(409, "Start the ROS session first and wait until it is ready.")
-    events = agent.run_agent(cur["robot"], cur["src"], req.task, req.resume)
-    return StreamingResponse((f"data: {json.dumps(e)}\n\n" for e in events), media_type="text/event-stream")
+    if not cur or st["state"] != "ready":
+        detail = "Start the ROS session first and wait until it is ready."
+        if st.get("log"):
+            detail += "\n" + st["log"]
+        raise HTTPException(409, detail)
+    cancel = threading.Event()
+    events = agent.run_agent(cur["robot"], cur["src"], req.task, req.resume, cancel=cancel)
+
+    async def stream():
+        try:
+            async for e in iterate_in_threadpool(events):
+                yield f"data: {json.dumps(e)}\n\n"
+        finally:
+            cancel.set()  # client gone or stream done: stop the agent's child process
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @router.post("/rerun")

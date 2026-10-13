@@ -1,4 +1,5 @@
 import sys
+import threading
 from pathlib import Path
 
 from app.program import agent
@@ -80,3 +81,21 @@ def test_usage_limit_error_passes_through():
     line = '{"type":"result","is_error":true,"result":"Claude AI usage limit reached|1791900000"}'
     events = list(agent.parse_stream([line], Path(".")))
     assert events == [{"kind": "error", "message": "Claude AI usage limit reached|1791900000"}]
+
+
+def test_cancel_kills_the_child_and_ends_the_stream(tmp_path, monkeypatch):
+    import subprocess
+    procs = []
+    real = subprocess.Popen
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: procs.append(real(*a, **k)) or procs[-1])
+    extra = _fake(tmp_path, "import time\nprint('{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}', flush=True)\ntime.sleep(30)")
+    cancel = threading.Event()
+    gen = agent.run_agent("bot", tmp_path, "x", exe=sys.executable, extra=extra, cancel=cancel)
+    assert next(gen)["kind"] == "text"
+    cancel.set()
+    drained = []
+    t = threading.Thread(target=lambda: drained.extend(gen), daemon=True)
+    t.start()
+    t.join(10)
+    assert not t.is_alive(), "stream did not end after cancel"
+    assert procs[0].poll() is not None

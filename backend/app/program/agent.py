@@ -95,8 +95,10 @@ def parse_stream(lines: Iterable[str], tasks_dir: Path) -> Iterator[dict]:
 
 
 def run_agent(robot: str, src: Path, task: str, resume: str | None = None,
-              exe: str | None = None, extra: list[str] | None = None) -> Iterator[dict]:
-    """Stream events for one task. `extra` is for tests (arguments placed before the claude flags)."""
+              exe: str | None = None, extra: list[str] | None = None,
+              cancel: threading.Event | None = None) -> Iterator[dict]:
+    """Stream events for one task. `extra` is for tests (arguments placed before the claude flags).
+    Setting `cancel` kills the child, which ends the stream."""
     exe = exe or shutil.which("claude")
     if not exe or not Path(exe).exists():
         yield {"kind": "error", "message": NOT_FOUND}
@@ -114,6 +116,12 @@ def run_agent(robot: str, src: Path, task: str, resume: str | None = None,
     except OSError as exc:
         yield {"kind": "error", "message": f"Could not start Claude Code: {exc}"}
         return
+    if cancel is not None:
+        def _watch():
+            cancel.wait()
+            if proc.poll() is None:
+                proc.kill()
+        threading.Thread(target=_watch, daemon=True).start()
     err_lines: list[str] = []
     drain = threading.Thread(target=lambda: err_lines.extend(proc.stderr), daemon=True)
     drain.start()
