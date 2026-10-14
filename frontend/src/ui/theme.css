@@ -209,3 +209,6 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .startup-panel .log { max-height: 160px; overflow: auto; font-size: 11px; margin: 8px 0 0; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.running-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin: 0 6px; background: var(--warning); animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { to { opacity: .3; } }
+.chat-waiting { margin: 0 12px 4px; font-size: 12px; }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseSse, runConversation, saveFile, type ProgramEvent } from "./program";
+import { listConversations, parseSse, runConversation, saveFile, type ProgramEvent } from "./program";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -47,6 +47,11 @@ describe("conversation client", () => {
     await runConversation("abc123abc123", "go", (e) => got.push(e));
     expect(got).toEqual([{ kind: "run", n: 1 }]);
     expect(f.mock.calls[0][0]).toBe("/api/program/conversations/abc123abc123/run");
+  });
+  it("asks for the robot's conversations by name", async () => {
+    const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
+    await listConversations("bot");
+    expect(f.mock.calls[0][0]).toBe("/api/program/conversations?robot=bot");
   });
   it("saves a file with its conversation", async () => {
     const f = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));

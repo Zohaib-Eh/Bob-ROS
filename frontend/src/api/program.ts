@@ -32,20 +32,21 @@ export interface FileEntry { path: string; editable: boolean }
 const put = (body: unknown): RequestInit => ({ ...json(body), method: "PUT" });
 const patch = (body: unknown): RequestInit => ({ ...json(body), method: "PATCH" });
 
-export async function listConversations(): Promise<ConversationInfo[]> {
-  return (await send("/program/conversations", { method: "GET" })).json();
+const q = (robot: string) => `?robot=${encodeURIComponent(robot)}`;
+export async function listConversations(robot: string): Promise<ConversationInfo[]> {
+  return (await send(`/program/conversations${q(robot)}`, { method: "GET" })).json();
 }
-export async function createConversation(title?: string): Promise<Conversation> {
-  return (await send("/program/conversations", json(title ? { title } : {}))).json();
+export async function createConversation(robot: string, title?: string): Promise<Conversation> {
+  return (await send(`/program/conversations${q(robot)}`, json(title ? { title } : {}))).json();
 }
-export async function getConversation(id: string): Promise<Conversation> {
-  return (await send(`/program/conversations/${id}`, { method: "GET" })).json();
+export async function getConversation(robot: string, id: string): Promise<Conversation> {
+  return (await send(`/program/conversations/${id}${q(robot)}`, { method: "GET" })).json();
 }
-export async function renameConversation(id: string, title: string): Promise<Conversation> {
-  return (await send(`/program/conversations/${id}`, patch({ title }))).json();
+export async function renameConversation(robot: string, id: string, title: string): Promise<Conversation> {
+  return (await send(`/program/conversations/${id}${q(robot)}`, patch({ title }))).json();
 }
-export async function deleteConversation(id: string): Promise<void> {
-  await send(`/program/conversations/${id}`, { method: "DELETE" });
+export async function deleteConversation(robot: string, id: string): Promise<void> {
+  await send(`/program/conversations/${id}${q(robot)}`, { method: "DELETE" });
 }
 export async function runConversation(id: string, task: string, onEvent: (e: ProgramEvent) => void,
   signal?: AbortSignal): Promise<void> {
