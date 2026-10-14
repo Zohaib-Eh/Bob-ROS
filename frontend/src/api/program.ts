@@ -1,4 +1,4 @@
-import { json, send } from "./client";
+import { json, parseSse as sse, readEvents, send } from "./client";
 import type { Message } from "../model/chat";
 import type { Body, Joint, Link } from "./types";
 
@@ -65,30 +65,9 @@ export async function runFile(path: string, conversation: string | null): Promis
   return (await send("/program/files/run", json({ path, conversation }))).json();
 }
 
-export function parseSse(buffer: string): { events: ProgramEvent[]; rest: string } {
-  const parts = buffer.replace(/\r\n/g, "\n").split("\n\n");
-  const rest = parts.pop() ?? "";
-  const events: ProgramEvent[] = [];
-  for (const p of parts) {
-    if (!p.startsWith("data: ")) continue;
-    try { events.push(JSON.parse(p.slice(6)) as ProgramEvent); } catch { /* skip bad frame */ }
-  }
-  return { events, rest };
-}
+export const parseSse = (buffer: string) => sse<ProgramEvent>(buffer);
 
 async function streamEvents(path: string, body: unknown, onEvent: (e: ProgramEvent) => void,
   signal?: AbortSignal): Promise<void> {
-  const res = await send(path, { ...json(body), signal });
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (value) buffer += decoder.decode(value, { stream: true });
-    const { events, rest } = parseSse(buffer);
-    buffer = rest;
-    events.forEach(onEvent);
-    if (done) break;
-  }
-  parseSse(buffer + "\n\n").events.forEach(onEvent);
+  await readEvents<ProgramEvent>(await send(path, { ...json(body), signal }), onEvent);
 }

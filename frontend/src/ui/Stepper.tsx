@@ -1,6 +1,6 @@
 import { Check, FolderOpen, Redo2, Save, Undo2, Upload } from "lucide-react";
 import { useState } from "react";
-import { importFile } from "../api/client";
+import { importFile, type ImportProgress } from "../api/client";
 import { exportChecklist, type StepId } from "../model/checklist";
 import type { Progress } from "../model/detection";
 import { chainDepth } from "../model/nextJoint";
@@ -8,11 +8,14 @@ import { partProblems } from "../model/problems";
 import { loadProject, saveProject } from "../model/project";
 import type { Ctx } from "./ctx";
 import { downloadBlob } from "./download";
+import { fmtElapsed, useElapsed } from "./useElapsed";
 
 export const STEPS: { id: StepId; label: string }[] = [
   { id: "parts", label: "Parts" }, { id: "group", label: "Group" },
   { id: "connect", label: "Connect" }, { id: "export", label: "Export" }, { id: "program", label: "Program" },
 ];
+
+const IMPORT_LABEL = { upload: "Uploading", read: "Reading file", parts: "Building parts", faces: "Finding faces" } as const;
 
 export function stepBadges(ctx: Pick<Ctx, "model" | "robotName">): Record<StepId, number> {
   const m = ctx.model;
@@ -33,18 +36,21 @@ interface Props { ctx: Ctx; progress: Progress; onCancel: () => void; onResume: 
 export default function Stepper({ ctx, progress, onCancel, onResume }: Props) {
   const { model, dispatch, step, goTo, notify, scale } = ctx;
   const [busy, setBusy] = useState(false);
+  const [imp, setImp] = useState<ImportProgress | null>(null);
+  const elapsed = useElapsed(busy);
   const badges = stepBadges(ctx);
 
   const onImport = async (file: File) => {
     setBusy(true);
     try {
-      const res = await importFile(file, scale);
+      const res = await importFile(file, scale, setImp);
       dispatch({ type: "import", bodies: res.bodies, warnings: res.warnings });
       goTo("parts");
     } catch (e) {
       notify(`Import of ${file.name} failed: ${(e as Error).message}`);
     } finally {
       setBusy(false);
+      setImp(null);
     }
   };
   const onOpen = async (file: File) => {
@@ -78,6 +84,13 @@ export default function Stepper({ ctx, progress, onCancel, onResume }: Props) {
           {progress.paused
             ? <button className="btn btn-ghost" onClick={onResume}>Resume</button>
             : <button className="btn btn-ghost" onClick={onCancel}>Pause</button>}
+        </span>
+      )}
+      {busy && imp && (
+        <span className="progress import-progress" data-testid="import-progress">
+          {IMPORT_LABEL[imp.stage]}{imp.total > 0 ? ` ${imp.done} / ${imp.total}` : "…"}
+          {imp.total > 0 && <progress value={imp.done} max={imp.total} />}
+          <span className="muted">{fmtElapsed(elapsed)}</span>
         </span>
       )}
       <label className={`btn file-btn${busy ? " active" : ""}`} title="Import STEP, IGES, BREP, STL or OBJ">

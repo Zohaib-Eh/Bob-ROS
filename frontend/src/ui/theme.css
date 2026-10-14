@@ -197,3 +197,5 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .preview-run { display: flex; align-items: center; gap: 8px; padding-bottom: 4px; }
 .preview-run .btn { padding: 3px 10px; }
 .btn.run-again { align-self: flex-start; margin-top: 4px; padding: 2px 8px; font-size: 12px; }
+
+.import-progress progress { width: 80px; height: 6px; vertical-align: middle; margin: 0 6px; }
