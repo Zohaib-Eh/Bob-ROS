@@ -7,7 +7,9 @@ import { applyEvent, emptyClaude, type ClaudeMessage } from "../../model/chat";
 import Chat from "./Chat";
 import ConversationList from "./ConversationList";
 import Workspace from "./Workspace";
+import StartupPanel, { stageText } from "./StartupPanel";
 import { useRosSession } from "./useRosSession";
+import { fmtElapsed, useElapsed } from "../useElapsed";
 
 export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: ReactNode }) {
   const ros = useRosSession(ctx);
@@ -18,6 +20,9 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
   const [live, setLive] = useState<ClaudeMessage | null>(null);
   const abort = useRef<AbortController | null>(null);
   const known = status.state === "ready" || status.state === "starting";
+  const [panel, setPanel] = useState(false);
+  const elapsed = useElapsed(status.state === "starting");
+  const showPanel = panel || status.state === "failed";
 
   const activeId = useRef<string | null>(null);
   const req = useRef(0);
@@ -167,12 +172,16 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         <button className="btn" onClick={() => ctx.goTo("export")} disabled={running}><ArrowLeft size={14} />Back to robot</button>
         <strong>{ctx.robotName}</strong>
         <span className={`dot ${status.state}`} />
-        <span className="muted">
-          {status.state === "starting" && "Starting ROS… (first start builds the workspace)"}
-          {status.state === "ready" && "ROS ready"}
-          {status.state === "failed" && "ROS session stopped"}
-          {status.state === "stopped" && "ROS not running"}
-        </span>
+        {status.state === "starting" || status.state === "failed" ? (
+          <span className="startup-anchor">
+            <button className="btn btn-ghost startup-pill" aria-expanded={showPanel} onClick={() => setPanel((p) => !p)}>
+              {status.state === "failed" ? "ROS session stopped" : `Starting ROS · ${stageText(status)} · ${fmtElapsed(elapsed)}`}
+            </button>
+            {showPanel && <StartupPanel status={status} />}
+          </span>
+        ) : (
+          <span className="muted">{status.state === "ready" ? "ROS ready" : "ROS not running"}</span>
+        )}
         <span className="spacer" />
         {status.state === "stopped" || status.state === "failed"
           ? <button className="btn" onClick={() => void ros.start()}><Play size={14} />Start ROS</button>
@@ -181,7 +190,6 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
           <button className="btn" onClick={() => void ros.restart()} disabled={ros.busy || running}><RotateCcw size={14} />Restart session</button>}
       </header>
       {ros.error && <p className="error program-error">{ros.error}</p>}
-      {status.state === "failed" && status.log && <pre className="log program-error">{status.log}</pre>}
       <div className="program-columns">
         <ConversationList items={convs} active={active?.id ?? null} disabled={running || !known}
           onSelect={(id) => void reload(id)} onNew={() => void newConversation()}

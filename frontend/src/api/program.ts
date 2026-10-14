@@ -9,7 +9,9 @@ export type ProgramEvent =
   | { kind: "run_result"; ok: boolean; message: string; output?: string }
   | { kind: "done"; summary: string; runs: number; ok: boolean; session_id: string | null; program: string | null; code: string | null }
   | { kind: "error"; message: string };
-export interface SessionStatus { state: "stopped" | "starting" | "ready" | "failed"; robot?: string | null; log?: string }
+export type Stage = "export" | "collisions" | "image" | "build" | "moveit" | "bridge" | "ready";
+export interface SessionStatus { state: "stopped" | "starting" | "ready" | "failed"; robot?: string | null;
+  stage?: Stage; done?: number; total?: number; log?: string; error?: string }
 
 export async function startSession(robotName: string, links: Link[], joints: Joint[],
   bodiesByLink: Record<string, Body[]>): Promise<SessionStatus> {

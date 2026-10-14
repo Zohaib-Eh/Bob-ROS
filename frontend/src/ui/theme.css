@@ -199,3 +199,13 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .btn.run-again { align-self: flex-start; margin-top: 4px; padding: 2px 8px; font-size: 12px; }
 
 .import-progress progress { width: 80px; height: 6px; vertical-align: middle; margin: 0 6px; }
+.startup-anchor { position: relative; }
+.startup-panel { position: absolute; top: 100%; left: 0; z-index: 50; min-width: 320px; margin-top: 4px; padding: 8px 12px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.startup-panel ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.startup-panel li { display: flex; align-items: center; gap: 6px; }
+.startup-panel li.todo { color: var(--muted); }
+.startup-panel li.failed { color: var(--danger); }
+.startup-panel .log { max-height: 160px; overflow: auto; font-size: 11px; margin: 8px 0 0; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

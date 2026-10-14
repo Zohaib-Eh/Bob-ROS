@@ -288,3 +288,40 @@ it("a deleted latest program is not offered; the dropdown falls back to one that
   expect([...pick.options].map((o) => o.textContent)).toEqual(["task_001_a.py", "All programs…"]);
   expect(pick.value).toBe("bot_tasks/programs/task_001_a.py");
 });
+
+describe("ROS startup progress", () => {
+  it("shows the startup stage in the header and the checklist on click", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    vi.spyOn(api, "sessionStatus").mockResolvedValue({ state: "starting", robot: "bot", stage: "collisions", done: 4200, total: 10000 });
+    ui();
+    const pill = await screen.findByRole("button", { name: /Checking collisions 4,200 \/ 10,000/ });
+    fireEvent.click(pill);
+    const panel = screen.getByTestId("startup-panel");
+    expect(panel.querySelector('[data-stage="export"]')!.className).toMatch(/done/);
+    expect(panel.querySelector('[data-stage="collisions"]')!.className).toMatch(/current/);
+    expect(panel.querySelector('[data-stage="build"]')!.className).toMatch(/todo/);
+  });
+
+  it("opens the checklist by itself on failure, marking the stage that failed", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    vi.spyOn(api, "sessionStatus").mockResolvedValue({ state: "failed", robot: "bot", stage: "image", error: "docker build failed" });
+    ui();
+    const panel = await screen.findByTestId("startup-panel");
+    expect(panel.querySelector('[data-stage="image"]')!.className).toMatch(/failed/);
+    expect(panel.textContent).toMatch(/docker build failed/);
+  });
+
+  it("never has two status requests in flight", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    let inFlight = 0, most = 0, calls = 0;
+    vi.spyOn(api, "sessionStatus").mockImplementation(async () => {
+      calls++; inFlight++; most = Math.max(most, inFlight);
+      await new Promise((r) => setTimeout(r, 40));  // slower than POLL.starting (10 ms)
+      inFlight--;
+      return { state: "starting", robot: "bot", stage: "build" };
+    });
+    ui();
+    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(4), { timeout: 3000 });
+    expect(most).toBe(1);
+  });
+});
