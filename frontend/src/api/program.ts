@@ -58,6 +58,9 @@ export async function readFile(path: string): Promise<{ path: string; content: s
 export async function saveFile(path: string, content: string, conversation: string | null): Promise<void> {
   await send("/program/files/content", put({ path, content, conversation }));
 }
+export async function deleteFile(path: string): Promise<void> {
+  await send(`/program/files/content?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+}
 export async function runFile(path: string, conversation: string | null): Promise<{ ok: boolean; output: string }> {
   return (await send("/program/files/run", json({ path, conversation }))).json();
 }

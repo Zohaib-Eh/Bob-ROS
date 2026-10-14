@@ -105,3 +105,24 @@ def test_tree_skips_hidden_folders(src):
     (src / ".bot_kinematics.old-1234abcd").mkdir()
     (src / ".bot_kinematics.old-1234abcd" / "setup.py").write_text("x")
     assert all(not f["path"].startswith(".") for f in client.get("/program/files").json())
+
+
+def test_delete_a_program(src):
+    r = client.delete("/program/files/content", params={"path": "bot_tasks/programs/task_001.py"})
+    assert r.status_code == 200 and not (src / "bot_tasks/programs/task_001.py").exists()
+    assert client.delete("/program/files/content", params={"path": "bot_tasks/programs/task_001.py"}).status_code == 404
+
+
+@pytest.mark.parametrize("bad", ["bot_program/robot.py", "../x.py", "bot_tasks/programs/../../bot_program/robot.py"])
+def test_only_programs_can_be_deleted(src, bad):
+    assert client.delete("/program/files/content", params={"path": bad}).status_code == 400
+    assert (src / "bot_program/robot.py").exists()
+
+
+def test_no_delete_while_a_task_runs(src):
+    assert routes._busy.acquire(blocking=False)
+    try:
+        r = client.delete("/program/files/content", params={"path": "bot_tasks/programs/task_001.py"})
+        assert r.status_code == 409 and (src / "bot_tasks/programs/task_001.py").exists()
+    finally:
+        routes._busy.release()

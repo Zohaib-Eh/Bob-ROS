@@ -132,3 +132,27 @@ describe("Workspace", () => {
     expect(list).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("deleting programs", () => {
+  it("deletes the open program after a confirm, then closes it and tells the parent", async () => {
+    const del = vi.spyOn(api, "deleteFile").mockResolvedValue();
+    const onRan = vi.fn();
+    ui(false, onRan);
+    await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "Code" })); });
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    vi.spyOn(window, "confirm").mockReturnValueOnce(false);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /delete/i })); });
+    expect(del).not.toHaveBeenCalled();
+    vi.spyOn(window, "confirm").mockReturnValueOnce(true);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /delete/i })); });
+    expect(del).toHaveBeenCalledWith("bot_tasks/programs/task_001.py");
+    expect(screen.queryByTestId("editor")).toBeNull();
+    expect(onRan).toHaveBeenCalled();
+  });
+  it("library files have no delete button", async () => {
+    ui();
+    await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "Code" })); });
+    await act(async () => { fireEvent.click(await screen.findByText("robot.py")); });
+    expect(screen.queryByRole("button", { name: /delete/i })).toBeNull();
+  });
+});

@@ -50,3 +50,12 @@ def write(src, robot: str, rel: str, content: str) -> None:
         raise PermissionError(f"Only {robot}_tasks/programs/*.py can be edited.")
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8", newline="\n")
+
+
+def delete(src, robot: str, rel: str) -> None:
+    p = safe(src, rel)
+    if not editable(robot, rel):
+        raise PermissionError(f"Only {robot}_tasks/programs/*.py can be deleted.")
+    if not p.is_file():
+        raise FileNotFoundError(rel)
+    p.unlink()

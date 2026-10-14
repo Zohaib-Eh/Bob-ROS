@@ -247,9 +247,44 @@ it("the Preview Run bar has a dropdown of all programs, defaulting to the latest
   await ready();
   await screen.findByText("A");
   const pick = await screen.findByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
-  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_001.py", "task_002.py"]);
   expect(pick.value).toBe("bot_tasks/programs/task_002.py");
+  fireEvent.change(pick, { target: { value: "__all__" } });
+  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_001.py", "task_002.py"]);
   fireEvent.change(pick, { target: { value: "bot_tasks/programs/task_001.py" } });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
   expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_001.py", "aaaaaaaaaaaa");
+});
+
+it("the dropdown lists this conversation's programs, with All programs to see the rest", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [{ kind: "file", path: "programs/task_002_stack.py" }], summary: "", result: { ok: true, runs: 1 },
+      error: null, program: "programs/task_002_stack.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([
+    { path: "bot_tasks/programs/task_001_old.py", editable: true },
+    { path: "bot_tasks/programs/task_002_stack.py", editable: true }]);
+  await ready();
+  await screen.findByText("A");
+  const pick = await screen.findByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_002_stack.py", "All programs…"]);
+  fireEvent.change(pick, { target: { value: "__all__" } });
+  const all = screen.getByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  expect([...all.options].map((o) => o.textContent)).toEqual(["task_001_old.py", "task_002_stack.py"]);
+  expect(all.value).toBe("bot_tasks/programs/task_002_stack.py");
+});
+
+it("a deleted latest program is not offered; the dropdown falls back to one that exists", async () => {
+  const c = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_001_a.py" },
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_002_b.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(c as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([{ path: "bot_tasks/programs/task_001_a.py", editable: true }]);
+  await ready();
+  await screen.findByText("A");
+  const pick = await screen.findByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  await act(async () => {});
+  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_001_a.py", "All programs…"]);
+  expect(pick.value).toBe("bot_tasks/programs/task_001_a.py");
 });

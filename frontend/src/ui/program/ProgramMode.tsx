@@ -118,10 +118,27 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     if (status.state !== "ready" || running) return;
     api.listFiles().then((fs) => { if (mounted.current) setPrograms(fs.filter((f) => f.editable).map((f) => f.path)); })
       .catch(() => {});  // the dropdown just stays as it was
-  }, [status.state, running, active?.id]);
+  }, [status.state, running, active]);
   const full = (p: string) => (p.includes("_tasks/") ? p : `${status.robot}_tasks/${p}`);
   useEffect(() => { setChosen(latest && status.robot ? full(latest) : null); }, [latest, status.robot]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const runList = chosen && !programs.includes(chosen) ? [...programs, chosen] : programs;
+  // the dropdown shows this conversation's programs; "All programs…" widens it to every program in the workspace
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => setShowAll(false), [active?.id]);
+  const mine = useMemo(() => {
+    const out = new Set<string>();
+    for (const m of active?.messages ?? []) {
+      if (m.role === "run") out.add(full(m.path));
+      if (m.role === "claude") {
+        if (m.program) out.add(full(m.program));
+        for (const it of m.items) if (it.kind === "file" && it.path.startsWith("programs/")) out.add(full(it.path));
+      }
+    }
+    return out;
+  }, [active, status.robot]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = showAll ? programs : programs.filter((p) => mine.has(p));
+  // once the list has loaded, a chosen program that no longer exists (deleted) falls back to the newest shown one
+  const pickable = programs.length ? shown : chosen ? [chosen] : [];
+  const pick = chosen && pickable.includes(chosen) ? chosen : pickable[pickable.length - 1] ?? null;
 
   async function runAgain(path: string) {
     if (!active || !status.robot) return;
@@ -176,13 +193,15 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
             onRan={(id) => void reload(id)} onRunning={(r) => { if (mounted.current) setRunning(r); }} showPreview={previewTick}
-            overlay={chosen && runList.length > 0 && (
+            overlay={pick && (
               <div className="preview-run" data-testid="preview-run">
-                <select aria-label="Program to run" value={chosen} disabled={running} onChange={(e) => setChosen(e.target.value)}>
-                  {runList.map((p) => <option key={p} value={p}>{p.split("/").pop()}</option>)}
+                <select aria-label="Program to run" value={pick} disabled={running}
+                  onChange={(e) => { if (e.target.value === "__all__") setShowAll(true); else setChosen(e.target.value); }}>
+                  {pickable.map((p) => <option key={p} value={p}>{p.split("/").pop()}</option>)}
+                  {!showAll && <option value="__all__">All programs…</option>}
                 </select>
                 <button className="btn btn-primary" disabled={running || status.state !== "ready"}
-                  onClick={() => void runAgain(chosen)}><Play size={14} />Run</button>
+                  onClick={() => void runAgain(pick)}><Play size={14} />Run</button>
               </div>
             )} />
         </section>

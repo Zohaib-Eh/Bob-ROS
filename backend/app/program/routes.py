@@ -202,6 +202,22 @@ def read_file(path: str) -> dict:
         raise HTTPException(404, "No such file.")
 
 
+@router.delete("/files/content")
+def delete_file(path: str) -> dict:
+    src, robot = _ws()
+    if not _busy.acquire(blocking=False):
+        raise HTTPException(409, "A task is already running.")
+    try:
+        files.delete(src, robot, path)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError:
+        raise HTTPException(404, "No such file.")
+    finally:
+        _busy.release()
+    return {"deleted": path}
+
+
 @router.put("/files/content")
 def save_file(req: SaveFile) -> dict:
     src, robot = _ws()

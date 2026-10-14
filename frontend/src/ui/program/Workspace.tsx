@@ -1,4 +1,4 @@
-import { Play, Save } from "lucide-react";
+import { Play, Save, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { FileEntry } from "../../api/program";
@@ -42,6 +42,16 @@ export default function Workspace({ preview, conversation, running, changed, onR
     }
     catch (e) { setNote((e as Error).message); return false; }
   }
+  async function remove() {
+    if (!file || !window.confirm(`Delete ${file.path.split("/").pop()}? This cannot be undone.`)) return;
+    try {
+      await api.deleteFile(file.path);
+      setFile(null); setText(""); setNote(null);
+      setFiles((fs) => fs.filter((f) => f.path !== file.path));
+      onRan(conversation);  // the parent refreshes its program list
+    } catch (e) { setNote((e as Error).message); }
+  }
+
   async function run() {
     if (!file) return;
     if (dirty && !(await save())) return;
@@ -73,6 +83,7 @@ export default function Workspace({ preview, conversation, running, changed, onR
                   {file.editable && <>
                     <button className="btn" onClick={() => void save()} disabled={running || !dirty}><Save size={14} />Save</button>
                     <button className="btn" onClick={() => void run()} disabled={running}><Play size={14} />Run</button>
+                    <button className="btn" aria-label="Delete" title="Delete this program" onClick={() => void remove()} disabled={running}><Trash2 size={14} /></button>
                   </>}
                 </div>
                 <Editor key={file.path} value={text} readOnly={!file.editable || running} onChange={(v) => { setText(v); setNote(null); }} />
