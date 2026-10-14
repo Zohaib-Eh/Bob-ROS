@@ -8,10 +8,13 @@ from xml.dom import minidom
 
 import numpy as np
 import trimesh
+
 from scipy.spatial.transform import Rotation
 
 from app.massprops.link_mass import compute_link_mass_properties
 from app.models import Body, Joint, Link, PartWarning
+from app.sim.mjcf import build_mjcf, compile_mjcf
+from app.sim.torque import required_efforts, suggest
 from app.validate.structural import validate_structure
 
 
@@ -83,7 +86,7 @@ def _joint_names(joints: list[Joint], links_by_id) -> dict[str, str]:
     return names
 
 
-def _add_joint_element(robot, joint: Joint, name: str, links_by_id, frames) -> None:
+def _add_joint_element(robot, joint: Joint, name: str, links_by_id, frames, effort: float = 100.0) -> None:
     joint_el = ET.SubElement(robot, "joint", {"name": name, "type": joint.type})
     ET.SubElement(joint_el, "parent", {"link": links_by_id[joint.parent_link_id].name})
     ET.SubElement(joint_el, "child", {"link": links_by_id[joint.child_link_id].name})
@@ -97,7 +100,7 @@ def _add_joint_element(robot, joint: Joint, name: str, links_by_id, frames) -> N
     if joint.type in ("revolute", "prismatic") and joint.limit_lower is not None:
         ET.SubElement(joint_el, "limit", {
             "lower": str(joint.limit_lower), "upper": str(joint.limit_upper),
-            "effort": "100", "velocity": "1.0",
+            "effort": f"{effort:g}", "velocity": "1.0",
         })
 
 
@@ -137,7 +140,9 @@ def export_urdf(
     links: list[Link],
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
+    efforts: dict[str, float] | None = None,
 ) -> str:
+    """URDF text. `efforts` maps joint ids to motor strength; a missing one is written as 100."""
     errors = validate_structure(links, joints) + _urdf_errors(
         robot_name, links, joints, bodies_by_link
     )
@@ -154,7 +159,7 @@ def export_urdf(
         _add_link_element(robot, robot_name, link, frames[link.id])
     names = _joint_names(joints, links_by_id)
     for joint in joints:
-        _add_joint_element(robot, joint, names[joint.id], links_by_id, frames)
+        _add_joint_element(robot, joint, names[joint.id], links_by_id, frames, (efforts or {}).get(joint.id, 100.0))
 
     return minidom.parseString(ET.tostring(robot, encoding="unicode")).toprettyxml(indent="  ")
 
@@ -255,29 +260,63 @@ def link_mass_properties(link: Link, bodies: list[Body]) -> Link:
     return _with_mass_properties(link, used[link.id])
 
 
+def _prepared(robot_name, links, joints, bodies_by_link):
+    """Validated links (with mass properties), used bodies and per-link STL bytes."""
+    bodies_by_link = _used_bodies(links, bodies_by_link)
+    errors = _part_status_errors(links, bodies_by_link)
+    if errors:
+        raise ValueError("Cannot export URDF -- " + "; ".join(errors))
+    links = [_with_mass_properties(l, bodies_by_link.get(l.id, [])) for l in links]
+    meshes = {}
+    for link in links:
+        parts = [trimesh.Trimesh(vertices=b.vertices, faces=b.triangles, process=False)
+                 for b in bodies_by_link.get(link.id, []) if b.vertices]
+        if parts:
+            meshes[f"{link.name}.stl"] = trimesh.util.concatenate(parts).export(file_type="stl")
+    return links, bodies_by_link, meshes
+
+
+def _suggested_from(urdf: str, links, joints, meshes) -> dict[str, float]:
+    """Joint id -> suggested motor strength (2x the worst static gravity load), moving joints only.
+    Raises ValueError when MuJoCo can't load the robot (e.g. impossible inertia, flat collision mesh)."""
+    by_name = suggest(required_efforts(compile_mjcf(build_mjcf(urdf, meshes, None), meshes)))
+    names = _joint_names(joints, {l.id: l for l in links})
+    return {j.id: by_name[names[j.id]] for j in joints if names[j.id] in by_name}
+
+
+def suggest_efforts(robot_name, links, joints, bodies_by_link) -> dict[str, float]:
+    links, bodies_by_link, meshes = _prepared(robot_name, links, joints, bodies_by_link)
+    return _suggested_from(export_urdf(robot_name, links, joints, bodies_by_link), links, joints, meshes)
+
+
 def export_package(
     robot_name: str,
     links: list[Link],
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
 ) -> bytes:
-    bodies_by_link = _used_bodies(links, bodies_by_link)
-    errors = _part_status_errors(links, bodies_by_link)
-    if errors:
-        raise ValueError("Cannot export URDF -- " + "; ".join(errors))
-    links = [_with_mass_properties(l, bodies_by_link.get(l.id, [])) for l in links]
-    urdf = export_urdf(robot_name, links, joints, bodies_by_link)
+    """The ROS description package zip. A robot MuJoCo can't load still exports: its efforts fall back
+    to 100 (or max_effort) and the zip has no mjcf/; the physics check reports why."""
+    links, bodies_by_link, meshes = _prepared(robot_name, links, joints, bodies_by_link)
+    urdf = export_urdf(robot_name, links, joints, bodies_by_link)  # structural errors raise here
+    try:
+        sug = _suggested_from(urdf, links, joints, meshes)
+    except ValueError:
+        sug = {}
+    efforts = {j.id: j.max_effort or sug.get(j.id, 100.0) for j in joints}
+    urdf = export_urdf(robot_name, links, joints, bodies_by_link, efforts)
+    names = _joint_names(joints, {l.id: l for l in links})
+    try:
+        mjcf = build_mjcf(urdf, meshes, {names[j.id]: efforts[j.id] for j in joints})  # fixed joints get no motor
+    except ValueError:
+        mjcf = None
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"{robot_name}/urdf/{robot_name}.urdf", urdf)
+        if mjcf is not None:
+            z.writestr(f"{robot_name}/mjcf/{robot_name}.xml", mjcf)
         z.writestr(f"{robot_name}/package.xml", package_xml(robot_name))
         z.writestr(f"{robot_name}/CMakeLists.txt", cmakelists(robot_name))
-        for link in links:
-            meshes = [
-                trimesh.Trimesh(vertices=b.vertices, faces=b.triangles, process=False)
-                for b in bodies_by_link.get(link.id, []) if b.vertices
-            ]
-            if meshes:
-                stl = trimesh.util.concatenate(meshes).export(file_type="stl")
-                z.writestr(f"{robot_name}/meshes/{link.name}.stl", stl)
+        for name, stl in meshes.items():
+            z.writestr(f"{robot_name}/meshes/{name}", stl)
     return buf.getvalue()

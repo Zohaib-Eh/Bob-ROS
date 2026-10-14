@@ -1,6 +1,6 @@
 import math
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Vec3 = tuple[float, float, float]
 
@@ -100,6 +100,7 @@ class Joint(_Model):
     limit_upper: float | None = None
     source: Literal["suggested", "confirmed", "manual"]
     ambiguous: bool = False
+    max_effort: float | None = Field(default=None, gt=0)  # N·m (N for prismatic); None = auto
 
     @model_validator(mode="after")
     def _check(self):
