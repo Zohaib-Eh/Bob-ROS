@@ -11,6 +11,8 @@ import StartupPanel, { stageText } from "./StartupPanel";
 import { useRosSession } from "./useRosSession";
 import { fmtElapsed, useElapsed } from "../useElapsed";
 
+const NO_CHAT = "";  // runningId for a Code-tab run with no chat open: still locks, matches no chat
+
 export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: ReactNode }) {
   const ros = useRosSession(ctx);
   const { status } = ros;
@@ -18,7 +20,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
   const [active, setActive] = useState<Conversation | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);  // the conversation a task runs in
   const running = runningId !== null;
-  const [live, setLive] = useState<ClaudeMessage | null>(null);
+  const [live, setLive] = useState<{ id: string; msg: ClaudeMessage } | null>(null);  // the streamed answer and its chat
   const abort = useRef<AbortController | null>(null);
   const robot = status.robot ?? ctx.robotName;  // conversations live in this robot's workspace
   const [panel, setPanel] = useState(false);
@@ -74,12 +76,12 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     setActive((a) => (a && a.id === id ? { ...a, messages: [...a.messages, { role: "user", text: task }] } : a));
     setRunningId(id);
     let msg = emptyClaude();
-    setLive(msg);
+    setLive({ id, msg });
     const ctl = new AbortController();
     abort.current = ctl;
     let failed = false;
     try {
-      await api.runConversation(id, task, (e) => { msg = applyEvent(msg, e); if (mounted.current) setLive(msg); }, ctl.signal);
+      await api.runConversation(id, task, (e) => { msg = applyEvent(msg, e); if (mounted.current) setLive({ id, msg }); }, ctl.signal);
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       failed = true;
@@ -155,12 +157,12 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     try { await api.runFile(full(path), id); }
     catch (e) { fail(e); }
     finally { if (mounted.current) setRunningId(null); }
-    if (mounted.current) await reload(id);
+    if (mounted.current) await reload();  // keeps whichever chat is open
   }
 
   const busyWhy = running ? "A task is running. Wait for it to finish first." : undefined;
   const runningTitle = convs.find((c) => c.id === runningId)?.title ?? "another chat";
-  const waiting = runningId && runningId !== active?.id ? `Waiting for task in “${runningTitle}”…`
+  const waiting = runningId !== null && runningId !== active?.id ? `Waiting for task in “${runningTitle}”…`
     : status.state === "starting" ? `Waiting for ROS… (${stageText(status)})`
     : status.state !== "ready" ? "Start ROS to send a task." : undefined;
 
@@ -202,15 +204,16 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
           onSelect={(id) => void reload(id)} onNew={() => void newConversation()}
           onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
         <section className="chat-column" data-testid="chat-slot">
-          <Chat messages={active?.messages ?? []} live={active?.id === runningId ? live : null} running={active?.id === runningId}
+          <Chat messages={active?.messages ?? []} live={live && active?.id === live.id ? live.msg : null} running={active?.id === runningId}
             disabled={!!waiting} waiting={waiting} onSend={(t) => void send(t)} onRunAgain={(p) => void runAgain(p)} />
         </section>
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
-            onRan={(id) => void reload(id)} onRunning={(r) => { if (mounted.current) setRunningId(r ? activeId.current : null); }} showPreview={previewTick}
+            onRan={() => void reload()}
+            onRunning={(r) => { if (mounted.current) setRunningId(r ? activeId.current ?? NO_CHAT : null); }} showPreview={previewTick}
             overlay={pick && (
               <div className="preview-run" data-testid="preview-run">
-                <select aria-label="Program to run" value={pick} disabled={running}
+                <select aria-label="Program to run" value={pick} disabled={running} title={busyWhy}
                   onChange={(e) => { if (e.target.value === "__all__") setShowAll(true); else setChosen(e.target.value); }}>
                   {pickable.map((p) => <option key={p} value={p}>{p.split("/").pop()}</option>)}
                   {!showAll && <option value="__all__">All programs…</option>}

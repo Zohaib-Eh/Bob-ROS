@@ -379,3 +379,52 @@ describe("Program mode unlocked", () => {
     expect(back.getAttribute("title")).toMatch(/task is running/i);
   });
 });
+
+describe("review fixes", () => {
+  const withProgram = (id: string, title: string) => ({ ...conv(id, title), messages: [{ role: "claude", items: [], summary: "done",
+    result: { ok: true, runs: 1 }, error: null, program: "programs/task_001.py" }] });
+
+  it("a Run again that ends while another chat is open does not jump back", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }, { id: "bbbbbbbbbbbb", title: "B" }]);
+    vi.spyOn(api, "getConversation").mockImplementation(async (_r, id) => withProgram(id, id === "aaaaaaaaaaaa" ? "A" : "B") as never);
+    vi.spyOn(api, "listFiles").mockResolvedValue([{ path: "bot_tasks/programs/task_001.py", editable: true }]);
+    let finish!: () => void;
+    vi.spyOn(api, "runFile").mockImplementation(() => new Promise((r) => { finish = () => r({ ok: true, output: "RESULT: ok" }); }));
+    await ready();
+    await screen.findByText("A");
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: /run again/i })[0]); });
+    expect(screen.getByLabelText("Program to run").getAttribute("title")).toMatch(/task is running/i);  // #12
+    await act(async () => { fireEvent.click(screen.getByText("B")); });
+    await act(async () => { finish(); });
+    expect(screen.getByTestId("conv-bbbbbbbbbbbb").className).toMatch(/active/);
+  });
+
+  it("the streamed answer stays on screen until the saved one has loaded", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+    const get = vi.spyOn(api, "getConversation").mockImplementation(async (_r, id) => conv(id, "A"));
+    let end!: () => void;
+    vi.spyOn(api, "runConversation").mockImplementation(async (_id, _t, on) => {
+      on({ kind: "text", text: "the streamed answer" });
+      await new Promise<void>((r) => { end = r; });
+    });
+    await ready();
+    await screen.findByText("A");
+    fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /send/i })); });
+    get.mockImplementation(() => new Promise(() => {}));  // the reload after the run never returns
+    await act(async () => { end(); });
+    expect(screen.getByText("the streamed answer")).toBeTruthy();
+  });
+
+  it("a Code-tab run with no chat open still locks Back to robot", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    vi.spyOn(api, "listFiles").mockResolvedValue([{ path: "bot_tasks/programs/task_001.py", editable: true }]);
+    vi.spyOn(api, "readFile").mockImplementation(async (p) => ({ path: p, content: "x", editable: true }));
+    vi.spyOn(api, "runFile").mockImplementation(() => new Promise(() => {}));
+    await ready();
+    await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "Code" })); });
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+    expect(screen.getByRole("button", { name: /back to robot/i })).toHaveProperty("disabled", true);
+  });
+});
