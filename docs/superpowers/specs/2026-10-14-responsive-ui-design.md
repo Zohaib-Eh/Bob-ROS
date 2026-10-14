@@ -29,7 +29,7 @@ strip. Every stage shows an elapsed timer, so even an opaque stage visibly ticks
 
 | Stage | Source | Display |
 |---|---|---|
-| Uploading | browser upload progress | bar (only visible for big files) |
+| Uploading | until the first event arrives | spinner + timer (upload to localhost is near-instant; no byte progress) |
 | Reading file | `_read_step_named` / `_read_shape` (one OCCT call) | spinner + timer |
 | Building parts | `for sources, prefix, repaired in groups` loop in `import_cad` | bar, "N / M" |
 | Finding faces | `segment_mesh_body` (STL/OBJ) | spinner + timer |
@@ -46,8 +46,8 @@ strip. Every stage shows an elapsed timer, so even an opaque stage visibly ticks
 - The plain-JSON response is removed (the frontend is the only caller).
 
 **Frontend.**
-- `importFile` switches from `fetch` to `XMLHttpRequest` (upload progress), and reads the event stream from
-  `xhr.responseText` as it grows (`onprogress`).
+- `importFile` keeps `fetch` and reads the event stream with the same reader the agent run uses (moved into
+  `client.ts`). No upload byte progress: the backend is on localhost.
 - `importFile(file, scale, onProgress)`; `Stepper` keeps the stage in state and renders the strip.
 
 **Tests.**
@@ -110,7 +110,7 @@ text).
 
 **3a. Conversations without ROS.** Conversations are files in `~/.cad-to-urdf/workspaces/<robot>/conversations/`.
 Conversation routes take `?robot=<name>` and resolve `WORKSPACES / <name>` directly instead of via
-`session.current()`. The name must match the export's `_NAME_RE` (`urdf_writer.py`), else 400 — this also blocks
+`session.current()`. The name must match `ROS_NAME` (`moveit_config.py`, the rule every workspace name already passes), else 400 — this also blocks
 path traversal. The sidebar loads at once; browse, create, rename and delete work while ROS
 is stopped or starting. Send and Run stay disabled until ready, showing "Waiting for ROS… (<stage>)". Routes that need
 the container (run, files that live in the workspace `src`) are unchanged.
