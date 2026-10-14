@@ -145,3 +145,11 @@ Any other cause found during reproduction gets fixed at its root and noted in th
 - ROS start: host-side errors and container failures both end as `state: "failed"` with stage, message and log; the
   panel opens.
 - Agent run: unchanged.
+
+## Findings (Task 1)
+
+Measured 2026-10-14, Docker Desktop not running, backend idle, about 2.3 GB of 16 GB RAM free:
+
+- `GET /program/session`: 0.31 s alone; 0.32–0.36 s for five at once (the thread pool absorbs them, so there's no pile-up when each call is fast).
+- `GET /program/conversations`: 0.16 s, but answers 409 "Start the ROS session first." Without a session, chats can't even be listed. That is cause 1 (the sidebar is dead without ROS).
+- Cause 2 (the poll pile-up) needs a status call slower than the 1 s poll interval. That happens only with Docker up under memory pressure, and can't be reproduced without a session started from the UI. The chained poll removes it either way. The Docker-up timings and RAM per piece are taken in Task 8.
