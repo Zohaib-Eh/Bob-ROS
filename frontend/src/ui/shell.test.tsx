@@ -13,6 +13,7 @@ import { routePick } from "./pick";
 import { deleteAction } from "./selection";
 import { shortcutFor } from "./shortcuts";
 import StepPanel from "./steps/StepPanel";
+import MenuBar from "./MenuBar";
 import Stepper from "./Stepper";
 import { Harness, imported, state } from "./testing";
 
@@ -117,10 +118,12 @@ describe("Stepper", () => {
     expect(screen.getByTestId("step-parts").querySelector(".badge")?.textContent).toBe("1");   // one approximate part
     fireEvent.click(screen.getByTestId("step-connect"));
     expect(state().step).toBe("connect");
+    expect(screen.getByTestId("step-export").textContent).toMatch(/Review/);
+    expect(screen.queryByTestId("step-program")).toBeNull();
   });
   it("imports a file with the current scale", async () => {
     const spy = vi.spyOn(client, "importFile").mockResolvedValue({ bodies: [boxBody("x", [0, 0, 0], [1, 1, 1])], applied_scale: 0.001, warnings: [] });
-    render(<Harness start={imported([])} ui={(ctx) => <Stepper ctx={ctx} progress={idle} onCancel={vi.fn()} onResume={vi.fn()} />} />);
+    render(<Harness start={imported([])} ui={(ctx) => <MenuBar ctx={ctx} />} />);
     const file = new File(["x"], "a.stl");
     await act(async () => { fireEvent.change(screen.getByTestId("import-input"), { target: { files: [file] } }); });
     expect(spy).toHaveBeenCalledWith(file, 0.001, expect.any(Function));
@@ -137,7 +140,7 @@ describe("Import progress", () => {
       report = onProgress!;
       return new Promise((r) => { finish = r; });
     });
-    render(<Harness start={imported([])} ui={(ctx) => <Stepper ctx={ctx} progress={idle} onCancel={vi.fn()} onResume={vi.fn()} />} />);
+    render(<Harness start={imported([])} ui={(ctx) => <MenuBar ctx={ctx} />} />);
     await act(async () => { fireEvent.change(screen.getByTestId("import-input"), { target: { files: [new File(["x"], "a.step")] } }); });
     await act(async () => { report({ stage: "parts", done: 2, total: 5 }); });
     expect(screen.getByTestId("import-progress").textContent).toMatch(/Building parts 2 \/ 5/);
@@ -149,7 +152,7 @@ describe("Import progress", () => {
 
 describe("Open project", () => {
   it("an opened project is never auto-grouped", async () => {
-    render(<Harness start={imported([])} ui={(ctx) => <Stepper ctx={ctx} progress={idle} onCancel={vi.fn()} onResume={vi.fn()} />} />);
+    render(<Harness start={imported([])} ui={(ctx) => <MenuBar ctx={ctx} />} />);
     const json = saveProject(two().present);
     const file = Object.assign(new File([json], "p.json"), { text: async () => json });   // jsdom's File has no text()
     await act(async () => { fireEvent.change(screen.getByTestId("open-input"), { target: { files: [file] } }); });

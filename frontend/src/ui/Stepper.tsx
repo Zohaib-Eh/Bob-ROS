@@ -1,21 +1,15 @@
-import { Check, FolderOpen, Redo2, Save, Undo2, Upload } from "lucide-react";
-import { useState } from "react";
-import { importFile, type ImportProgress } from "../api/client";
+import { Check } from "lucide-react";
 import { exportChecklist, type StepId } from "../model/checklist";
 import type { Progress } from "../model/detection";
 import { chainDepth } from "../model/nextJoint";
 import { partProblems } from "../model/problems";
-import { loadProject, saveProject } from "../model/project";
 import type { Ctx } from "./ctx";
-import { downloadBlob } from "./download";
-import { fmtElapsed, useElapsed } from "./useElapsed";
 
+/** Build's steps. "export" is shown as Review; Simulate ("program") is a workbench, not a step. */
 export const STEPS: { id: StepId; label: string }[] = [
   { id: "parts", label: "Parts" }, { id: "group", label: "Group" },
-  { id: "connect", label: "Connect" }, { id: "export", label: "Export" }, { id: "program", label: "Program" },
+  { id: "connect", label: "Connect" }, { id: "export", label: "Review" },
 ];
-
-const IMPORT_LABEL = { upload: "Uploading", read: "Reading file", parts: "Building parts", faces: "Finding faces" } as const;
 
 export function stepBadges(ctx: Pick<Ctx, "model" | "robotName">): Record<StepId, number> {
   const m = ctx.model;
@@ -34,38 +28,12 @@ export function stepBadges(ctx: Pick<Ctx, "model" | "robotName">): Record<StepId
 interface Props { ctx: Ctx; progress: Progress; onCancel: () => void; onResume: () => void }
 
 export default function Stepper({ ctx, progress, onCancel, onResume }: Props) {
-  const { model, dispatch, step, goTo, notify, scale } = ctx;
-  const [busy, setBusy] = useState(false);
-  const [imp, setImp] = useState<ImportProgress | null>(null);
-  const elapsed = useElapsed(busy);
+  const { model, step, goTo } = ctx;
   const badges = stepBadges(ctx);
-
-  const onImport = async (file: File) => {
-    setBusy(true);
-    try {
-      const res = await importFile(file, scale, setImp);
-      dispatch({ type: "import", bodies: res.bodies, warnings: res.warnings });
-      goTo("parts");
-    } catch (e) {
-      notify(`Import of ${file.name} failed: ${(e as Error).message}`);
-    } finally {
-      setBusy(false);
-      setImp(null);
-    }
-  };
-  const onOpen = async (file: File) => {
-    try {
-      dispatch({ type: "load", model: loadProject(await file.text()) });
-      ctx.setAutoGrouped(true);   // an opened project is already arranged
-    } catch (e) {
-      notify((e as Error).message);
-    }
-  };
   const working = progress.total > 0 && progress.done < progress.total;
 
   return (
     <header className="stepper">
-      <span className="brand">CAD → URDF</span>
       {STEPS.map((s, i) => (
         <span key={s.id} className="row">
           {i > 0 && <span className="step-sep" />}
@@ -86,31 +54,6 @@ export default function Stepper({ ctx, progress, onCancel, onResume }: Props) {
             : <button className="btn btn-ghost" onClick={onCancel}>Pause</button>}
         </span>
       )}
-      {busy && imp && (
-        <span className="progress import-progress" data-testid="import-progress">
-          {IMPORT_LABEL[imp.stage]}{imp.total > 0 ? ` ${imp.done} / ${imp.total}` : "…"}
-          {imp.total > 0 && <progress value={imp.done} max={imp.total} />}
-          <span className="muted">{fmtElapsed(elapsed)}</span>
-        </span>
-      )}
-      <label className={`btn file-btn${busy ? " active" : ""}`} title="Import STEP, IGES, BREP, STL or OBJ">
-        <Upload size={14} />{busy ? "Importing…" : "Import"}
-        <input data-testid="import-input" type="file" disabled={busy} accept=".step,.stp,.iges,.igs,.brep,.stl,.obj"
-          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onImport(f); }} />
-      </label>
-      <button className="btn btn-icon" data-testid="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!ctx.canUndo}
-        onClick={() => dispatch({ type: "undo" })}><Undo2 size={14} /></button>
-      <button className="btn btn-icon" data-testid="redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled={!ctx.canRedo}
-        onClick={() => dispatch({ type: "redo" })}><Redo2 size={14} /></button>
-      <button className="btn btn-icon" data-testid="save-project" title="Save project" aria-label="Save project"
-        onClick={() => downloadBlob(new Blob([saveProject(model)], { type: "application/json" }), "project.json")}>
-        <Save size={14} />
-      </button>
-      <label className="btn btn-icon file-btn" title="Open project" aria-label="Open project">
-        <FolderOpen size={14} />
-        <input data-testid="open-input" type="file" accept=".json"
-          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onOpen(f); }} />
-      </label>
     </header>
   );
 }

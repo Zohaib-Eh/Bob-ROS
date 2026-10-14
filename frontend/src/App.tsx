@@ -14,6 +14,7 @@ import InfoCard from "./ui/InfoCard";
 import JointTool from "./ui/JointTool";
 import MarkerLayer from "./ui/MarkerLayer";
 import { looseLines, markersFor, type Marker } from "./ui/markers";
+import MenuBar from "./ui/MenuBar";
 import ProgramMode from "./ui/program/ProgramMode";
 import { routePick } from "./ui/pick";
 import { deleteAction, linksOfSelection, selectedBodies, type Selection } from "./ui/selection";
@@ -149,6 +150,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <MenuBar ctx={ctx} />
       <Stepper ctx={ctx} progress={progress} onCancel={() => runner.current!.cancel()} onResume={() => runner.current!.resume()} />
       <Banner message={banner} onClose={() => notify(null)} />
       <div className="workspace">

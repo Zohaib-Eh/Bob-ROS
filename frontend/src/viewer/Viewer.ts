@@ -32,6 +32,7 @@ export class Viewer {
   private meshes = new Map<string, Mesh>();
   private edgeMaterial = new LineBasicMaterial({ color: 0x3f4349, transparent: true, opacity: 0.35 });
   private grid: GridHelper | null = null;
+  private showGrid = true;
   private bounds = new Sphere(new Vector3(), 0.5);
   private pickCb: PickCb = () => {};
   private hoverCb: ((hit: Hit) => void) | null = null;
@@ -168,7 +169,20 @@ export class Viewer {
     const gm = this.grid.material as Material;
     gm.transparent = true;
     gm.opacity = 0.5;
+    this.grid.visible = this.showGrid;
     this.scene.add(this.grid);
+  }
+
+  setGrid(on: boolean) {
+    this.showGrid = on;
+    if (this.grid) this.grid.visible = on;
+    this.requestRender();
+  }
+
+  /** Every part's edge lines share one material, so one switch hides them all. */
+  setEdges(on: boolean) {
+    this.edgeMaterial.visible = on;
+    this.requestRender();
   }
 
   private applyLooks() {

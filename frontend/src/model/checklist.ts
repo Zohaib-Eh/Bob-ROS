@@ -56,3 +56,8 @@ export function exportChecklist(m: ModelState, robotName: string): CheckItem[] {
       linkIds: [], jointIds: defaults.map((j) => j.id), step: "connect" },
   ];
 }
+
+/** Why Simulate can't open yet, or null when the Review checklist passes. */
+export function simulateBlocked(model: ModelState, robotName: string): string | null {
+  return exportChecklist(model, robotName).some((i) => !i.ok && !i.warning) ? "Fix the Review checklist first." : null;
+}

@@ -212,3 +212,16 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .running-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin: 0 6px; background: var(--warning); animation: pulse 1s ease-in-out infinite alternate; }
 @keyframes pulse { to { opacity: .3; } }
 .chat-waiting { margin: 0 12px 4px; font-size: 12px; }
+.menubar { display: flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--chrome); border-bottom: 1px solid var(--border); }
+.menubar .brand { margin-right: 8px; }
+.menu { position: relative; }
+.menu-head { background: none; border: 0; padding: 4px 8px; border-radius: var(--radius); color: var(--text); font: inherit; cursor: pointer; }
+.menu-head:hover, .menu-head.open { background: var(--panel); }
+.menu-pop { position: absolute; top: 100%; left: 0; z-index: 60; min-width: 230px; padding: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); display: grid; }
+.menu-item { text-align: left; background: none; border: 0; padding: 6px 10px; border-radius: 4px; color: var(--text); font: inherit; cursor: pointer; }
+.menu-item:hover:not(:disabled) { background: var(--panel-2); }
+.menu-item:disabled { color: var(--muted); cursor: default; }
+.workbench { display: inline-flex; margin-left: 12px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.wb { background: var(--panel); border: 0; padding: 4px 12px; font: inherit; color: var(--text); cursor: pointer; }
+.wb.current { background: var(--accent); color: var(--accent-text); }
+.wb:disabled:not(.current) { color: var(--muted); cursor: default; }

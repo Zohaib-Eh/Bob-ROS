@@ -1,9 +1,10 @@
-import { ArrowLeft, Play, RotateCcw, Square } from "lucide-react";
+import { Play, RotateCcw, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { Conversation, ConversationInfo } from "../../api/program";
 import type { Ctx } from "../ctx";
 import { applyEvent, emptyClaude, type ClaudeMessage } from "../../model/chat";
+import MenuBar from "../MenuBar";
 import Chat from "./Chat";
 import ConversationList from "./ConversationList";
 import Workspace from "./Workspace";
@@ -177,8 +178,8 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
 
   return (
     <div className="program-mode">
+      <MenuBar ctx={ctx} lock={busyWhy ?? null} />
       <header className="program-bar">
-        <button className="btn" onClick={() => ctx.goTo("export")} disabled={running} title={busyWhy}><ArrowLeft size={14} />Back to robot</button>
         <strong>{ctx.robotName}</strong>
         <span className={`dot ${status.state}`} />
         {status.state === "starting" || status.state === "failed" ? (

@@ -31,7 +31,7 @@ describe("ProgramMode", () => {
     vi.spyOn(api, "listConversations").mockResolvedValue([]);
     await ready();
     expect(screen.getByTestId("viewer")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /back to robot/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
     expect(state().step).toBe("export");
   });
 
@@ -143,7 +143,7 @@ it("shows ROS ready and the conversations on mount when a session is already run
   expect(start).not.toHaveBeenCalled();
 });
 
-it("disables Back to robot while a task runs", async () => {
+it("disables the Build switch while a task runs", async () => {
   vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
   vi.spyOn(api, "getConversation").mockImplementation(async (_r, id) => conv(id, "A"));
   let finish!: () => void;
@@ -152,7 +152,7 @@ it("disables Back to robot while a task runs", async () => {
   await screen.findByText("A");
   fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
   await act(async () => { fireEvent.keyDown(screen.getByLabelText(/describe a task/i), { key: "Enter" }); });
-  expect((screen.getByRole("button", { name: /back to robot/i }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Build" }) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => { finish(); });
 });
 
@@ -367,14 +367,14 @@ describe("Program mode unlocked", () => {
     expect(screen.getByTestId("conv-bbbbbbbbbbbb").className).toMatch(/active/);
   });
 
-  it("Back to robot says why it is disabled during a run", async () => {
+  it("the Build switch says why it is disabled during a run", async () => {
     vi.spyOn(api, "listConversations").mockResolvedValue([]);
     vi.spyOn(api, "createConversation").mockResolvedValue(conv("aaaaaaaaaaaa", "New conversation"));
     vi.spyOn(api, "runConversation").mockImplementation(() => new Promise(() => {}));
     await ready();
     fireEvent.change(screen.getByRole("textbox", { name: /describe a task/i }), { target: { value: "go" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /send/i })); });
-    const back = screen.getByRole("button", { name: /back to robot/i });
+    const back = screen.getByRole("button", { name: "Build" });
     expect(back).toHaveProperty("disabled", true);
     expect(back.getAttribute("title")).toMatch(/task is running/i);
   });
@@ -416,7 +416,7 @@ describe("review fixes", () => {
     expect(screen.getByText("the streamed answer")).toBeTruthy();
   });
 
-  it("a Code-tab run with no chat open still locks Back to robot", async () => {
+  it("a Code-tab run with no chat open still locks the Build switch", async () => {
     vi.spyOn(api, "listConversations").mockResolvedValue([]);
     vi.spyOn(api, "listFiles").mockResolvedValue([{ path: "bot_tasks/programs/task_001.py", editable: true }]);
     vi.spyOn(api, "readFile").mockImplementation(async (p) => ({ path: p, content: "x", editable: true }));
@@ -425,6 +425,6 @@ describe("review fixes", () => {
     await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "Code" })); });
     await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
-    expect(screen.getByRole("button", { name: /back to robot/i })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Build" })).toHaveProperty("disabled", true);
   });
 });
