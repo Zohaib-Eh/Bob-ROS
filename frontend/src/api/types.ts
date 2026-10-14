@@ -49,6 +49,7 @@ export interface Joint {
   limit_upper: number | null;
   source: "suggested" | "confirmed" | "manual";
   ambiguous?: boolean;
+  max_effort?: number | null;   // N·m (N for prismatic); null/missing = auto
 }
 
 export interface Evidence {

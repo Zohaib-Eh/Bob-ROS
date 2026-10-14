@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import * as client from "../../api/client";
 import type { DetectResponse, Joint } from "../../api/types";
 import { historyReducer, type History } from "../../model/history";
 import { draftFromJoint, emptyDraft } from "../../model/jointDraft";
@@ -99,6 +100,19 @@ describe("JointTool", () => {
     fireEvent.click(screen.getByTestId("no-limits"));
     fireEvent.click(screen.getByTestId("ok"));
     expect(state().joints[0].type).toBe("continuous");
+  });
+
+  it("Max torque shows the suggested strength and stores what you type", async () => {
+    vi.spyOn(client, "suggestEfforts").mockResolvedValue({ s1: 140 });
+    both(withSuggestion(base(), J({})));
+    fireEvent.click(screen.getByTestId("next-joint"));
+    fireEvent.click(screen.getByTestId("ok"));
+    fireEvent.click(screen.getByTestId("h-open"));
+    await waitFor(() => expect(screen.getByTestId("max-effort").getAttribute("placeholder")).toBe("auto · 140 N·m"), { timeout: 2000 });
+    fireEvent.change(screen.getByTestId("max-effort"), { target: { value: "50" } });
+    expect(state().jointDraft.maxEffort).toBe(50);
+    fireEvent.change(screen.getByTestId("max-effort"), { target: { value: "-3" } });
+    expect(state().jointDraft.maxEffort).toBeNull();
   });
 
   it("a manual rigid joint between picked parts", () => {

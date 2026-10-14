@@ -19,6 +19,7 @@ export interface JointDraft {
   detected: JointType | null;
   ambiguous: boolean;
   source: Joint["source"];
+  maxEffort: number | null;   // null = auto (the backend suggests one)
 }
 
 export const DEFAULT_LIMITS: { revolute: [number, number]; slider: [number, number] } = {
@@ -59,7 +60,7 @@ export function jointAtDefaultLimits(j: Joint): boolean {
 
 export function emptyDraft(fixed: string | null = null, moving: string | null = null): JointDraft {
   return { id: crypto.randomUUID(), fixed, moving, origin: null, axis: null, motion: null, noLimits: false,
-    lower: null, upper: null, suggestionKey: null, detected: null, ambiguous: false, source: "manual" };
+    lower: null, upper: null, suggestionKey: null, detected: null, ambiguous: false, source: "manual", maxEffort: null };
 }
 
 export function setMotion(d: JointDraft, motion: Motion): JointDraft {
@@ -72,7 +73,7 @@ export function draftFromJoint(j: Joint, suggestionKey: string | null = null): J
   const d: JointDraft = { id: j.id, fixed: j.parent_link_id, moving: j.child_link_id, origin: j.origin_xyz,
     axis: j.axis, motion: motionOf(j.type), noLimits: j.type === "continuous", lower: j.limit_lower,
     upper: j.limit_upper, suggestionKey, detected: j.source === "suggested" ? j.type : null,
-    ambiguous: !!j.ambiguous, source: j.source };
+    ambiguous: !!j.ambiguous, source: j.source, maxEffort: j.max_effort ?? null };
   const limited = (d.motion === "revolute" && !d.noLimits) || d.motion === "slider";
   if (limited && (d.lower === null || d.upper === null)) {
     const [lo, hi] = DEFAULT_LIMITS[d.motion as "revolute" | "slider"];
@@ -126,7 +127,8 @@ export function draftToJoint(d: JointDraft): Joint {
   const limited = type === "revolute" || type === "prismatic";
   return { id: d.id, parent_link_id: d.fixed!, child_link_id: d.moving!, type, origin_xyz: d.origin!,
     origin_rpy: [0, 0, 0], axis: d.axis, limit_lower: limited ? d.lower : null,
-    limit_upper: limited ? d.upper : null, source: d.source === "suggested" ? "confirmed" : d.source };
+    limit_upper: limited ? d.upper : null, source: d.source === "suggested" ? "confirmed" : d.source,
+    max_effort: d.maxEffort };
 }
 
 /** A joint to draw while the draft is incomplete; null until both parts and an origin exist. */
@@ -134,7 +136,7 @@ export function draftPreviewJoint(d: JointDraft): Joint | null {
   if (!d.fixed || !d.moving || !d.origin) return null;
   return { id: d.id, parent_link_id: d.fixed, child_link_id: d.moving, type: jointType(d) ?? "fixed",
     origin_xyz: d.origin, origin_rpy: [0, 0, 0], axis: d.axis, limit_lower: d.lower, limit_upper: d.upper,
-    source: d.source };
+    source: d.source, max_effort: d.maxEffort };
 }
 
 /** Snap point under a clicked triangle: a round face gives its axis line, a flat face its normal. */
@@ -150,4 +152,10 @@ export function snapAt(body: Body, triangle: number): { origin: Vec3; axis: Vec3
     return { kind: "plane", origin: [0, 1, 2].map((k) => (a[k] + b[k] + c[k]) / 3) as Vec3, axis: f.normal };
   }
   return null;
+}
+
+/** A typed motor strength: finite and positive, else null (auto). */
+export function parseEffort(text: string): number | null {
+  const v = Number(text.trim());
+  return text.trim() !== "" && Number.isFinite(v) && v > 0 ? v : null;
 }

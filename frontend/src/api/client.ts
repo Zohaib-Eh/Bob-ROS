@@ -109,6 +109,11 @@ export async function linkMass(link: Link, bodies: Body[]): Promise<LinkMass> {
   return (await send("/link-mass", json({ link, bodies }))).json();
 }
 
+export async function suggestEfforts(robotName: string, links: Link[], joints: Joint[],
+  bodiesByLink: Record<string, Body[]>, signal?: AbortSignal): Promise<Record<string, number>> {
+  return (await send("/suggest-efforts", { ...json({ robot_name: robotName, links, joints, bodies_by_link: bodiesByLink }), signal })).json();
+}
+
 export async function exportRobot(
   robotName: string, links: Link[], joints: Joint[], bodiesByLink: Record<string, Body[]>,
 ): Promise<{ blob: Blob; warnings: PartWarning[] }> {

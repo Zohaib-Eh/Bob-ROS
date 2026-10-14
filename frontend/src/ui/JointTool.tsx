@@ -2,7 +2,7 @@ import { ArrowLeftRight, Check, Crosshair, Loader2, Lock, MoveHorizontal, Pause,
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Vec3 } from "../api/types";
 import {
-  draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, isDefaultLimits, setMotion, type JointDraft, type Motion,
+  draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, isDefaultLimits, parseEffort, setMotion, type JointDraft, type Motion,
 } from "../model/jointDraft";
 import { NAME_RE } from "../model/types";
 import { jointMotion, previewRange } from "../viewer/preview";
@@ -10,6 +10,7 @@ import type { Ctx, PickMode } from "./ctx";
 import { deg, rad, shortName } from "./format";
 import type { Term } from "./glossary";
 import { sweepLimits } from "../api/client";
+import { useEffortSuggestions } from "./useEffortSuggestions";
 import type { SweepResult } from "../api/types";
 import { beyondSide, driveRange, fmtJointValue, movingBodies, sweepRequest, sweepSummary } from "./drive";
 import Info from "./Info";
@@ -24,6 +25,7 @@ const MOTIONS: { id: Motion; label: string; term: Term; icon: LucideIcon }[] = [
 export default function JointTool({ ctx }: { ctx: Ctx }) {
   const { model, dispatch, jointDraft: d, setJointDraft, pick, setPick, viewer } = ctx;
   const [animating, setAnimating] = useState(false);
+  const suggestions = useEffortSuggestions(ctx);
   const stored = d ? model.joints.find((j) => j.id === d.id) ?? null : null;
   const opened = useRef({ id: d?.id ?? null, stored });
 
@@ -193,6 +195,14 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
               value={shown(d.upper)} onChange={(e) => set({ upper: parsed(e.target.value) })} />
           </div>
         </div>
+      )}
+      {(d.motion === "revolute" || d.motion === "slider") && (
+        <label className="row">
+          {slider ? "Max force" : "Max torque"}
+          <input className="field" data-testid="max-effort" type="number" step="any" min="0" style={{ width: 120 }}
+            placeholder={suggestions[d.id] ? `auto · ${suggestions[d.id]} ${slider ? "N" : "N·m"}` : "auto"}
+            value={d.maxEffort ?? ""} onChange={(e) => set({ maxEffort: parseEffort(e.target.value) })} />
+        </label>
       )}
       {d.motion === "revolute" && (
         <label className="row small">

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Body, Joint } from "../api/types";
-import {
-  contactCenter, DEFAULT_LIMITS, draftForPair, draftFromJoint, draftFromSuggestion, draftPreviewJoint, draftProblem,
-  draftToJoint, emptyDraft, jointType, motionOf, setMotion, snapAt,
-} from "./jointDraft";
+import { contactCenter, DEFAULT_LIMITS, draftForPair, draftFromJoint, draftFromSuggestion, draftPreviewJoint, draftProblem, draftToJoint, emptyDraft, jointType, motionOf, setMotion, snapAt, parseEffort } from "./jointDraft";
 import { modelReducer } from "./reducer";
 import { boxBody } from "./testBodies";
 import { emptyModel, type Suggestion } from "./types";
@@ -121,5 +118,20 @@ describe("contactCenter and draftForPair", () => {
   it("a pair without a suggestion gets the contact centre as origin", () => {
     const d = draftForPair(m, { fixed: la, moving: lb, suggestion: null });
     expect(d).toMatchObject({ fixed: la, moving: lb, origin: [1, 0.5, 0.5], motion: null, source: "manual" });
+  });
+});
+
+describe("max effort", () => {
+  const j = { id: "j", parent_link_id: "a", child_link_id: "b", type: "revolute" as const, origin_xyz: [0, 0, 0] as [number, number, number],
+    origin_rpy: [0, 0, 0] as [number, number, number], axis: [0, 0, 1] as [number, number, number], limit_lower: -1, limit_upper: 1,
+    source: "manual" as const };
+  it("carries max_effort through the draft; missing means auto", () => {
+    expect(draftFromJoint(j).maxEffort).toBeNull();
+    expect(draftToJoint({ ...draftFromJoint(j), maxEffort: 12 }).max_effort).toBe(12);
+    expect(draftToJoint(draftFromJoint(j)).max_effort).toBeNull();
+  });
+  it("parseEffort keeps only finite positive numbers", () => {
+    expect(parseEffort("140")).toBe(140);
+    for (const bad of ["", "abc", "-5", "0", "NaN", "Infinity"]) expect(parseEffort(bad)).toBeNull();
   });
 });
