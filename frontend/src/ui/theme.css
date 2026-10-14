@@ -193,6 +193,7 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .pad { padding: 12px; }
 
 .tab-body { position: relative; }
-.preview-run { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px;
-  border-radius: 8px; background: var(--panel); border: 1px solid var(--border); }
+.tabs { align-items: center; }
+.preview-run { display: flex; align-items: center; gap: 8px; padding-bottom: 4px; }
+.preview-run .btn { padding: 3px 10px; }
 .btn.run-again { align-self: flex-start; margin-top: 4px; padding: 2px 8px; font-size: 12px; }

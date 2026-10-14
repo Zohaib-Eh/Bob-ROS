@@ -57,8 +57,9 @@ export default function Workspace({ preview, conversation, running, changed, onR
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === "preview"} className={tab === "preview" ? "active" : ""} onClick={() => setTab("preview")}>Preview</button>
         <button role="tab" aria-selected={tab === "code"} className={tab === "code" ? "active" : ""} onClick={() => setTab("code")}>Code</button>
+        {tab === "preview" && overlay && <><span className="spacer" />{overlay}</>}
       </div>
-      <div className="tab-body" style={{ display: tab === "preview" ? "flex" : "none" }}>{preview}{overlay}</div>
+      <div className="tab-body" style={{ display: tab === "preview" ? "flex" : "none" }}>{preview}</div>
       {tab === "code" && (
         <div className="code-tab">
           <FileTree files={files} open={file?.path ?? null} changed={changed} onOpen={requestOpen} />
