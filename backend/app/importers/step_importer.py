@@ -290,17 +290,21 @@ def _reexport_advice(file_path: str) -> str:
     return "Re-export the model from your CAD tool as STEP with solid bodies."
 
 
-def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], list[PartWarning]]:
+def import_cad(file_path: str, brep_scale: float = 0.001,
+               on_progress=None) -> tuple[list[Body], list[PartWarning]]:
     """Import STEP/IGES/BREP (by extension) in meters: every solid, plus loose shells
     and loose faces sewn into solids. File-level warnings report faces that ended up
-    in no body. `brep_scale` applies to unitless .brep only."""
+    in no body. `brep_scale` applies to unitless .brep only. `on_progress(stage, done, total)`
+    reports "read", then "parts" once per part built."""
     if not (math.isfinite(brep_scale) and brep_scale > 0):
         raise ValueError(f"brep_scale must be finite and positive, got {brep_scale}")
+    report = on_progress or (lambda *a: None)
+    report("read", 0, 0)
     ext = os.path.splitext(file_path)[1].lower()
     named = (_read_step_named(file_path) if ext in (".step", ".stp")
              else [(None, _read_shape(file_path, brep_scale))])
 
-    bodies: list[Body] = []
+    plan = []  # every part up front, so progress knows the total
     total_faces = accounted = 0
     for product, shape in named:
         total_faces += len(_subshapes(shape, TopAbs_FACE))
@@ -309,7 +313,11 @@ def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], l
         loose = _loose_faces(shape)
         if loose:
             groups.append((loose, "surface", True))
+        plan.append((product, groups))
+    total, built = sum(len(g) for _, g in plan), 0
 
+    bodies: list[Body] = []
+    for product, groups in plan:
         mine: list[Body] = []
         if not groups:
             mine.append(_failed_body(product or f"part_{len(bodies)}", "no geometry was transferred"))
@@ -324,6 +332,8 @@ def import_cad(file_path: str, brep_scale: float = 0.001) -> tuple[list[Body], l
                 new = [_failed_body(f"{prefix}_{n}", f"import failed ({type(e).__name__})")]
                 accounted += sum(len(_subshapes(s, TopAbs_FACE)) for s in sources)
             mine += new
+            built += 1
+            report("parts", built, total)
         if product:  # bare name for one body, name_k for several
             for k, b in enumerate(mine):
                 new_name = product if len(mine) == 1 else f"{product}_{k}"
