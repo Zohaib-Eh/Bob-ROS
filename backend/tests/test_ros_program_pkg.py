@@ -29,7 +29,8 @@ def test_program_folder_and_tasks_folder_are_generated(ws):
     assert (ws / "bot_tasks" / "programs").is_dir()
     text = (prog / "brief.md").read_text()
     assert "arm_joint" in text and "hand_joint" in text and "Tool link: hand" in text
-    assert "at most 3 runs" in text and "../bot_program/run_task.sh programs/task_NNN.py" in text
+    assert "at most 3 runs" in text and "../bot_program/run_task.sh programs/task_NNN_<name>.py" in text
+    assert "task_007_stack_two_boxes.py" in text
 
 
 def test_regenerating_keeps_user_programs(ws, tmp_path):

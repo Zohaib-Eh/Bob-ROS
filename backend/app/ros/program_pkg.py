@@ -51,8 +51,8 @@ r.home()
 ```"""
 
 RULES = """## Rules
-- Write exactly one program per task: `programs/task_NNN.py` (next free number). For a follow-up, write a new file starting from the previous one.
-- Test it with `../__ROBOT___program/run_task.sh programs/task_NNN.py`. Every run starts clean (robot at home, no objects) and ends with `RESULT: ok` or `RESULT: failed: <reason>`.
+- Write exactly one program per task: `programs/task_NNN_<name>.py`, with the next free number and a short snake_case name saying what it does (2-4 words), e.g. `programs/task_007_stack_two_boxes.py`. For a follow-up, write a new file starting from the previous one.
+- Test it with `../__ROBOT___program/run_task.sh programs/task_NNN_<name>.py`. Every run starts clean (robot at home, no objects) and ends with `RESULT: ok` or `RESULT: failed: <reason>`.
 - Fix and re-run until `RESULT: ok`. You have at most __MAX_RUNS__ runs per task; after that, stop and explain what is still wrong.
 - Positions are in metres in the base frame, z up; keep objects above the floor (z > 0) and inside the reach.
 - Only edit files under `programs/`. Do not run any other command.
