@@ -222,7 +222,7 @@ it("the Preview tab has a Run bar for the conversation's latest program", async 
   await screen.findByText("A");
   const bar = screen.getByTestId("preview-run");
   expect(bar.textContent).toMatch(/task_002\.py/);
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /run task_002\.py/i })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
   expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_002.py", "aaaaaaaaaaaa");
 });
 
@@ -232,4 +232,24 @@ it("no Run bar when the conversation has no program yet", async () => {
   await ready();
   await screen.findByText("A");
   expect(screen.queryByTestId("preview-run")).toBeNull();
+});
+
+it("the Preview Run bar has a dropdown of all programs, defaulting to the latest", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_002.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([
+    { path: "bot_program/robot.py", editable: false },
+    { path: "bot_tasks/programs/task_001.py", editable: true },
+    { path: "bot_tasks/programs/task_002.py", editable: true }]);
+  const run = vi.spyOn(api, "runFile").mockResolvedValue({ ok: true, output: "RESULT: ok" });
+  await ready();
+  await screen.findByText("A");
+  const pick = await screen.findByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_001.py", "task_002.py"]);
+  expect(pick.value).toBe("bot_tasks/programs/task_002.py");
+  fireEvent.change(pick, { target: { value: "bot_tasks/programs/task_001.py" } });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+  expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_001.py", "aaaaaaaaaaaa");
 });

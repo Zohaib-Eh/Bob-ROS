@@ -111,14 +111,25 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     return null;
   }, [active]);
 
+  // every program in the workspace, for the Preview Run dropdown; refreshed when the conversation changes or a run ends
+  const [programs, setPrograms] = useState<string[]>([]);
+  const [chosen, setChosen] = useState<string | null>(null);
+  useEffect(() => {
+    if (status.state !== "ready" || running) return;
+    api.listFiles().then((fs) => { if (mounted.current) setPrograms(fs.filter((f) => f.editable).map((f) => f.path)); })
+      .catch(() => {});  // the dropdown just stays as it was
+  }, [status.state, running, active?.id]);
+  const full = (p: string) => (p.includes("_tasks/") ? p : `${status.robot}_tasks/${p}`);
+  useEffect(() => { setChosen(latest && status.robot ? full(latest) : null); }, [latest, status.robot]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const runList = chosen && !programs.includes(chosen) ? [...programs, chosen] : programs;
+
   async function runAgain(path: string) {
     if (!active || !status.robot) return;
-    const full = path.includes("_tasks/") ? path : `${status.robot}_tasks/${path}`;
     const id = active.id;
     ros.setError(null);
     setPreviewTick((n) => n + 1);
     setRunning(true);
-    try { await api.runFile(full, id); }
+    try { await api.runFile(full(path), id); }
     catch (e) { fail(e); }
     finally { if (mounted.current) setRunning(false); }
     if (mounted.current) await reload(id);
@@ -165,11 +176,13 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
             onRan={(id) => void reload(id)} onRunning={(r) => { if (mounted.current) setRunning(r); }} showPreview={previewTick}
-            overlay={latest && (
+            overlay={chosen && runList.length > 0 && (
               <div className="preview-run" data-testid="preview-run">
-                <span className="muted small">{latest.split("/").pop()}</span>
-                <button className="btn btn-primary" aria-label={`Run ${latest.split("/").pop()}`}
-                  disabled={running || status.state !== "ready"} onClick={() => void runAgain(latest)}><Play size={14} />Run</button>
+                <select aria-label="Program to run" value={chosen} disabled={running} onChange={(e) => setChosen(e.target.value)}>
+                  {runList.map((p) => <option key={p} value={p}>{p.split("/").pop()}</option>)}
+                </select>
+                <button className="btn btn-primary" disabled={running || status.state !== "ready"}
+                  onClick={() => void runAgain(chosen)}><Play size={14} />Run</button>
               </div>
             )} />
         </section>
