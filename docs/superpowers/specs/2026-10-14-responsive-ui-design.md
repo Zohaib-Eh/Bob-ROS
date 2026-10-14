@@ -153,3 +153,10 @@ Measured 2026-10-14, Docker Desktop not running, backend idle, about 2.3 GB of 1
 - `GET /program/session`: 0.31 s alone; 0.32–0.36 s for five at once (the thread pool absorbs them, so there's no pile-up when each call is fast).
 - `GET /program/conversations`: 0.16 s, but answers 409 "Start the ROS session first." Without a session, chats can't even be listed. That is cause 1 (the sidebar is dead without ROS).
 - Cause 2 (the poll pile-up) needs a status call slower than the 1 s poll interval. That happens only with Docker up under memory pressure, and can't be reproduced without a session started from the UI. The chained poll removes it either way. The Docker-up timings and RAM per piece are taken in Task 8.
+
+## Findings (Task 8, real irb1300 STEP, 29 MB)
+
+- Before: OCCT's file read held Python's GIL for ~40 s. `/health` took 37.5 s during an import, and the first progress event reached the browser only at 43 s, so the whole backend looked frozen.
+- Fix: the import runs in a spawned child process.
+- After: `/health` takes ~3 ms during an import. "Reading file" shows at 5 s (1 s upload parse + ~4 s process start), parts 1–18 tick over ~27 s, and the result arrives ~5 s after part 18.
+- Not yet measured (Docker Desktop was off): ROS start timings and RAM per piece with the session up.
