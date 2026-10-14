@@ -285,9 +285,13 @@ class Robot:
             T = T @ M
         return out
 
-    def tool_down(self) -> tuple:
-        """rpy that points the tool's approach axis (the last joint's axis) straight down, turning the
-        home orientation as little as possible."""
+    def tool_facing(self, direction) -> tuple:
+        """rpy that points the tool (the flange, along the last joint's axis, away from the arm) toward
+        `direction` in the base frame, turning the home orientation as little as possible."""
+        d = np.asarray(direction, float)
+        if np.linalg.norm(d) < 1e-9:
+            raise ValueError("tool_facing needs a non-zero direction")
+        d = d / np.linalg.norm(d)
         q = _home(self.chain)
         T = self._kin.fk(q)
         R = T[:3, :3]
@@ -295,14 +299,21 @@ class Robot:
         # the axis may point either way: outward is away from the rest of the arm (the earlier joint frames)
         if sum(float(a @ (p - T[:3, 3])) for p in (F[:3, 3] for F in self._joint_frames(q)[:-1])) > 0:
             a = -a
-        target = np.array([0.0, 0.0, -1.0])
-        v, c = np.cross(a, target), float(a @ target)
-        if np.linalg.norm(v) < 1e-9:
-            turn = np.eye(3) if c > 0 else np.diag([1.0, -1.0, -1.0])
+        v, c = np.cross(a, d), float(a @ d)
+        if np.linalg.norm(v) < 1e-9 and c > 0:
+            turn = np.eye(3)
+        elif np.linalg.norm(v) < 1e-9:                                 # opposite: half turn about any perpendicular
+            u = np.cross(a, np.eye(3)[int(np.argmin(np.abs(a)))])
+            u /= np.linalg.norm(u)
+            turn = 2 * np.outer(u, u) - np.eye(3)
         else:
             vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
             turn = np.eye(3) + vx + vx @ vx * (1 / (1 + c))
         return _rpy(turn @ R)
+
+    def tool_down(self) -> tuple:
+        """rpy with the tool pointing straight down (tool_facing((0, 0, -1)))."""
+        return self.tool_facing((0, 0, -1))
 
     def _run(self, client, goal, timeout):
         handle = _wait(client.send_goal_async(goal), 30)

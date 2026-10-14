@@ -24,6 +24,7 @@ r.add_cylinder(name, radius, height, xyz, rpy=(0, 0, 0))  # axis along its local
 r.move_to(xyz, rpy=None)  # tool link to a position; with rpy also that orientation; planned around obstacles
 r.move_line(xyz, rpy=None)  # straight line; without rpy keeps the current orientation (under 6 joints: any orientation, short steps)
 r.tool_down()             # an orientation (rpy) with the tool pointing straight down, for this robot
+r.tool_facing(direction)  # an orientation (rpy) pointing the tool along a base-frame direction, e.g. (0, 0, 1) = up
 r.move_joints(q)          # joint values in joint order
 r.home()
 r.attach(name)            # the object rides on the tool link (pick)

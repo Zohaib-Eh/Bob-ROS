@@ -105,7 +105,7 @@ def test_brief_states_joints_facing_and_the_no_probing_rule(ws, tmp_path):
     assert "It cannot hold arbitrary tool orientations: call r.move_to(xyz) without rpy" in text
     assert '"In front of the robot" means toward bearing' in text
     assert "Never search for joint angles by moving the robot" in text
-    assert "r.move_to(xyz, rpy=None)" in text and "r.tool_down()" in text
+    assert "r.move_to(xyz, rpy=None)" in text and "r.tool_down()" in text and "r.tool_facing(direction)" in text
 
 
 def test_bearing_is_the_home_reach_direction(tmp_path):
@@ -118,4 +118,4 @@ def test_bearing_is_the_home_reach_direction(tmp_path):
 def test_library_has_position_only_moves_and_tool_down(ws):
     lib = (ws / "bot_program" / "robot.py").read_text()
     assert "def move_to(self, xyz, rpy=None)" in lib and "def move_line(self, xyz, rpy=None)" in lib
-    assert "def tool_down(self)" in lib and "def _position_ik(self" in lib
+    assert "def tool_down(self)" in lib and "def _position_ik(self" in lib and "def tool_facing(self, direction)" in lib
