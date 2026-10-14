@@ -269,13 +269,32 @@ class Robot:
                 q = np.clip(q + step * min(1.0, 0.3 / max(1e-9, float(np.abs(step).max()))), lo, hi)
         return sorted(sols, key=lambda s: float(np.linalg.norm(s - cur)))
 
+    def _joint_frames(self, q) -> list:
+        """Base-frame pose of each joint frame (before its own motion) at joint values q."""
+        T, out = np.eye(4), []
+        for j, qi in zip(self.chain.joints, q):
+            T = T @ j.origin
+            out.append(T.copy())
+            ax = np.asarray(j.axis, float)
+            M = np.eye(4)
+            if j.type == "prismatic":
+                M[:3, 3] = ax * qi
+            elif j.type in ("revolute", "continuous"):
+                k = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]])
+                M[:3, :3] = np.eye(3) + math.sin(qi) * k + (1 - math.cos(qi)) * k @ k
+            T = T @ M
+        return out
+
     def tool_down(self) -> tuple:
         """rpy that points the tool's approach axis (the last joint's axis) straight down, turning the
         home orientation as little as possible."""
-        R = self._kin.fk(_home(self.chain))[:3, :3]
+        q = _home(self.chain)
+        T = self._kin.fk(q)
+        R = T[:3, :3]
         a = R @ np.asarray(self.chain.joints[-1].axis, float)          # approach axis in the base frame
-        if a[2] > 0:
-            a = -a                                                     # either direction of the axis may point outward
+        # the axis may point either way: outward is away from the rest of the arm (the earlier joint frames)
+        if sum(float(a @ (p - T[:3, 3])) for p in (F[:3, 3] for F in self._joint_frames(q)[:-1])) > 0:
+            a = -a
         target = np.array([0.0, 0.0, -1.0])
         v, c = np.cross(a, target), float(a @ target)
         if np.linalg.norm(v) < 1e-9:
