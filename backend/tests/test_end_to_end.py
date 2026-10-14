@@ -528,3 +528,30 @@ def test_link_mass_ignores_bodies_not_in_body_ids():
         "bodies": [_unit_box_json()]})
     assert r.status_code == 422
     assert "Link 'a'" in r.json()["detail"]
+
+
+def test_import_worker_reports_progress_then_the_result(box_stl_path, tmp_path):
+    import queue
+    import shutil
+    from app.routes import import_routes
+    tmp = tmp_path / "upload.stl"
+    shutil.copy(box_stl_path, tmp)
+    q = queue.Queue()
+    import_routes._import_worker(str(tmp), ".stl", "box.stl", 0.001, q)
+    events = []
+    while not q.empty():
+        events.append(q.get())
+    assert events[0]["kind"] == "progress" and events[-1] is None
+    assert events[-2]["kind"] == "done" and len(events[-2]["bodies"]) == 1
+    assert not tmp.exists()  # the worker deletes the upload
+
+
+def test_import_worker_turns_failures_into_an_error_event(tmp_path):
+    import queue
+    from app.routes import import_routes
+    tmp = tmp_path / "junk.stl"
+    tmp.write_bytes(b"garbage")
+    q = queue.Queue()
+    import_routes._import_worker(str(tmp), ".stl", "junk.stl", 0.001, q)
+    events = [q.get() for _ in range(q.qsize())]
+    assert events[-2]["kind"] == "error" and "junk.stl" in events[-2]["message"] and events[-1] is None
