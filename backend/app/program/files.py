@@ -30,7 +30,8 @@ def tree(src, robot: str) -> list[dict]:
     out = []
     for p in root.rglob("*"):
         rel = p.relative_to(root)
-        if p.is_file() and p.suffix in TEXT_EXT and not SKIP_DIRS.intersection(rel.parts):
+        if (p.is_file() and p.suffix in TEXT_EXT and not SKIP_DIRS.intersection(rel.parts)
+                and not any(part.startswith(".") for part in rel.parts)):
             r = rel.as_posix()
             out.append({"path": r, "editable": editable(robot, r)})
     return sorted(out, key=lambda f: f["path"])

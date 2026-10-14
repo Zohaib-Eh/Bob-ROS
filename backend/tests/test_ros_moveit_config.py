@@ -203,3 +203,16 @@ def test_source_name_with_dash_runs_still_yields_valid_xml(tmp_path):
     assert len(files) >= 4
     for f in files:
         ET.parse(f)
+
+
+def test_regenerating_sweeps_backups_a_locked_file_left_behind(tmp_path):
+    d = unzip(two_joint_zip(tmp_path), tmp_path / "x")
+    src = tmp_path / "ws" / "src"
+    generate("bot", d / "bot", src, source="bot.zip", samples=50)
+    stale = src / ".bot_kinematics.old-1234abcd"
+    (stale / "pkg").mkdir(parents=True)
+    (stale / "pkg" / "f.py").write_text("x")
+    (src / ".hidden_user_folder").mkdir()
+    generate("bot", d / "bot", src, source="bot.zip", samples=50)
+    assert not stale.exists()
+    assert (src / ".hidden_user_folder").exists()          # only our own backups are swept

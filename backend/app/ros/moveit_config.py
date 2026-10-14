@@ -285,6 +285,9 @@ def _swap_in(out_src: Path, tmp: Path, pkgs: list[str]) -> None:
     first; any failure puts every package back as it was. Other folders are never touched."""
     created = not out_src.exists()
     out_src.mkdir(parents=True, exist_ok=True)
+    for stale in out_src.glob(".*.old-*"):  # backups an earlier swap could not delete (a file was locked)
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
     backups: dict[str, Path] = {}
     new: list[str] = []
     try:

@@ -99,3 +99,9 @@ def test_bad_conversation_id_on_save_writes_nothing(src):
         "path": "bot_tasks/programs/task_001.py", "content": "print(2)\n", "conversation": "../x"})
     assert r.status_code == 400
     assert (src / "bot_tasks/programs/task_001.py").read_text() == "print(1)\n"
+
+
+def test_tree_skips_hidden_folders(src):
+    (src / ".bot_kinematics.old-1234abcd").mkdir()
+    (src / ".bot_kinematics.old-1234abcd" / "setup.py").write_text("x")
+    assert all(not f["path"].startswith(".") for f in client.get("/program/files").json())
