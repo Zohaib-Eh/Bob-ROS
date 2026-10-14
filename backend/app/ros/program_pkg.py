@@ -27,7 +27,7 @@ r.tool_down()             # an orientation (rpy) with the tool pointing straight
 r.tool_facing(direction)  # an orientation (rpy) pointing the tool along a base-frame direction, e.g. (0, 0, 1) = up
 r.move_joints(q)          # joint values in joint order
 r.home()
-r.attach(name)            # the object rides on the tool link (pick)
+r.attach(name)            # the object rides on the tool link (pick); the tool must be within 2 cm of it
 r.detach(name)            # the object stays where it is (place)
 r.solutions(xyz, rpy)     # every exact joint solution, nearest first; [] = unreachable
 r.tool_pose()             # current (xyz, rpy) of the tool link
@@ -41,11 +41,11 @@ r = Robot()
 r.add_box("box", (0.05, 0.05, 0.05), (0.5, 0.2, 0.025))
 down = r.tool_down()                       # tool pointing straight down
 r.move_to((0.5, 0.2, 0.15), down)
-r.move_line((0.5, 0.2, 0.06), down)
+r.move_line((0.5, 0.2, 0.055), down)       # tool 5 mm above the box's top face (0.05)
 r.attach("box")
 r.move_line((0.5, 0.2, 0.15), down)
 r.move_to((0.4, -0.3, 0.15), down)
-r.move_line((0.4, -0.3, 0.06), down)
+r.move_line((0.4, -0.3, 0.055), down)
 r.detach("box")
 r.home()
 ```"""

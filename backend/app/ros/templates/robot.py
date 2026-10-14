@@ -18,6 +18,7 @@ from shape_msgs.msg import SolidPrimitive
 
 ROBOT = "__ROBOT__"
 GROUP = "arm"
+ATTACH_REACH = 0.02   # m: attach() needs the tool frame this close to the object's surface
 _kin = importlib.import_module(f"{ROBOT}_kinematics")
 _home = importlib.import_module(f"{ROBOT}_kinematics._chain").home
 _ERRORS = {v: k for k, v in vars(MoveItErrorCodes).items() if k.isupper() and isinstance(v, int)}
@@ -86,6 +87,16 @@ def _pose(xyz, rpy) -> Pose:
     p.position.x, p.position.y, p.position.z = (float(v) for v in xyz)
     p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w = _quat(T[:3, :3])
     return p
+
+
+def _pose_matrix(p: Pose) -> np.ndarray:
+    x, y, z, w = p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w
+    M = np.eye(4)
+    M[:3, :3] = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                 [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                 [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+    M[:3, 3] = [p.position.x, p.position.y, p.position.z]
+    return M
 
 
 def _fmt(xyz) -> str:
@@ -173,14 +184,33 @@ class Robot:
         a.link_name = self.chain.tip
         a.object.id = name
         a.object.operation = op
-        a.touch_links = [self.chain.tip]
+        a.touch_links = [self.chain.tip, self.chain.joints[-1].parent]   # flange and the wrist it sits on
         return a
+
+    def _gap(self, name) -> float:
+        """Distance from the tool frame to the surface of world object `name` (0 inside it)."""
+        req = GetPlanningScene.Request()
+        req.components.components = PlanningSceneComponents.WORLD_OBJECT_GEOMETRY
+        co = next(o for o in _wait(self._get.call_async(req), 10).scene.world.collision_objects if o.id == name)
+        prim, pp = co.primitives[0], co.primitive_poses[0]
+        P = _pose_matrix(co.pose) @ _pose_matrix(pp)
+        local = np.linalg.inv(P) @ np.append(self._kin.fk(self._current())[:3, 3], 1.0)
+        if prim.type == SolidPrimitive.BOX:
+            out = np.maximum(np.abs(local[:3]) - np.asarray(prim.dimensions[:3]) / 2, 0)
+        else:                                                          # cylinder: (height, radius)
+            h, rad = prim.dimensions[0], prim.dimensions[1]
+            out = np.array([max(math.hypot(local[0], local[1]) - rad, 0), max(abs(local[2]) - h / 2, 0)])
+        return float(np.linalg.norm(out))
 
     def attach(self, name):
         world, attached = self._scene()
         if name not in world:
             raise UnknownObject(f"'{name}' is not a free object in the scene "
                                 f"(objects: {', '.join(world + attached) or 'none'})")
+        gap = self._gap(name)
+        if gap > ATTACH_REACH:
+            raise UnknownObject(f"'{name}' is {gap:.2f} m from the tool; move the tool to touch it first "
+                                f"(within {ATTACH_REACH * 100:.0f} cm, e.g. 5 mm above its top face)")
         self._diff(attached=[self._attached(name, CollisionObject.ADD)])
 
     def detach(self, name):
