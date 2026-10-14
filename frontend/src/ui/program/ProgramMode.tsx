@@ -6,6 +6,7 @@ import type { Ctx } from "../ctx";
 import { applyEvent, emptyClaude, type ClaudeMessage } from "../../model/chat";
 import MenuBar from "../MenuBar";
 import Chat from "./Chat";
+import PhysicsCard from "./PhysicsCard";
 import ConversationList from "./ConversationList";
 import Workspace from "./Workspace";
 import StartupPanel, { stageText } from "./StartupPanel";
@@ -205,6 +206,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
           onSelect={(id) => void reload(id)} onNew={() => void newConversation()}
           onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
         <section className="chat-column" data-testid="chat-slot">
+          <PhysicsCard ctx={ctx} />
           <Chat messages={active?.messages ?? []} live={live && active?.id === live.id ? live.msg : null} running={active?.id === runningId}
             disabled={!!waiting} waiting={waiting} onSend={(t) => void send(t)} onRunAgain={(p) => void runAgain(p)} />
         </section>

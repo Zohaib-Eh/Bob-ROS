@@ -225,3 +225,7 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .wb { background: var(--panel); border: 0; padding: 4px 12px; font: inherit; color: var(--text); cursor: pointer; }
 .wb.current { background: var(--accent); color: var(--accent-text); }
 .wb:disabled:not(.current) { color: var(--muted); cursor: default; }
+.physics-card { margin: 8px; padding: 6px 10px; }
+.physics-card.ok { border-color: var(--success); }
+.physics-card.bad { border-color: var(--danger); }
+.physics-card .row { gap: 8px; align-items: center; }

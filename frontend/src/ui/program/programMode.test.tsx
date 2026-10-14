@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as client from "../../api/client";
 import * as api from "../../api/program";
 import { boxBody } from "../../model/testBodies";
 import { Harness, imported, state } from "../testing";
@@ -10,7 +11,10 @@ vi.mock("../../ros/rosbridge", () => ({
   RosBridge: class { ready = Promise.resolve(); subscribe() {} call() { return Promise.resolve({ scene: {} }); } close() {} },
 }));
 vi.mock("./Editor", () => ({ default: ({ value }: { value: string }) => <textarea data-testid="editor" value={value} readOnly /> }));
-beforeEach(() => { POLL.starting = 10; POLL.ready = 10_000; });
+beforeEach(() => {
+  POLL.starting = 10; POLL.ready = 10_000;
+  vi.spyOn(client, "physicsCheck").mockResolvedValue({ ok: true, kind: "ok", message: "Holds pose." });
+});
 afterEach(() => vi.restoreAllMocks());
 
 const conv = (id: string, title: string) => ({ id, title, created: 1, updated: 1, claude_session_id: null, edited: [], messages: [] });

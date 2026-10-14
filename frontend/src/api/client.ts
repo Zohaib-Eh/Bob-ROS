@@ -114,6 +114,13 @@ export async function suggestEfforts(robotName: string, links: Link[], joints: J
   return (await send("/suggest-efforts", { ...json({ robot_name: robotName, links, joints, bodies_by_link: bodiesByLink }), signal })).json();
 }
 
+export type PhysicsResult = { ok: boolean; kind: "ok" | "load" | "unstable" | "sag" | "crash"; message: string;
+  link?: string; joint?: string; needed?: number; has?: number };
+export async function physicsCheck(robotName: string, links: Link[], joints: Joint[],
+  bodiesByLink: Record<string, Body[]>): Promise<PhysicsResult> {
+  return (await send("/simulate/check", json({ robot_name: robotName, links, joints, bodies_by_link: bodiesByLink }))).json();
+}
+
 export async function exportRobot(
   robotName: string, links: Link[], joints: Joint[], bodiesByLink: Record<string, Body[]>,
 ): Promise<{ blob: Blob; warnings: PartWarning[] }> {
