@@ -272,7 +272,10 @@ def generate(robot: str, description_dir: Path, out_src: Path, source: str, samp
         write_files(tmp / f"{robot}_moveit_config", moveit_files(chain, robot, source, pairs))
         from .kinematics_pkg import kinematics_files  # local: kinematics_pkg imports this module
         write_files(tmp / f"{robot}_kinematics", kinematics_files(robot, source))
+        from .program_pkg import program_files  # local: program_pkg imports this module
+        write_files(tmp / f"{robot}_program", program_files(chain, robot, source))
         _swap_in(Path(out_src), tmp, sorted(p.name for p in tmp.iterdir()))
+        (Path(out_src) / f"{robot}_tasks" / "programs").mkdir(parents=True, exist_ok=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -282,6 +285,9 @@ def _swap_in(out_src: Path, tmp: Path, pkgs: list[str]) -> None:
     first; any failure puts every package back as it was. Other folders are never touched."""
     created = not out_src.exists()
     out_src.mkdir(parents=True, exist_ok=True)
+    for stale in out_src.glob(".*.old-*"):  # backups an earlier swap could not delete (a file was locked)
+        if stale.is_dir():
+            shutil.rmtree(stale, ignore_errors=True)
     backups: dict[str, Path] = {}
     new: list[str] = []
     try:

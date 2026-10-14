@@ -1,0 +1,290 @@
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "../../api/program";
+import { boxBody } from "../../model/testBodies";
+import { Harness, imported, state } from "../testing";
+import ProgramMode from "./ProgramMode";
+import { POLL } from "./useRosSession";
+
+vi.mock("../../ros/rosbridge", () => ({
+  RosBridge: class { ready = Promise.resolve(); subscribe() {} call() { return Promise.resolve({ scene: {} }); } close() {} },
+}));
+vi.mock("./Editor", () => ({ default: ({ value }: { value: string }) => <textarea data-testid="editor" value={value} readOnly /> }));
+beforeEach(() => { POLL.starting = 10; POLL.ready = 10_000; });
+afterEach(() => vi.restoreAllMocks());
+
+const conv = (id: string, title: string) => ({ id, title, created: 1, updated: 1, claude_session_id: null, edited: [], messages: [] });
+function ui() {
+  return render(<Harness start={imported([boxBody("base", [0, 0, 0], [1, 1, 1])])} step="program"
+    ui={(ctx) => <ProgramMode ctx={ctx} preview={<div data-testid="viewer" />} />} />);
+}
+async function ready() {
+  vi.spyOn(api, "sessionStatus").mockResolvedValueOnce({ state: "stopped" }).mockResolvedValue({ state: "ready", robot: "bot" });  // first call: the mount refresh
+  vi.spyOn(api, "startSession").mockResolvedValue({ state: "starting", robot: "bot" });
+  ui();
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /start ros/i })); });
+  await screen.findByText(/ROS ready/);
+}
+
+describe("ProgramMode", () => {
+  it("fills the window, shows the preview and goes back to the robot", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    await ready();
+    expect(screen.getByTestId("viewer")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /back to robot/i }));
+    expect(state().step).toBe("export");
+  });
+
+  it("lists conversations, creates, switches and renames", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "Square" }]);
+    vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, id === "aaaaaaaaaaaa" ? "Square" : "New conversation"));
+    const create = vi.spyOn(api, "createConversation").mockResolvedValue(conv("bbbbbbbbbbbb", "New conversation"));
+    const rename = vi.spyOn(api, "renameConversation").mockResolvedValue(conv("aaaaaaaaaaaa", "Square path"));
+    await ready();
+    await screen.findByText("Square");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /new/i })); });
+    expect(create).toHaveBeenCalled();
+    expect(screen.getByTestId("conv-bbbbbbbbbbbb").className).toMatch(/active/);
+    await act(async () => { fireEvent.doubleClick(screen.getByText("Square")); });
+    fireEvent.change(screen.getByDisplayValue("Square"), { target: { value: "Square path" } });
+    await act(async () => { fireEvent.keyDown(screen.getByDisplayValue("Square path"), { key: "Enter" }); });
+    expect(rename).toHaveBeenCalledWith("aaaaaaaaaaaa", "Square path");
+  });
+
+  it("shows broken conversations without crashing", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "cccccccccccc", title: "Unreadable conversation", broken: true }]);
+    await ready();
+    expect((await screen.findByText("Unreadable conversation")).closest("li")!.className).toMatch(/broken/);
+  });
+});
+
+describe("ProgramMode sidebar fixes", () => {
+  const two = [{ id: "aaaaaaaaaaaa", title: "Alpha" }, { id: "bbbbbbbbbbbb", title: "Beta" }];
+  const activeIds = () => two.filter((c) => screen.queryByTestId(`conv-${c.id}`)?.className.includes("active")).map((c) => c.id);
+
+  it("deleting the active conversation selects the next one", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.spyOn(api, "listConversations").mockResolvedValueOnce(two).mockResolvedValue([two[1]]);
+    const get = vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, id));
+    vi.spyOn(api, "deleteConversation").mockResolvedValue(undefined as never);
+    await ready();
+    await vi.waitFor(() => expect(activeIds()).toEqual(["aaaaaaaaaaaa"]));
+    await act(async () => { fireEvent.click(screen.getByLabelText("Delete Alpha")); });
+    await vi.waitFor(() => expect(activeIds()).toEqual(["bbbbbbbbbbbb"]));
+    expect(get).not.toHaveBeenLastCalledWith("aaaaaaaaaaaa");
+    expect(document.querySelector(".error")).toBeNull();
+  });
+
+  it("a slow earlier switch cannot override a later one", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue(two);
+    const slow: Record<string, (c: ReturnType<typeof conv>) => void> = {};
+    vi.spyOn(api, "getConversation").mockImplementationOnce(async (id) => conv(id, id))
+      .mockImplementation((id) => new Promise((r) => { slow[id] = r; }));
+    await ready();
+    await vi.waitFor(() => expect(activeIds()).toEqual(["aaaaaaaaaaaa"]));
+    await act(async () => { fireEvent.click(screen.getByText("Alpha")); });
+    await act(async () => { fireEvent.click(screen.getByText("Beta")); });
+    await act(async () => { slow.bbbbbbbbbbbb(conv("bbbbbbbbbbbb", "Beta")); });
+    await act(async () => { slow.aaaaaaaaaaaa(conv("aaaaaaaaaaaa", "Alpha")); });
+    expect(activeIds()).toEqual(["bbbbbbbbbbbb"]);
+  });
+
+  it("shows an error when creating fails", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    vi.spyOn(api, "createConversation").mockRejectedValue(new Error("boom"));
+    await ready();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /new/i })); });
+    expect(await screen.findByText("boom")).toBeTruthy();
+  });
+
+  it("renaming another conversation keeps the active one", async () => {
+    vi.spyOn(api, "listConversations").mockResolvedValue(two);
+    const get = vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, id));
+    vi.spyOn(api, "renameConversation").mockResolvedValue(conv("bbbbbbbbbbbb", "Gamma"));
+    await ready();
+    await vi.waitFor(() => expect(activeIds()).toEqual(["aaaaaaaaaaaa"]));
+    get.mockClear();
+    await act(async () => { fireEvent.doubleClick(screen.getByText("Beta")); });
+    fireEvent.change(screen.getByDisplayValue("Beta"), { target: { value: "Gamma" } });
+    await act(async () => { fireEvent.keyDown(screen.getByDisplayValue("Gamma"), { key: "Enter" }); });
+    expect(await screen.findByText("Gamma")).toBeTruthy();
+    expect(activeIds()).toEqual(["aaaaaaaaaaaa"]);
+    expect(get).not.toHaveBeenCalled();
+  });
+});
+
+it("a stream keeps writing into the conversation it started in", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }, { id: "bbbbbbbbbbbb", title: "B" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, id === "aaaaaaaaaaaa" ? "A" : "B"));
+  let finish!: () => void;
+  const run = vi.spyOn(api, "runConversation").mockImplementation(async (_id, _t, on) => {
+    on({ kind: "text", text: "streaming for A" });
+    await new Promise<void>((r) => { finish = r; });
+  });
+  await ready();
+  await screen.findByText("A");
+  fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
+  await act(async () => { fireEvent.keyDown(screen.getByLabelText(/describe a task/i), { key: "Enter" }); });
+  expect(run.mock.calls[0][0]).toBe("aaaaaaaaaaaa");
+  expect(screen.getByText("streaming for A")).toBeTruthy();
+  expect((screen.getByText("B") as HTMLButtonElement).disabled).toBe(true);   // switching is locked while running
+  await act(async () => { finish(); });
+});
+
+it("shows ROS ready and the conversations on mount when a session is already running", async () => {
+  vi.spyOn(api, "sessionStatus").mockResolvedValue({ state: "ready", robot: "bot" });
+  const start = vi.spyOn(api, "startSession");
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "Existing" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "Existing"));
+  ui();
+  expect(await screen.findByText(/ROS ready/)).toBeTruthy();
+  expect(await screen.findByText("Existing")).toBeTruthy();
+  expect(start).not.toHaveBeenCalled();
+});
+
+it("disables Back to robot while a task runs", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "A"));
+  let finish!: () => void;
+  vi.spyOn(api, "runConversation").mockImplementation(async () => { await new Promise<void>((r) => { finish = r; }); });
+  await ready();
+  await screen.findByText("A");
+  fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
+  await act(async () => { fireEvent.keyDown(screen.getByLabelText(/describe a task/i), { key: "Enter" }); });
+  expect((screen.getByRole("button", { name: /back to robot/i }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => { finish(); });
+});
+
+it("clears the top error when a new task is sent", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "A"));
+  vi.spyOn(api, "createConversation").mockRejectedValue(new Error("old failure"));
+  vi.spyOn(api, "runConversation").mockImplementation(async () => { await new Promise<void>(() => {}); });
+  await ready();
+  await screen.findByText("A");
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /new/i })); });
+  expect(await screen.findByText("old failure")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/describe a task/i), { target: { value: "go" } });
+  await act(async () => { fireEvent.keyDown(screen.getByLabelText(/describe a task/i), { key: "Enter" }); });
+  expect(screen.queryByText("old failure")).toBeNull();
+});
+
+it("locks the chat and Run while a manual run is pending", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockImplementation(async (id) => conv(id, "A"));
+  vi.spyOn(api, "listFiles").mockResolvedValue([{ path: "bot_tasks/programs/task_001.py", editable: true }]);
+  vi.spyOn(api, "readFile").mockImplementation(async (p) => ({ path: p, content: "x", editable: true }));
+  let done!: (v: { ok: boolean; output: string }) => void;
+  vi.spyOn(api, "runFile").mockImplementation(() => new Promise((r) => { done = r; }));
+  await ready();
+  await screen.findByText("A");
+  await act(async () => { fireEvent.click(screen.getByRole("tab", { name: "Code" })); });
+  await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+  const box = () => screen.getByLabelText(/describe a task/i) as HTMLTextAreaElement;
+  const runBtn = () => screen.getByRole("button", { name: /^run$/i }) as HTMLButtonElement;
+  expect(box().disabled).toBe(false);
+  await act(async () => { fireEvent.click(runBtn()); });
+  expect(box().disabled).toBe(true);
+  expect(runBtn().disabled).toBe(true);
+  await act(async () => { done({ ok: true, output: "" }); });
+  expect(box().disabled).toBe(false);
+  expect(runBtn().disabled).toBe(false);
+});
+
+it("Run again runs that program live in Preview and locks the UI while it runs", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [{ role: "claude", items: [], summary: "done", result: { ok: true, runs: 1 },
+    error: null, program: "programs/task_001.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([]);
+  let finish!: () => void;
+  const run = vi.spyOn(api, "runFile").mockImplementation(() => new Promise((r) => { finish = () => r({ ok: true, output: "RESULT: ok" }); }));
+  await ready();
+  await screen.findByText("A");
+  fireEvent.click(screen.getByRole("tab", { name: "Code" }));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /run again/i })); });
+  expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_001.py", "aaaaaaaaaaaa");
+  expect(screen.getByRole("tab", { name: "Preview" }).getAttribute("aria-selected")).toBe("true");
+  expect((screen.getByLabelText(/describe a task/i) as HTMLTextAreaElement).disabled).toBe(true);
+  await act(async () => { finish(); });
+  expect((screen.getByLabelText(/describe a task/i) as HTMLTextAreaElement).disabled).toBe(false);
+});
+
+
+it("the Preview tab has a Run bar for the conversation's latest program", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_001.py" },
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_002.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  const run = vi.spyOn(api, "runFile").mockResolvedValue({ ok: true, output: "RESULT: ok" });
+  await ready();
+  await screen.findByText("A");
+  const bar = screen.getByTestId("preview-run");
+  expect(bar.textContent).toMatch(/task_002\.py/);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+  expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_002.py", "aaaaaaaaaaaa");
+});
+
+it("no Run bar when the conversation has no program yet", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(conv("aaaaaaaaaaaa", "A") as never);
+  await ready();
+  await screen.findByText("A");
+  expect(screen.queryByTestId("preview-run")).toBeNull();
+});
+
+it("the Preview Run bar has a dropdown of all programs, defaulting to the latest", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_002.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([
+    { path: "bot_program/robot.py", editable: false },
+    { path: "bot_tasks/programs/task_001.py", editable: true },
+    { path: "bot_tasks/programs/task_002.py", editable: true }]);
+  const run = vi.spyOn(api, "runFile").mockResolvedValue({ ok: true, output: "RESULT: ok" });
+  await ready();
+  await screen.findByText("A");
+  const pick = await screen.findByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  expect(pick.value).toBe("bot_tasks/programs/task_002.py");
+  fireEvent.change(pick, { target: { value: "__all__" } });
+  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_001.py", "task_002.py"]);
+  fireEvent.change(pick, { target: { value: "bot_tasks/programs/task_001.py" } });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+  expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_001.py", "aaaaaaaaaaaa");
+});
+
+it("the dropdown lists this conversation's programs, with All programs to see the rest", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [{ kind: "file", path: "programs/task_002_stack.py" }], summary: "", result: { ok: true, runs: 1 },
+      error: null, program: "programs/task_002_stack.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([
+    { path: "bot_tasks/programs/task_001_old.py", editable: true },
+    { path: "bot_tasks/programs/task_002_stack.py", editable: true }]);
+  await ready();
+  await screen.findByText("A");
+  const pick = await screen.findByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_002_stack.py", "All programs…"]);
+  fireEvent.change(pick, { target: { value: "__all__" } });
+  const all = screen.getByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  expect([...all.options].map((o) => o.textContent)).toEqual(["task_001_old.py", "task_002_stack.py"]);
+  expect(all.value).toBe("bot_tasks/programs/task_002_stack.py");
+});
+
+it("a deleted latest program is not offered; the dropdown falls back to one that exists", async () => {
+  const c = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_001_a.py" },
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_002_b.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(c as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([{ path: "bot_tasks/programs/task_001_a.py", editable: true }]);
+  await ready();
+  await screen.findByText("A");
+  const pick = await screen.findByRole("combobox", { name: /program to run/i }) as HTMLSelectElement;
+  await act(async () => {});
+  expect([...pick.options].map((o) => o.textContent)).toEqual(["task_001_a.py", "All programs…"]);
+  expect(pick.value).toBe("bot_tasks/programs/task_001_a.py");
+});

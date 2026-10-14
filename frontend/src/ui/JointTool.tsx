@@ -2,7 +2,7 @@ import { ArrowLeftRight, Check, Crosshair, Loader2, Lock, MoveHorizontal, Pause,
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Vec3 } from "../api/types";
 import {
-  draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, setMotion, type JointDraft, type Motion,
+  draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, isDefaultLimits, setMotion, type JointDraft, type Motion,
 } from "../model/jointDraft";
 import { NAME_RE } from "../model/types";
 import { jointMotion, previewRange } from "../viewer/preview";
@@ -88,6 +88,13 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
       if (live.current.shape === asked) setSweep({ state: "error", message: (e as Error).message });
     }
   };
+
+  // a draft still at the default range finds its limits by itself, once per axis/origin/motion
+  const atDefault = !!d && !d.noLimits && isDefaultLimits(d.motion, d.lower, d.upper);
+  useEffect(() => {
+    if (canDrive && atDefault && sweep.state === "idle") void runSweep();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shape, canDrive, atDefault, sweep.state]);
 
   useEffect(() => {
     const toggle = () => setAnimating((a) => !a);

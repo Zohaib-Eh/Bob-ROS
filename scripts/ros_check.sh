@@ -13,6 +13,7 @@ host() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1";
 
 (cd "$ROOT/backend" && OPENBLAS_NUM_THREADS=1 "$PY" -m app.ros.cli "$(host "$ZIP")" -o "$(host "$WS")")
 docker build -q -t cad-to-urdf-jazzy "$(host "$ROOT/docker/jazzy")" >/dev/null
-MSYS_NO_PATHCONV=1 docker run --rm \
+# own network: a running app session must not join this check's ROS graph
+MSYS_NO_PATHCONV=1 docker run --rm --network none \
   -v "$(host "$WS"):/ws" -v "$(host "$ROOT/docker/jazzy/check"):/check:ro" \
   cad-to-urdf-jazzy bash /check/run.sh

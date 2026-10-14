@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-ros2-control \
         ros-jazzy-ros2-controllers \
         ros-jazzy-xacro \
+        ros-jazzy-rosbridge-suite \
         python3-pip \
     && rm -rf /var/lib/apt/lists/*
 # Keep the Debian numpy that ROS was built against; pip would otherwise replace it with 2.x.

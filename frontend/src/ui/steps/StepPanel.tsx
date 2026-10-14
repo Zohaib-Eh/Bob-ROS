@@ -19,5 +19,6 @@ export default function StepPanel({ ctx }: { ctx: Ctx }) {
     case "group": return <GroupStep ctx={ctx} />;
     case "connect": return <ConnectStep ctx={ctx} />;
     case "export": return <ExportStep ctx={ctx} />;
+    case "program": return null;
   }
 }
