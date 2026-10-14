@@ -84,3 +84,27 @@ def test_title_from_and_fold():
         "summary": "Done.\nAll good.", "result": {"ok": True, "runs": 2}, "error": None,
         "program": "programs/task_001.py"}
     assert conv.fold([{"kind": "error", "message": "boom"}])["error"] == "boom"
+
+
+def test_conversations_work_with_no_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(routes.session, "WORKSPACES", tmp_path)
+
+    def no_docker():
+        raise AssertionError("must not ask docker")
+    monkeypatch.setattr(routes.session, "current", no_docker)
+    a = client.post("/program/conversations?robot=bot", json={}).json()
+    assert [c["id"] for c in client.get("/program/conversations?robot=bot").json()] == [a["id"]]
+    assert client.patch(f"/program/conversations/{a['id']}?robot=bot", json={"title": "Pick"}).json()["title"] == "Pick"
+    assert client.get(f"/program/conversations/{a['id']}?robot=bot").json()["title"] == "Pick"
+    assert (tmp_path / "bot" / "conversations" / f"{a['id']}.json").exists()
+    assert client.delete(f"/program/conversations/{a['id']}?robot=bot").status_code == 200
+
+
+def test_robot_name_cannot_escape_the_workspaces(tmp_path, monkeypatch):
+    monkeypatch.setattr(routes.session, "WORKSPACES", tmp_path / "ws")
+    for bad in ("..", "../x", "Bot", "a/b", ""):
+        r = client.get("/program/conversations", params={"robot": bad})
+        assert r.status_code == 400, bad
+        r = client.post("/program/conversations", params={"robot": bad}, json={})
+        assert r.status_code == 400, bad
+    assert not (tmp_path / "x").exists() and not (tmp_path / "conversations").exists()

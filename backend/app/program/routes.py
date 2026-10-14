@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
 
 from app.program import agent, conversations, files, session
+from app.ros.moveit_config import ROS_NAME
 from app.routes.export_routes import ExportRequest
 
 router = APIRouter(prefix="/program")
@@ -113,7 +114,12 @@ class Rename(BaseModel):
     title: str
 
 
-def _src() -> Path:
+def _src(robot: str | None = None) -> Path:
+    """The robot's workspace src: from the name when given (no Docker), else from the session."""
+    if robot is not None:
+        if not ROS_NAME.match(robot):
+            raise HTTPException(400, "Invalid robot name.")
+        return session.WORKSPACES / robot / "src"
     try:
         cur = session.current()
     except session.SessionError as exc:
@@ -123,8 +129,8 @@ def _src() -> Path:
     return Path(cur["src"])
 
 
-def _conv(cid: str) -> tuple[Path, dict]:
-    src = _src()
+def _conv(cid: str, robot: str | None = None) -> tuple[Path, dict]:
+    src = _src(robot)
     try:
         return src, conversations.load(src, cid)
     except ValueError as exc:
@@ -134,29 +140,29 @@ def _conv(cid: str) -> tuple[Path, dict]:
 
 
 @router.get("/conversations")
-def list_conversations() -> list:
-    return conversations.list_all(_src())
+def list_conversations(robot: str | None = None) -> list:
+    return conversations.list_all(_src(robot))
 
 
 @router.post("/conversations")
-def new_conversation(req: NewConversation) -> dict:
-    return conversations.create(_src(), req.title or "New conversation")
+def new_conversation(req: NewConversation, robot: str | None = None) -> dict:
+    return conversations.create(_src(robot), req.title or "New conversation")
 
 
 @router.get("/conversations/{cid}")
-def get_conversation(cid: str) -> dict:
-    return _conv(cid)[1]
+def get_conversation(cid: str, robot: str | None = None) -> dict:
+    return _conv(cid, robot)[1]
 
 
 @router.patch("/conversations/{cid}")
-def rename_conversation(cid: str, req: Rename) -> dict:
-    src, _ = _conv(cid)
+def rename_conversation(cid: str, req: Rename, robot: str | None = None) -> dict:
+    src, _ = _conv(cid, robot)
     return conversations.rename(src, cid, req.title)
 
 
 @router.delete("/conversations/{cid}")
-def delete_conversation(cid: str) -> dict:
-    src = _src()
+def delete_conversation(cid: str, robot: str | None = None) -> dict:
+    src = _src(robot)
     try:
         conversations.delete(src, cid)
     except ValueError as exc:
