@@ -1,5 +1,7 @@
 # Run Replay — Design
 
+> **Status: deferred (2026-10-14).** Not built. Run again buttons (re-running the program live) cover replay for now; see commit ababc6a.
+
 Date: 2026-10-14. Branch: prompt-to-program. Builds on the Program workspace (`2026-10-13-program-workspace-design.md`).
 
 ## 1. Goal

@@ -1,5 +1,7 @@
 # Run Replay Implementation Plan
 
+> **Status: deferred (2026-10-14).** Not built. Run again buttons (re-running the program live) cover replay for now; see commit ababc6a.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every finished program run (Claude's or manual) gets a ▶ Replay button in the chat. The button plays the recorded motion and objects back in the 3D view.
