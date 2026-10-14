@@ -108,3 +108,8 @@ def test_robot_name_cannot_escape_the_workspaces(tmp_path, monkeypatch):
         r = client.post("/program/conversations", params={"robot": bad}, json={})
         assert r.status_code == 400, bad
     assert not (tmp_path / "x").exists() and not (tmp_path / "conversations").exists()
+
+
+def test_robot_name_with_a_trailing_newline_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(routes.session, "WORKSPACES", tmp_path)
+    assert client.get("/program/conversations", params={"robot": "bot\n"}).status_code == 400

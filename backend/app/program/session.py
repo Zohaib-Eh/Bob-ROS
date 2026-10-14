@@ -120,7 +120,11 @@ def status() -> dict:
         return {"state": "stopped", "robot": robot}
     if r.stdout.strip() != "running":
         return {"state": "failed", "robot": robot, "log": logs()}
-    stage = _docker("exec", SESSION_CONTAINER, "cat", "/tmp/stage", check=False).stdout.strip() or "build"
+    r = _docker("exec", SESSION_CONTAINER, "cat", "/tmp/stage", check=False)
+    stage = r.stdout.strip() or "build"
+    if r.returncode != 0:  # a container started before stage files: only /tmp/ready tells
+        ready = _docker("exec", SESSION_CONTAINER, "test", "-f", "/tmp/ready", check=False).returncode == 0
+        stage = "ready" if ready else "build"
     if stage == "ready":
         return {"state": "ready", "robot": robot}
     return {"state": "starting", "robot": robot, "stage": stage, "log": logs(8)}

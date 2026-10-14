@@ -555,3 +555,18 @@ def test_import_worker_turns_failures_into_an_error_event(tmp_path):
     import_routes._import_worker(str(tmp), ".stl", "junk.stl", 0.001, q)
     events = [q.get() for _ in range(q.qsize())]
     assert events[-2]["kind"] == "error" and "junk.stl" in events[-2]["message"] and events[-1] is None
+
+
+def test_a_dropped_import_stream_kills_the_importer():
+    import multiprocessing
+    import time
+    from app.routes import import_routes
+    ctx = multiprocessing.get_context("spawn")
+    q = ctx.Queue()
+    proc = ctx.Process(target=time.sleep, args=(60,), daemon=True)
+    proc.start()
+    q.put({"kind": "progress", "stage": "read", "done": 0, "total": 0})
+    gen = import_routes._stream(proc, q, "big.step")
+    assert "read" in next(gen)
+    gen.close()  # what Starlette does when the client goes away
+    assert not proc.is_alive()

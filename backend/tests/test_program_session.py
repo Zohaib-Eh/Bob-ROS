@@ -182,3 +182,17 @@ def test_status_while_starting_carries_a_log_tail(fake):
     fake.stage = "build"
     st = session.status()
     assert st["state"] == "starting" and st["stage"] == "build" and "log" in st
+
+
+def test_a_container_from_before_stage_files_still_reports_ready(fake, monkeypatch):
+    _started()
+    real = fake.__call__
+
+    def old_container(args, **kw):
+        if args[1] == "exec" and args[-2:] == ["cat", "/tmp/stage"]:
+            return subprocess.CompletedProcess(args, 1, "", "No such file")
+        if args[1] == "exec" and args[-1:] == ["/tmp/ready"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return real(args, **kw)
+    monkeypatch.setattr(session.subprocess, "run", old_container)
+    assert session.status()["state"] == "ready"

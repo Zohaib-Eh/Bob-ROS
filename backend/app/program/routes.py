@@ -117,7 +117,7 @@ class Rename(BaseModel):
 def _src(robot: str | None = None) -> Path:
     """The robot's workspace src: from the name when given (no Docker), else from the session."""
     if robot is not None:
-        if not ROS_NAME.match(robot):
+        if not ROS_NAME.fullmatch(robot):
             raise HTTPException(400, "Invalid robot name.")
         return session.WORKSPACES / robot / "src"
     try:
