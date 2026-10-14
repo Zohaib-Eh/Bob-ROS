@@ -190,3 +190,46 @@ it("locks the chat and Run while a manual run is pending", async () => {
   expect(box().disabled).toBe(false);
   expect(runBtn().disabled).toBe(false);
 });
+
+it("Run again runs that program live in Preview and locks the UI while it runs", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [{ role: "claude", items: [], summary: "done", result: { ok: true, runs: 1 },
+    error: null, program: "programs/task_001.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  vi.spyOn(api, "listFiles").mockResolvedValue([]);
+  let finish!: () => void;
+  const run = vi.spyOn(api, "runFile").mockImplementation(() => new Promise((r) => { finish = () => r({ ok: true, output: "RESULT: ok" }); }));
+  await ready();
+  await screen.findByText("A");
+  fireEvent.click(screen.getByRole("tab", { name: "Code" }));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /run again/i })); });
+  expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_001.py", "aaaaaaaaaaaa");
+  expect(screen.getByRole("tab", { name: "Preview" }).getAttribute("aria-selected")).toBe("true");
+  expect((screen.getByLabelText(/describe a task/i) as HTMLTextAreaElement).disabled).toBe(true);
+  await act(async () => { finish(); });
+  expect((screen.getByLabelText(/describe a task/i) as HTMLTextAreaElement).disabled).toBe(false);
+});
+
+
+it("the Preview tab has a Run bar for the conversation's latest program", async () => {
+  const withProgram = { ...conv("aaaaaaaaaaaa", "A"), messages: [
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_001.py" },
+    { role: "claude", items: [], summary: "", result: { ok: true, runs: 1 }, error: null, program: "programs/task_002.py" }] };
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(withProgram as never);
+  const run = vi.spyOn(api, "runFile").mockResolvedValue({ ok: true, output: "RESULT: ok" });
+  await ready();
+  await screen.findByText("A");
+  const bar = screen.getByTestId("preview-run");
+  expect(bar.textContent).toMatch(/task_002\.py/);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /run task_002\.py/i })); });
+  expect(run).toHaveBeenCalledWith("bot_tasks/programs/task_002.py", "aaaaaaaaaaaa");
+});
+
+it("no Run bar when the conversation has no program yet", async () => {
+  vi.spyOn(api, "listConversations").mockResolvedValue([{ id: "aaaaaaaaaaaa", title: "A" }]);
+  vi.spyOn(api, "getConversation").mockResolvedValue(conv("aaaaaaaaaaaa", "A") as never);
+  await ready();
+  await screen.findByText("A");
+  expect(screen.queryByTestId("preview-run")).toBeNull();
+});

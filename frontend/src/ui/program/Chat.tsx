@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FileCode, Loader2, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, FileCode, Loader2, Play, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import type { ClaudeMessage, Item, Message } from "../../model/chat";
@@ -22,7 +22,13 @@ function Step({ item }: { item: Item }) {
   return <RunOutput head={`Run ${item.n} ${mark} ${item.message ?? "running"}`} output={item.output} cls={item.ok === false ? "bad" : item.ok ? "ok" : ""} />;
 }
 
-function Claude({ m, live }: { m: ClaudeMessage; live: boolean }) {
+/** Re-runs a program live in the 3D view. */
+function RunAgain({ path, onRunAgain, disabled }: { path: string; onRunAgain?: (path: string) => void; disabled: boolean }) {
+  if (!onRunAgain) return null;
+  return <button className="btn run-again" disabled={disabled} onClick={() => onRunAgain(path)}><Play size={12} />Run again</button>;
+}
+
+function Claude({ m, live, onRunAgain, busy }: { m: ClaudeMessage; live: boolean; onRunAgain?: (path: string) => void; busy: boolean }) {
   return (
     <div className="claude-msg">
       {m.items.map((it, i) => <Step key={i} item={it} />)}
@@ -31,14 +37,18 @@ function Claude({ m, live }: { m: ClaudeMessage; live: boolean }) {
         {m.result.ok ? `✓ Worked on run ${m.result.runs}/${MAX_RUNS}` : `✗ Failed after ${m.result.runs} run${m.result.runs === 1 ? "" : "s"}`}
       </div>}
       {m.error && <div className="error">{m.error}</div>}
+      {!live && m.result && m.program && <RunAgain path={m.program} onRunAgain={onRunAgain} disabled={busy} />}
       {live && !m.result && !m.error && <div className="muted"><Loader2 size={12} className="spin" /> Working…</div>}
     </div>
   );
 }
 
-interface Props { messages: Message[]; live: ClaudeMessage | null; running: boolean; disabled: boolean; onSend(task: string): void }
+interface Props {
+  messages: Message[]; live: ClaudeMessage | null; running: boolean; disabled: boolean; onSend(task: string): void;
+  onRunAgain?(path: string): void;
+}
 
-export default function Chat({ messages, live, running, disabled, onSend }: Props) {
+export default function Chat({ messages, live, running, disabled, onSend, onRunAgain }: Props) {
   const [task, setTask] = useState("");
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [messages, live]);
@@ -47,9 +57,10 @@ export default function Chat({ messages, live, running, disabled, onSend }: Prop
     <>
       <div className="chat-scroll">
         {messages.map((m, i) => m.role === "user" ? <div key={i} className="bubble">{m.text}</div>
-          : m.role === "run" ? <RunOutput key={i} head={`You ran ${m.path} ${m.ok ? "✓" : "✗"}`} output={m.output} cls={m.ok ? "ok" : "bad"} />
-          : <Claude key={i} m={m} live={false} />)}
-        {live && <Claude m={live} live={true} />}
+          : m.role === "run" ? <div key={i}><RunOutput head={`You ran ${m.path} ${m.ok ? "✓" : "✗"}`} output={m.output} cls={m.ok ? "ok" : "bad"} />
+              <RunAgain path={m.path} onRunAgain={onRunAgain} disabled={running || disabled} /></div>
+          : <Claude key={i} m={m} live={false} onRunAgain={onRunAgain} busy={running || disabled} />)}
+        {live && <Claude m={live} live={true} busy={true} />}
         <div ref={end} />
       </div>
       <div className="prompt">

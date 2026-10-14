@@ -101,6 +101,29 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     } catch (e) { fail(e); }
   }
 
+  const [previewTick, setPreviewTick] = useState(0);
+  // the conversation's latest program: the last answer's program or the last file you ran
+  const latest = useMemo(() => {
+    for (const m of [...(active?.messages ?? [])].reverse()) {
+      if (m.role === "claude" && m.program) return m.program;
+      if (m.role === "run") return m.path;
+    }
+    return null;
+  }, [active]);
+
+  async function runAgain(path: string) {
+    if (!active || !status.robot) return;
+    const full = path.includes("_tasks/") ? path : `${status.robot}_tasks/${path}`;
+    const id = active.id;
+    ros.setError(null);
+    setPreviewTick((n) => n + 1);
+    setRunning(true);
+    try { await api.runFile(full, id); }
+    catch (e) { fail(e); }
+    finally { if (mounted.current) setRunning(false); }
+    if (mounted.current) await reload(id);
+  }
+
   const changed = useMemo(() => {
     const out = new Set<string>();
     const lastClaude = [...(active?.messages ?? [])].reverse().find((m) => m.role === "claude");
@@ -136,11 +159,19 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
           onSelect={(id) => void reload(id)} onNew={() => void newConversation()}
           onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
         <section className="chat-column" data-testid="chat-slot">
-          <Chat messages={active?.messages ?? []} live={live} running={running} disabled={status.state !== "ready"} onSend={(t) => void send(t)} />
+          <Chat messages={active?.messages ?? []} live={live} running={running} disabled={status.state !== "ready"} onSend={(t) => void send(t)}
+            onRunAgain={(p) => void runAgain(p)} />
         </section>
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
-            onRan={(id) => void reload(id)} onRunning={(r) => { if (mounted.current) setRunning(r); }} />
+            onRan={(id) => void reload(id)} onRunning={(r) => { if (mounted.current) setRunning(r); }} showPreview={previewTick}
+            overlay={latest && (
+              <div className="preview-run" data-testid="preview-run">
+                <span className="muted small">{latest.split("/").pop()}</span>
+                <button className="btn btn-primary" aria-label={`Run ${latest.split("/").pop()}`}
+                  disabled={running || status.state !== "ready"} onClick={() => void runAgain(latest)}><Play size={14} />Run</button>
+              </div>
+            )} />
         </section>
       </div>
     </div>

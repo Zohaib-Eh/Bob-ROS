@@ -5,10 +5,12 @@ import type { FileEntry } from "../../api/program";
 import Editor from "./Editor";
 import FileTree from "./FileTree";
 
-interface Props { preview: ReactNode; conversation: string | null; running: boolean; changed: Set<string>; onRan(id: string | null): void; onRunning(running: boolean): void }
+interface Props { preview: ReactNode; conversation: string | null; running: boolean; changed: Set<string>; onRan(id: string | null): void; onRunning(running: boolean): void;
+  overlay?: ReactNode; showPreview?: number }
 
-export default function Workspace({ preview, conversation, running, changed, onRan, onRunning }: Props) {
+export default function Workspace({ preview, conversation, running, changed, onRan, onRunning, overlay, showPreview = 0 }: Props) {
   const [tab, setTab] = useState<"preview" | "code">("preview");
+  useEffect(() => { if (showPreview) setTab("preview"); }, [showPreview]);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [file, setFile] = useState<{ path: string; content: string; editable: boolean } | null>(null);
   const [text, setText] = useState("");
@@ -56,7 +58,7 @@ export default function Workspace({ preview, conversation, running, changed, onR
         <button role="tab" aria-selected={tab === "preview"} className={tab === "preview" ? "active" : ""} onClick={() => setTab("preview")}>Preview</button>
         <button role="tab" aria-selected={tab === "code"} className={tab === "code" ? "active" : ""} onClick={() => setTab("code")}>Code</button>
       </div>
-      <div className="tab-body" style={{ display: tab === "preview" ? "flex" : "none" }}>{preview}</div>
+      <div className="tab-body" style={{ display: tab === "preview" ? "flex" : "none" }}>{preview}{overlay}</div>
       {tab === "code" && (
         <div className="code-tab">
           <FileTree files={files} open={file?.path ?? null} changed={changed} onOpen={requestOpen} />

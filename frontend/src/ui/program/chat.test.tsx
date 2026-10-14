@@ -54,3 +54,22 @@ describe("Chat", () => {
     expect(screen.getByText(/Working/)).toBeTruthy();
   });
 });
+
+describe("Run again", () => {
+  it("is offered on answers with a program and on manual runs, and passes the program path", () => {
+    const onRunAgain = vi.fn();
+    render(<Chat messages={msgs} live={null} running={false} disabled={false} onSend={() => {}} onRunAgain={onRunAgain} />);
+    const buttons = screen.getAllByRole("button", { name: /run again/i });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]);
+    expect(onRunAgain).toHaveBeenLastCalledWith("programs/task_001.py");
+    fireEvent.click(buttons[1]);
+    expect(onRunAgain).toHaveBeenLastCalledWith("bot_tasks/programs/task_001.py");
+  });
+  it("is disabled while anything runs or ROS is not ready", () => {
+    const { rerender } = render(<Chat messages={msgs} live={null} running={true} disabled={false} onSend={() => {}} onRunAgain={() => {}} />);
+    expect(screen.getAllByRole("button", { name: /run again/i }).every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+    rerender(<Chat messages={msgs} live={null} running={false} disabled={true} onSend={() => {}} onRunAgain={() => {}} />);
+    expect(screen.getAllByRole("button", { name: /run again/i }).every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
