@@ -251,7 +251,8 @@ ament_package()
     }
 
 
-def generate(robot: str, description_dir: Path, out_src: Path, source: str, samples: int = 10000) -> None:
+def generate(robot: str, description_dir: Path, out_src: Path, source: str, samples: int = 10000,
+             on_progress=None) -> None:
     """Write <robot>, <robot>_moveit_config and <robot>_kinematics into out_src.
     Everything is built in a temp folder first: an error leaves out_src untouched."""
     if not ROS_NAME.match(robot):
@@ -263,7 +264,8 @@ def generate(robot: str, description_dir: Path, out_src: Path, source: str, samp
         raise ValueError("Not a cad-to-urdf export.")
     urdf = urdf_path.read_text(encoding="utf-8")
     chain = parse_chain(urdf)
-    pairs = disabled_pairs(chain, link_meshes(urdf, description_dir), samples=samples)
+    pairs = disabled_pairs(chain, link_meshes(urdf, description_dir), samples=samples,
+                           on_progress=on_progress)
 
     tmp = Path(tempfile.mkdtemp(prefix="cad-to-urdf-"))
     try:

@@ -56,16 +56,30 @@ def test_health_route_still_works():
     assert response.json() == {"status": "ok"}
 
 
+def _events(r):
+    return [json.loads(x[6:]) for x in r.text.split("\n\n") if x.startswith("data: ")]
+
+
+def _import_events(c, name, data, query=""):
+    r = c.post(f"/import{query}", files={"file": (name, data)})
+    return r, _events(r)
+
+
+def _result(r):
+    """The final event of an /import stream: the import result (or an error event)."""
+    return _events(r)[-1]
+
+
 def test_import_box_stl_segments_into_six_planes(box_stl_path):
     with open(box_stl_path, "rb") as f:
-        r = client.post("/import", files={"file": ("box.stl", f.read())})
-    assert r.status_code == 200
-    j = r.json()
-    assert j["applied_scale"] == 0.001
-    assert len(j["bodies"]) == 1
-    faces = j["bodies"][0]["faces"]
-    assert len(faces) == 6
-    assert all(f["kind"] == "plane" and f["origin"] == "segmented" for f in faces)
+        r, ev = _import_events(client, "box.stl", f.read())
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    stages = [e["stage"] for e in ev if e["kind"] == "progress"]
+    assert stages[:1] == ["read"] and "faces" in stages
+    done = ev[-1]
+    assert done["kind"] == "done" and done["applied_scale"] == 0.001 and len(done["bodies"]) == 1
+    faces = done["bodies"][0]["faces"]
+    assert len(faces) == 6 and all(f["kind"] == "plane" and f["origin"] == "segmented" for f in faces)
 
 
 def test_import_unsupported_extension_is_400():
@@ -118,9 +132,8 @@ def test_import_nan_scale_is_422(box_stl_path):
 
 def test_import_scale_override(box_stl_path):
     with open(box_stl_path, "rb") as f:
-        r = client.post("/import?scale=1.0", files={"file": ("box.stl", f.read())})
-    assert r.status_code == 200
-    assert r.json()["applied_scale"] == 1.0
+        _, ev = _import_events(client, "box.stl", f.read(), "?scale=1.0")
+    assert ev[-1]["kind"] == "done" and ev[-1]["applied_scale"] == 1.0
 
 
 def test_detect_joints_cylinder_without_axis_is_422():
@@ -186,46 +199,45 @@ _raising_client = TestClient(app, raise_server_exceptions=False)
     ("junk.iges", b"junk"), ("junk.step", b"garbage"), ("junk.brep", b"junk"),
     ("junk.stl", b"garbage"), ("junk.obj", b"v 0 0 0\n"),
 ])
-def test_import_corrupt_file_is_422_naming_upload(name, data):
-    r = _raising_client.post("/import", files={"file": (name, data)})
-    assert r.status_code == 422
-    detail = r.json()["detail"]
-    assert name in detail
-    assert "tmp" not in detail.lower() and "temp" not in detail.lower()
+def test_import_corrupt_file_is_an_error_event_naming_upload(name, data):
+    r, ev = _import_events(_raising_client, name, data)
+    assert r.status_code == 200 and ev[-1]["kind"] == "error"
+    msg = ev[-1]["message"]
+    assert name in msg and "tmp" not in msg.lower() and "temp" not in msg.lower()
 
 
-def test_import_empty_stl_is_422_could_not_read():
+def test_import_empty_stl_is_an_error_could_not_read():
     r = _raising_client.post("/import", files={"file": ("empty.stl", b"")})
-    assert r.status_code == 422
-    assert "could not read" in r.json()["detail"].lower()
-    assert "empty.stl" in r.json()["detail"]
+    assert _result(r)["kind"] == "error"
+    assert "could not read" in _result(r)["message"].lower()
+    assert "empty.stl" in _result(r)["message"]
 
 
 def test_import_non_watertight_is_approximate_not_422(non_watertight_stl_path):
     with open(non_watertight_stl_path, "rb") as f:
         r = client.post("/import", files={"file": ("broken.stl", f.read())})
     assert r.status_code == 200
-    body = r.json()["bodies"][0]
+    body = _result(r)["bodies"][0]
     assert body["status"] == "approximate"
     assert body["warnings"][0]["code"] == "open_geometry"
     assert "tmp" not in body["warnings"][0]["message"].lower()
 
 
 def _cyl_radius(r):
-    return next(f["radius"] for f in r.json()["bodies"][0]["faces"] if f["kind"] == "cylinder")
+    return next(f["radius"] for f in _result(r)["bodies"][0]["faces"] if f["kind"] == "cylinder")
 
 
 def test_brep_import_reports_and_honors_scale(cylinder_brep_path):
     data = open(cylinder_brep_path, "rb").read()
     r = client.post("/import", files={"file": ("cyl.brep", data)})
     assert r.status_code == 200
-    assert r.json()["applied_scale"] == 0.001
+    assert _result(r)["applied_scale"] == 0.001
     assert _cyl_radius(r) == pytest.approx(0.5)
     r1 = client.post("/import?scale=1.0", files={"file": ("cyl.brep", data)})
     assert r1.status_code == 200
-    assert r1.json()["applied_scale"] == 1.0
+    assert _result(r1)["applied_scale"] == 1.0
     assert _cyl_radius(r1) == pytest.approx(500.0)
-    xs = [v[0] for v in r1.json()["bodies"][0]["vertices"]]
+    xs = [v[0] for v in _result(r1)["bodies"][0]["vertices"]]
     assert max(xs) - min(xs) == pytest.approx(1000.0, rel=1e-6)
 
 
@@ -233,7 +245,7 @@ def test_step_import_reports_unit_scale_and_ignores_scale_param(cylinder_step_pa
     r = client.post("/import?scale=5.0",
                     files={"file": ("cyl.step", open(cylinder_step_path, "rb").read())})
     assert r.status_code == 200
-    assert r.json()["applied_scale"] == 1.0
+    assert _result(r)["applied_scale"] == 1.0
     assert _cyl_radius(r) == pytest.approx(0.5)
 
 
@@ -298,7 +310,7 @@ def _confirm_and_export(block: dict, peg: dict) -> zipfile.ZipFile:
 def test_http_step_peg_in_hole_import_detect_confirm_export(peg_in_hole_step_path):
     r = client.post("/import", files={"file": ("peg.step", open(peg_in_hole_step_path, "rb").read())})
     assert r.status_code == 200
-    block, peg = r.json()["bodies"]
+    block, peg = _result(r)["bodies"]
     _confirm_and_export(block, peg)
 
 
@@ -309,29 +321,29 @@ def test_http_stl_two_part_import_detect_confirm_export(peg_in_hole_step_path, t
         stl = trimesh.Trimesh(b.vertices, b.triangles).apply_scale(1000.0).export(file_type="stl")
         r = client.post("/import", files={"file": (f"{b.name}.stl", stl)})
         assert r.status_code == 200
-        assert r.json()["applied_scale"] == 0.001
-        bodies.append(r.json()["bodies"][0])
+        assert _result(r)["applied_scale"] == 0.001
+        bodies.append(_result(r)["bodies"][0])
     _confirm_and_export(*bodies)
 
 
 def test_import_response_has_file_level_warnings(box_stl_path):
     r = client.post("/import", files={"file": ("box.stl", open(box_stl_path, "rb").read())})
     assert r.status_code == 200
-    assert r.json()["warnings"] == []
-    assert r.json()["bodies"][0]["status"] == "ok"
+    assert _result(r)["warnings"] == []
+    assert _result(r)["bodies"][0]["status"] == "ok"
 
 
 def test_import_mixed_brep_lists_every_part(mixed_topology_brep_path):
     r = client.post("/import?scale=1.0",
                     files={"file": ("mixed.brep", open(mixed_topology_brep_path, "rb").read())})
     assert r.status_code == 200
-    assert sorted(b["status"] for b in r.json()["bodies"]) == ["approximate", "approximate", "ok", "repaired"]
+    assert sorted(b["status"] for b in _result(r)["bodies"]) == ["approximate", "approximate", "ok", "repaired"]
 
 
 def test_import_mesh_names_body_after_upload_filename(non_watertight_stl_path):
     with open(non_watertight_stl_path, "rb") as f:
         r = client.post("/import", files={"file": ("broken.stl", f.read())})
-    body = r.json()["bodies"][0]
+    body = _result(r)["bodies"][0]
     assert body["name"] == "broken"
     assert "broken" in body["warnings"][0]["message"]
 
@@ -516,3 +528,45 @@ def test_link_mass_ignores_bodies_not_in_body_ids():
         "bodies": [_unit_box_json()]})
     assert r.status_code == 422
     assert "Link 'a'" in r.json()["detail"]
+
+
+def test_import_worker_reports_progress_then_the_result(box_stl_path, tmp_path):
+    import queue
+    import shutil
+    from app.routes import import_routes
+    tmp = tmp_path / "upload.stl"
+    shutil.copy(box_stl_path, tmp)
+    q = queue.Queue()
+    import_routes._import_worker(str(tmp), ".stl", "box.stl", 0.001, q)
+    events = []
+    while not q.empty():
+        events.append(q.get())
+    assert events[0]["kind"] == "progress" and events[-1] is None
+    assert events[-2]["kind"] == "done" and len(events[-2]["bodies"]) == 1
+    assert not tmp.exists()  # the worker deletes the upload
+
+
+def test_import_worker_turns_failures_into_an_error_event(tmp_path):
+    import queue
+    from app.routes import import_routes
+    tmp = tmp_path / "junk.stl"
+    tmp.write_bytes(b"garbage")
+    q = queue.Queue()
+    import_routes._import_worker(str(tmp), ".stl", "junk.stl", 0.001, q)
+    events = [q.get() for _ in range(q.qsize())]
+    assert events[-2]["kind"] == "error" and "junk.stl" in events[-2]["message"] and events[-1] is None
+
+
+def test_a_dropped_import_stream_kills_the_importer():
+    import multiprocessing
+    import time
+    from app.routes import import_routes
+    ctx = multiprocessing.get_context("spawn")
+    q = ctx.Queue()
+    proc = ctx.Process(target=time.sleep, args=(60,), daemon=True)
+    proc.start()
+    q.put({"kind": "progress", "stage": "read", "done": 0, "total": 0})
+    gen = import_routes._stream(proc, q, "big.step")
+    assert "read" in next(gen)
+    gen.close()  # what Starlette does when the client goes away
+    assert not proc.is_alive()

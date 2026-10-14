@@ -123,8 +123,26 @@ describe("Stepper", () => {
     render(<Harness start={imported([])} ui={(ctx) => <Stepper ctx={ctx} progress={idle} onCancel={vi.fn()} onResume={vi.fn()} />} />);
     const file = new File(["x"], "a.stl");
     await act(async () => { fireEvent.change(screen.getByTestId("import-input"), { target: { files: [file] } }); });
-    expect(spy).toHaveBeenCalledWith(file, 0.001);
+    expect(spy).toHaveBeenCalledWith(file, 0.001, expect.any(Function));
     expect(state().links).toHaveLength(1);
+    spy.mockRestore();
+  });
+});
+
+describe("Import progress", () => {
+  it("shows import progress while importing", async () => {
+    let report!: (p: client.ImportProgress) => void;
+    let finish!: (r: Awaited<ReturnType<typeof client.importFile>>) => void;
+    const spy = vi.spyOn(client, "importFile").mockImplementation((_f, _s, onProgress) => {
+      report = onProgress!;
+      return new Promise((r) => { finish = r; });
+    });
+    render(<Harness start={imported([])} ui={(ctx) => <Stepper ctx={ctx} progress={idle} onCancel={vi.fn()} onResume={vi.fn()} />} />);
+    await act(async () => { fireEvent.change(screen.getByTestId("import-input"), { target: { files: [new File(["x"], "a.step")] } }); });
+    await act(async () => { report({ stage: "parts", done: 2, total: 5 }); });
+    expect(screen.getByTestId("import-progress").textContent).toMatch(/Building parts 2 \/ 5/);
+    await act(async () => { finish({ bodies: [], applied_scale: 1, warnings: [] }); });
+    expect(screen.queryByTestId("import-progress")).toBeNull();
     spy.mockRestore();
   });
 });

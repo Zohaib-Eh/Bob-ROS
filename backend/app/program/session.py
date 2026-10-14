@@ -2,6 +2,7 @@
 rosbridge on the robot's generated workspace."""
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 from app.export.urdf_writer import export_package
@@ -24,6 +25,15 @@ LABEL_FORMAT = ('{{index .Config.Labels "cad-to-urdf.robot"}}|'
 
 class SessionError(Exception):
     pass
+
+
+class SessionBusy(SessionError):
+    pass
+
+
+_lock = threading.Lock()
+_prep: dict | None = None  # host-side startup: robot, stage, done, total, error, stop, launched
+_thread: threading.Thread | None = None
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -51,22 +61,43 @@ def current() -> dict | None:
 
 
 def start(robot_name: str, links, joints, bodies_by_link) -> dict:
-    """Export the model, generate its workspace and (re)start the session container."""
-    global _current
+    """Check fast, then export the workspace and (re)start the container in a background thread."""
+    global _prep, _thread
     data = export_package(robot_name, links, joints, bodies_by_link)  # ValueError -> caller
-    ws = WORKSPACES / robot_name
-    robot = workspace_from_zip(data, ws, samples=SAMPLES)
     _docker("info")
-    if _docker("image", "inspect", IMAGE, check=False).returncode != 0:
-        _docker("build", "-t", IMAGE, str(DOCKER_DIR))
-    _docker("rm", "-f", SESSION_CONTAINER, check=False)
-    src = ws / "src"
-    _docker("run", "-d", "--name", SESSION_CONTAINER, "-p", "127.0.0.1:9090:9090",
-            "--label", f"cad-to-urdf.robot={robot}", "--label", f"cad-to-urdf.src={src}",
-            "-v", f"{ws}:/ws", "-v", f"{DOCKER_DIR / 'session'}:/session:ro",
-            IMAGE, "bash", "/session/start.sh")
-    _current = {"robot": robot, "src": src}
-    return {"state": "starting", "robot": robot}
+    with _lock:
+        if _thread is not None and _thread.is_alive():
+            raise SessionBusy("Startup is still finishing; try again in a moment.")
+        _prep = prep = {"robot": robot_name, "stage": "collisions", "done": 0, "total": SAMPLES,
+                        "error": None, "stop": False, "launched": False}
+        _thread = threading.Thread(target=_prepare, args=(prep, data), daemon=True)
+        _thread.start()
+    return {"state": "starting", "robot": robot_name, "stage": "collisions", "done": 0, "total": SAMPLES}
+
+
+def _prepare(prep: dict, data: bytes) -> None:
+    """The slow part of start(): workspace, image if missing, container. Progress goes into prep."""
+    global _current
+    try:
+        ws = WORKSPACES / prep["robot"]
+        robot = workspace_from_zip(data, ws, samples=SAMPLES,
+                                   on_progress=lambda d, t: prep.update(done=d, total=t))
+        if _docker("image", "inspect", IMAGE, check=False).returncode != 0:
+            prep.update(stage="image", done=0, total=0)
+            _docker("build", "-t", IMAGE, str(DOCKER_DIR))
+        with _lock:
+            if prep["stop"]:
+                return
+            _docker("rm", "-f", SESSION_CONTAINER, check=False)
+            src = ws / "src"
+            _docker("run", "-d", "--name", SESSION_CONTAINER, "-p", "127.0.0.1:9090:9090",
+                    "--label", f"cad-to-urdf.robot={robot}", "--label", f"cad-to-urdf.src={src}",
+                    "-v", f"{ws}:/ws", "-v", f"{DOCKER_DIR / 'session'}:/session:ro",
+                    IMAGE, "bash", "/session/start.sh")
+            _current = {"robot": robot, "src": src}
+            prep.update(stage="build", done=0, total=0, launched=True)
+    except Exception as exc:  # any failure must reach the UI, not die with the thread
+        prep["error"] = str(exc) or type(exc).__name__
 
 
 def logs(lines: int = 30) -> str:
@@ -75,6 +106,13 @@ def logs(lines: int = 30) -> str:
 
 
 def status() -> dict:
+    prep = _prep
+    if prep is not None and not prep["stop"]:
+        if prep["error"]:
+            return {"state": "failed", "robot": prep["robot"], "stage": prep["stage"], "error": prep["error"]}
+        if not prep["launched"]:
+            return {"state": "starting", "robot": prep["robot"], "stage": prep["stage"],
+                    "done": prep["done"], "total": prep["total"]}
     cur = current()
     robot = cur["robot"] if cur else None
     r = _docker("inspect", "-f", "{{.State.Status}}", SESSION_CONTAINER, check=False)
@@ -82,14 +120,24 @@ def status() -> dict:
         return {"state": "stopped", "robot": robot}
     if r.stdout.strip() != "running":
         return {"state": "failed", "robot": robot, "log": logs()}
-    ready = _docker("exec", SESSION_CONTAINER, "test", "-f", "/tmp/ready", check=False).returncode == 0
-    return {"state": "ready" if ready else "starting", "robot": robot}
+    r = _docker("exec", SESSION_CONTAINER, "cat", "/tmp/stage", check=False)
+    stage = r.stdout.strip() or "build"
+    if r.returncode != 0:  # a container started before stage files: only /tmp/ready tells
+        ready = _docker("exec", SESSION_CONTAINER, "test", "-f", "/tmp/ready", check=False).returncode == 0
+        stage = "ready" if ready else "build"
+    if stage == "ready":
+        return {"state": "ready", "robot": robot}
+    return {"state": "starting", "robot": robot, "stage": stage, "log": logs(8)}
 
 
 def stop() -> None:
-    global _current
-    _docker("rm", "-f", SESSION_CONTAINER, check=False)
-    _current = None
+    global _current, _prep
+    with _lock:
+        if _prep is not None:
+            _prep["stop"] = True
+        _prep = None
+        _docker("rm", "-f", SESSION_CONTAINER, check=False)
+        _current = None
 
 
 def run_program(program: str) -> dict:

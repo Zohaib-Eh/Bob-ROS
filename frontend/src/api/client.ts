@@ -35,10 +35,52 @@ export const json = (body: unknown): RequestInit => ({
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
 
-export async function importFile(file: File, scale: number): Promise<ImportResponse> {
+export function parseSse<T>(buffer: string): { events: T[]; rest: string } {
+  const parts = buffer.replace(/\r\n/g, "\n").split("\n\n");
+  const rest = parts.pop() ?? "";
+  const events: T[] = [];
+  for (const p of parts) {
+    if (!p.startsWith("data: ")) continue;
+    try { events.push(JSON.parse(p.slice(6)) as T); } catch { /* skip bad frame */ }
+  }
+  return { events, rest };
+}
+
+/** Reads a `data: {json}` event stream to its end, calling onEvent per event. */
+export async function readEvents<T>(res: Response, onEvent: (e: T) => void): Promise<void> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: true });
+    const { events, rest } = parseSse<T>(buffer);
+    buffer = rest;
+    events.forEach(onEvent);
+    if (done) break;
+  }
+  parseSse<T>(buffer + "\n\n").events.forEach(onEvent);
+}
+
+export type ImportProgress = { stage: "upload" | "read" | "parts" | "faces"; done: number; total: number };
+type ImportEvent = ({ kind: "progress" } & ImportProgress) | ({ kind: "done" } & ImportResponse) | { kind: "error"; message: string };
+
+export async function importFile(file: File, scale: number,
+  onProgress?: (p: ImportProgress) => void): Promise<ImportResponse> {
   const form = new FormData();
   form.append("file", file);
-  return (await send(`/import?scale=${scale}`, { method: "POST", body: form })).json();
+  onProgress?.({ stage: "upload", done: 0, total: 0 });
+  const res = await send(`/import?scale=${scale}`, { method: "POST", body: form });
+  let result: ImportResponse | null = null;
+  let error: string | null = null;
+  await readEvents<ImportEvent>(res, (e) => {
+    if (e.kind === "progress") onProgress?.({ stage: e.stage, done: e.done, total: e.total });
+    else if (e.kind === "done") result = { bodies: e.bodies, applied_scale: e.applied_scale, warnings: e.warnings };
+    else error = e.message;
+  });
+  if (error) throw new ApiError(422, error);
+  if (!result) throw new ApiError(0, "The import ended early. Is the backend still running?");
+  return result;
 }
 
 export async function replacePart(

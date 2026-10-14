@@ -43,17 +43,24 @@ export function useRosSession(ctx: Ctx) {
   }
 
   async function refresh() {
-    try { const s = await api.sessionStatus(); if (mounted.current) setStatus(s); }
-    catch (e) { if (mounted.current) setError((e as Error).message); }
+    try {
+      const s = await api.sessionStatus();
+      // a dead container reports no stage: keep the last one seen so the panel can mark it
+      if (mounted.current) setStatus((p) => (s.state === "failed" && !s.stage ? { ...s, stage: p.stage } : s));
+    } catch (e) { if (mounted.current) setError((e as Error).message); }
   }
 
   useEffect(() => { void refresh(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {  // poll while starting (fast) and ready (detects a dead session)
+  useEffect(() => {  // poll while starting (fast) and ready (detects a dead session); never two at once
     if (status.state !== "starting" && status.state !== "ready") return;
-    const t = setInterval(refresh, status.state === "starting" ? POLL.starting : POLL.ready);
-    return () => clearInterval(t);
-  }, [status.state]);
+    const delay = status.state === "starting" ? POLL.starting : POLL.ready;
+    let stopped = false;
+    let t = 0;
+    const tick = async () => { await refresh(); if (!stopped) t = window.setTimeout(tick, delay); };
+    t = window.setTimeout(tick, delay);
+    return () => { stopped = true; clearTimeout(t); };
+  }, [status.state]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {  // live robot while ready
     if (status.state !== "ready" || !viewer) return;

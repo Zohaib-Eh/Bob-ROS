@@ -45,10 +45,10 @@ function Claude({ m, live, onRunAgain, busy }: { m: ClaudeMessage; live: boolean
 
 interface Props {
   messages: Message[]; live: ClaudeMessage | null; running: boolean; disabled: boolean; onSend(task: string): void;
-  onRunAgain?(path: string): void;
+  onRunAgain?(path: string): void; waiting?: string;
 }
 
-export default function Chat({ messages, live, running, disabled, onSend, onRunAgain }: Props) {
+export default function Chat({ messages, live, running, disabled, onSend, onRunAgain, waiting }: Props) {
   const [task, setTask] = useState("");
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [messages, live]);
@@ -63,6 +63,7 @@ export default function Chat({ messages, live, running, disabled, onSend, onRunA
         {live && <Claude m={live} live={true} busy={true} />}
         <div ref={end} />
       </div>
+      {waiting && <p className="muted chat-waiting">{waiting}</p>}
       <div className="prompt">
         <textarea aria-label="Describe a task" value={task} disabled={running || disabled} rows={3}
           placeholder="Describe a task, e.g. pick the box at (0.5, 0.2) and place it at (0.4, -0.3)"

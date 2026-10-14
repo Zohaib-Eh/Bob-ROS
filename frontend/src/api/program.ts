@@ -1,4 +1,4 @@
-import { json, send } from "./client";
+import { json, parseSse as sse, readEvents, send } from "./client";
 import type { Message } from "../model/chat";
 import type { Body, Joint, Link } from "./types";
 
@@ -9,7 +9,9 @@ export type ProgramEvent =
   | { kind: "run_result"; ok: boolean; message: string; output?: string }
   | { kind: "done"; summary: string; runs: number; ok: boolean; session_id: string | null; program: string | null; code: string | null }
   | { kind: "error"; message: string };
-export interface SessionStatus { state: "stopped" | "starting" | "ready" | "failed"; robot?: string | null; log?: string }
+export type Stage = "export" | "collisions" | "image" | "build" | "moveit" | "bridge" | "ready";
+export interface SessionStatus { state: "stopped" | "starting" | "ready" | "failed"; robot?: string | null;
+  stage?: Stage; done?: number; total?: number; log?: string; error?: string }
 
 export async function startSession(robotName: string, links: Link[], joints: Joint[],
   bodiesByLink: Record<string, Body[]>): Promise<SessionStatus> {
@@ -30,20 +32,21 @@ export interface FileEntry { path: string; editable: boolean }
 const put = (body: unknown): RequestInit => ({ ...json(body), method: "PUT" });
 const patch = (body: unknown): RequestInit => ({ ...json(body), method: "PATCH" });
 
-export async function listConversations(): Promise<ConversationInfo[]> {
-  return (await send("/program/conversations", { method: "GET" })).json();
+const q = (robot: string) => `?robot=${encodeURIComponent(robot)}`;
+export async function listConversations(robot: string): Promise<ConversationInfo[]> {
+  return (await send(`/program/conversations${q(robot)}`, { method: "GET" })).json();
 }
-export async function createConversation(title?: string): Promise<Conversation> {
-  return (await send("/program/conversations", json(title ? { title } : {}))).json();
+export async function createConversation(robot: string, title?: string): Promise<Conversation> {
+  return (await send(`/program/conversations${q(robot)}`, json(title ? { title } : {}))).json();
 }
-export async function getConversation(id: string): Promise<Conversation> {
-  return (await send(`/program/conversations/${id}`, { method: "GET" })).json();
+export async function getConversation(robot: string, id: string): Promise<Conversation> {
+  return (await send(`/program/conversations/${id}${q(robot)}`, { method: "GET" })).json();
 }
-export async function renameConversation(id: string, title: string): Promise<Conversation> {
-  return (await send(`/program/conversations/${id}`, patch({ title }))).json();
+export async function renameConversation(robot: string, id: string, title: string): Promise<Conversation> {
+  return (await send(`/program/conversations/${id}${q(robot)}`, patch({ title }))).json();
 }
-export async function deleteConversation(id: string): Promise<void> {
-  await send(`/program/conversations/${id}`, { method: "DELETE" });
+export async function deleteConversation(robot: string, id: string): Promise<void> {
+  await send(`/program/conversations/${id}${q(robot)}`, { method: "DELETE" });
 }
 export async function runConversation(id: string, task: string, onEvent: (e: ProgramEvent) => void,
   signal?: AbortSignal): Promise<void> {
@@ -65,30 +68,9 @@ export async function runFile(path: string, conversation: string | null): Promis
   return (await send("/program/files/run", json({ path, conversation }))).json();
 }
 
-export function parseSse(buffer: string): { events: ProgramEvent[]; rest: string } {
-  const parts = buffer.replace(/\r\n/g, "\n").split("\n\n");
-  const rest = parts.pop() ?? "";
-  const events: ProgramEvent[] = [];
-  for (const p of parts) {
-    if (!p.startsWith("data: ")) continue;
-    try { events.push(JSON.parse(p.slice(6)) as ProgramEvent); } catch { /* skip bad frame */ }
-  }
-  return { events, rest };
-}
+export const parseSse = (buffer: string) => sse<ProgramEvent>(buffer);
 
 async function streamEvents(path: string, body: unknown, onEvent: (e: ProgramEvent) => void,
   signal?: AbortSignal): Promise<void> {
-  const res = await send(path, { ...json(body), signal });
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (value) buffer += decoder.decode(value, { stream: true });
-    const { events, rest } = parseSse(buffer);
-    buffer = rest;
-    events.forEach(onEvent);
-    if (done) break;
-  }
-  parseSse(buffer + "\n\n").events.forEach(onEvent);
+  await readEvents<ProgramEvent>(await send(path, { ...json(body), signal }), onEvent);
 }

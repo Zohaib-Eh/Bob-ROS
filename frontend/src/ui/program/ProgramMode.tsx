@@ -7,17 +7,25 @@ import { applyEvent, emptyClaude, type ClaudeMessage } from "../../model/chat";
 import Chat from "./Chat";
 import ConversationList from "./ConversationList";
 import Workspace from "./Workspace";
+import StartupPanel, { stageText } from "./StartupPanel";
 import { useRosSession } from "./useRosSession";
+import { fmtElapsed, useElapsed } from "../useElapsed";
+
+const NO_CHAT = "";  // runningId for a Code-tab run with no chat open: still locks, matches no chat
 
 export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: ReactNode }) {
   const ros = useRosSession(ctx);
   const { status } = ros;
   const [convs, setConvs] = useState<ConversationInfo[]>([]);
   const [active, setActive] = useState<Conversation | null>(null);
-  const [running, setRunning] = useState(false);
-  const [live, setLive] = useState<ClaudeMessage | null>(null);
+  const [runningId, setRunningId] = useState<string | null>(null);  // the conversation a task runs in
+  const running = runningId !== null;
+  const [live, setLive] = useState<{ id: string; msg: ClaudeMessage } | null>(null);  // the streamed answer and its chat
   const abort = useRef<AbortController | null>(null);
-  const known = status.state === "ready" || status.state === "starting";
+  const robot = status.robot ?? ctx.robotName;  // conversations live in this robot's workspace
+  const [panel, setPanel] = useState(false);
+  const elapsed = useElapsed(status.state === "starting");
+  const showPanel = panel || status.state === "failed";
 
   const activeId = useRef<string | null>(null);
   const req = useRef(0);
@@ -31,20 +39,20 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     ros.setError(null);
     const token = ++req.current;
     try {
-      const list = await api.listConversations();
+      const list = await api.listConversations(robot);
       if (token !== req.current || !mounted.current) return;
       setConvs(list);
       const id = select === null ? list.find((c) => !c.broken)?.id : select ?? activeId.current ?? list.find((c) => !c.broken)?.id;
       if (!id) { if (select === null) setActive(null); return; }
-      const c = await api.getConversation(id);
+      const c = await api.getConversation(robot, id);
       if (token === req.current && mounted.current) setActive(c);
     } catch (e) { if (token === req.current && mounted.current) fail(e); }
   }
-  useEffect(() => { if (known) void reload(); }, [known]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void reload(); }, [robot]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function newConversation() {
     try {
-      const c = await api.createConversation();
+      const c = await api.createConversation(robot);
       req.current++;
       setActive(c);
       setConvs((cs) => [{ id: c.id, title: c.title, created: c.created, updated: c.updated }, ...cs]);
@@ -55,7 +63,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     let c = active;
     if (!c) {
       try {
-        c = await api.createConversation();
+        c = await api.createConversation(robot);
         if (!mounted.current) return;
         req.current++;
         setActive(c);
@@ -64,31 +72,31 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
       } catch (e) { fail(e); return; }
     }
     ros.setError(null);
-    const id = c.id;  // the stream writes only into this conversation; the sidebar is locked while running
+    const id = c.id;  // the stream writes only into this conversation, whichever one is open
     setActive((a) => (a && a.id === id ? { ...a, messages: [...a.messages, { role: "user", text: task }] } : a));
-    setRunning(true);
+    setRunningId(id);
     let msg = emptyClaude();
-    setLive(msg);
+    setLive({ id, msg });
     const ctl = new AbortController();
     abort.current = ctl;
     let failed = false;
     try {
-      await api.runConversation(id, task, (e) => { msg = applyEvent(msg, e); if (mounted.current) setLive(msg); }, ctl.signal);
+      await api.runConversation(id, task, (e) => { msg = applyEvent(msg, e); if (mounted.current) setLive({ id, msg }); }, ctl.signal);
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       failed = true;
       if (mounted.current) fail(e);
     }
     if (!mounted.current) return;
-    setRunning(false);
-    await reload(id);
+    setRunningId(null);
+    await reload();  // keeps whichever chat is open; the finished one reloads with its saved answer
     if (mounted.current) setLive(null);  // keep the streamed answer on screen until the saved one is loaded
     if (failed || msg.error) await ros.refresh();
   }
 
   async function rename(id: string, title: string) {
     try {
-      await api.renameConversation(id, title);
+      await api.renameConversation(robot, id, title);
       setConvs((cs) => cs.map((c) => (c.id === id ? { ...c, title } : c)));
       setActive((a) => (a?.id === id ? { ...a, title } : a));
     } catch (e) { fail(e); }
@@ -96,7 +104,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
 
   async function remove(id: string) {
     try {
-      await api.deleteConversation(id);
+      await api.deleteConversation(robot, id);
       await reload(activeId.current === id ? null : undefined);
     } catch (e) { fail(e); }
   }
@@ -145,12 +153,18 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
     const id = active.id;
     ros.setError(null);
     setPreviewTick((n) => n + 1);
-    setRunning(true);
+    setRunningId(id);
     try { await api.runFile(full(path), id); }
     catch (e) { fail(e); }
-    finally { if (mounted.current) setRunning(false); }
-    if (mounted.current) await reload(id);
+    finally { if (mounted.current) setRunningId(null); }
+    if (mounted.current) await reload();  // keeps whichever chat is open
   }
+
+  const busyWhy = running ? "A task is running. Wait for it to finish first." : undefined;
+  const runningTitle = convs.find((c) => c.id === runningId)?.title ?? "another chat";
+  const waiting = runningId !== null && runningId !== active?.id ? `Waiting for task in “${runningTitle}”…`
+    : status.state === "starting" ? `Waiting for ROS… (${stageText(status)})`
+    : status.state !== "ready" ? "Start ROS to send a task." : undefined;
 
   const changed = useMemo(() => {
     const out = new Set<string>();
@@ -164,43 +178,48 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
   return (
     <div className="program-mode">
       <header className="program-bar">
-        <button className="btn" onClick={() => ctx.goTo("export")} disabled={running}><ArrowLeft size={14} />Back to robot</button>
+        <button className="btn" onClick={() => ctx.goTo("export")} disabled={running} title={busyWhy}><ArrowLeft size={14} />Back to robot</button>
         <strong>{ctx.robotName}</strong>
         <span className={`dot ${status.state}`} />
-        <span className="muted">
-          {status.state === "starting" && "Starting ROS… (first start builds the workspace)"}
-          {status.state === "ready" && "ROS ready"}
-          {status.state === "failed" && "ROS session stopped"}
-          {status.state === "stopped" && "ROS not running"}
-        </span>
+        {status.state === "starting" || status.state === "failed" ? (
+          <span className="startup-anchor">
+            <button className="btn btn-ghost startup-pill" aria-expanded={showPanel} onClick={() => setPanel((p) => !p)}>
+              {status.state === "failed" ? "ROS session stopped" : `Starting ROS · ${stageText(status)} · ${fmtElapsed(elapsed)}`}
+            </button>
+            {showPanel && <StartupPanel status={status} />}
+          </span>
+        ) : (
+          <span className="muted">{status.state === "ready" ? "ROS ready" : "ROS not running"}</span>
+        )}
         <span className="spacer" />
         {status.state === "stopped" || status.state === "failed"
           ? <button className="btn" onClick={() => void ros.start()}><Play size={14} />Start ROS</button>
-          : <button className="btn" onClick={() => void ros.stop()} disabled={ros.busy || running}><Square size={14} />Stop ROS</button>}
+          : <button className="btn" onClick={() => void ros.stop()} disabled={ros.busy || running} title={busyWhy}><Square size={14} />Stop ROS</button>}
         {(status.state === "ready" || status.state === "failed") &&
-          <button className="btn" onClick={() => void ros.restart()} disabled={ros.busy || running}><RotateCcw size={14} />Restart session</button>}
+          <button className="btn" onClick={() => void ros.restart()} disabled={ros.busy || running} title={busyWhy}><RotateCcw size={14} />Restart session</button>}
       </header>
       {ros.error && <p className="error program-error">{ros.error}</p>}
-      {status.state === "failed" && status.log && <pre className="log program-error">{status.log}</pre>}
       <div className="program-columns">
-        <ConversationList items={convs} active={active?.id ?? null} disabled={running || !known}
+        <ConversationList items={convs} active={active?.id ?? null} runningId={runningId}
           onSelect={(id) => void reload(id)} onNew={() => void newConversation()}
           onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
         <section className="chat-column" data-testid="chat-slot">
-          <Chat messages={active?.messages ?? []} live={live} running={running} disabled={status.state !== "ready"} onSend={(t) => void send(t)}
-            onRunAgain={(p) => void runAgain(p)} />
+          <Chat messages={active?.messages ?? []} live={live && active?.id === live.id ? live.msg : null} running={active?.id === runningId}
+            disabled={!!waiting} waiting={waiting} onSend={(t) => void send(t)} onRunAgain={(p) => void runAgain(p)} />
         </section>
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
-            onRan={(id) => void reload(id)} onRunning={(r) => { if (mounted.current) setRunning(r); }} showPreview={previewTick}
+            onRan={() => void reload()}
+            onRunning={(r) => { if (mounted.current) setRunningId(r ? activeId.current ?? NO_CHAT : null); }} showPreview={previewTick}
             overlay={pick && (
               <div className="preview-run" data-testid="preview-run">
-                <select aria-label="Program to run" value={pick} disabled={running}
+                <select aria-label="Program to run" value={pick} disabled={running} title={busyWhy}
                   onChange={(e) => { if (e.target.value === "__all__") setShowAll(true); else setChosen(e.target.value); }}>
                   {pickable.map((p) => <option key={p} value={p}>{p.split("/").pop()}</option>)}
                   {!showAll && <option value="__all__">All programs…</option>}
                 </select>
                 <button className="btn btn-primary" disabled={running || status.state !== "ready"}
+                  title={busyWhy ?? (status.state !== "ready" ? "Waiting for ROS…" : undefined)}
                   onClick={() => void runAgain(pick)}><Play size={14} />Run</button>
               </div>
             )} />

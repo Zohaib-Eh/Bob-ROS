@@ -89,3 +89,10 @@ def test_mesh_path_cannot_leave_the_package(robot, tmp_path):
     urdf = _urdf().replace("package://r/meshes/l2.stl", "package://r/../../x.stl")
     with pytest.raises(ValueError, match="leaves the package"):
         link_meshes(urdf, tmp_path)
+
+
+def test_disabled_pairs_reports_progress(robot):
+    chain, meshes = robot
+    seen = []
+    disabled_pairs(chain, meshes, samples=600, on_progress=lambda d, t: seen.append((d, t)))
+    assert seen[-1] == (600, 600) and all(t == 600 for _, t in seen)

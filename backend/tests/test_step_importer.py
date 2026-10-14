@@ -327,3 +327,11 @@ def test_plane_face_centre_is_its_hole_centre(tmp_path):
 def test_plane_face_without_circles_is_centred_on_its_area(box_step_path):
     side = _plane_with_normal(import_step(box_step_path)[0], (1, 0, 0))   # 1 x 2 x 3 box
     assert side.center == pytest.approx((1.0, 1.0, 1.5), abs=1e-6)
+
+
+def test_import_cad_reports_parts_progress(box_step_path):
+    seen = []
+    import_cad(box_step_path, on_progress=lambda s, d, t: seen.append((s, d, t)))
+    assert seen[0] == ("read", 0, 0)
+    parts = [x for x in seen if x[0] == "parts"]
+    assert parts and parts[-1][1] == parts[-1][2] and [p[1] for p in parts] == list(range(1, len(parts) + 1))
