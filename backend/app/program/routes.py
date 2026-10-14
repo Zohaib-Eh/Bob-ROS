@@ -17,6 +17,8 @@ router = APIRouter(prefix="/program")
 def start_session(req: ExportRequest) -> dict:
     try:
         return session.start(req.robot_name, req.links, req.joints, req.bodies_by_link)
+    except session.SessionBusy as exc:
+        raise HTTPException(409, str(exc))
     except session.SessionError as exc:
         raise HTTPException(503, str(exc))
     except ValueError as exc:

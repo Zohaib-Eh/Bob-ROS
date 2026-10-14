@@ -20,7 +20,7 @@ def _robot_name(z: zipfile.ZipFile) -> str:
     return found[0]
 
 
-def workspace_from_zip(zip_source: Path | bytes, out_dir: Path, samples: int = 10000) -> str:
+def workspace_from_zip(zip_source: Path | bytes, out_dir: Path, samples: int = 10000, on_progress=None) -> str:
     """Generate <out_dir>/src from a cad-to-urdf export zip (path or bytes). Returns the robot name."""
     import io
     src = io.BytesIO(zip_source) if isinstance(zip_source, bytes) else zip_source
@@ -28,7 +28,8 @@ def workspace_from_zip(zip_source: Path | bytes, out_dir: Path, samples: int = 1
         robot = _robot_name(z)
         z.extractall(tmp)
         name = "upload.zip" if isinstance(zip_source, bytes) else Path(zip_source).name
-        generate(robot, Path(tmp) / robot, Path(out_dir) / "src", source=name, samples=samples)
+        generate(robot, Path(tmp) / robot, Path(out_dir) / "src", source=name, samples=samples,
+                 on_progress=on_progress)
     return robot
 
 

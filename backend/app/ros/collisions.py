@@ -49,7 +49,9 @@ def _random_q(chain: Chain, rng) -> list[float]:
             for j in chain.joints]
 
 
-def disabled_pairs(chain: Chain, meshes, samples: int = 10000, seed: int = 0) -> dict[tuple[str, str], str]:
+def disabled_pairs(chain: Chain, meshes, samples: int = 10000, seed: int = 0,
+                   on_progress=None) -> dict[tuple[str, str], str]:
+    """`on_progress(done, total)` is called every 250 samples and once at the end."""
     objs = {n: fcl_object(v, f) for n, (v, f) in meshes.items()}
     names = sorted(objs)
 
@@ -71,11 +73,15 @@ def disabled_pairs(chain: Chain, meshes, samples: int = 10000, seed: int = 0) ->
             out[p] = "Default"
     open_pairs = [p for p in open_pairs if p not in out]
     rng = np.random.default_rng(seed)
-    for _ in range(samples):
+    for i in range(samples):
         if not open_pairs:
             break
         place(_random_q(chain, rng))
         open_pairs = [p for p in open_pairs if not collides(objs[p[0]], objs[p[1]])]
+        if on_progress and (i + 1) % 250 == 0:
+            on_progress(i + 1, samples)
+    if on_progress:
+        on_progress(samples, samples)
     for p in open_pairs:
         out[p] = "Never"
     return out
