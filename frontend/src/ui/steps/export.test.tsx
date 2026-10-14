@@ -38,14 +38,16 @@ describe("ExportStep", () => {
     expect(screen.getByTestId("check-names").className).toMatch(/bad/);
   });
 
-  it("exports the directed request and downloads the zip", async () => {
+  it("Continue to Simulate validates on the server and opens Simulate without downloading", async () => {
     const spy = vi.spyOn(client, "exportRobot").mockResolvedValue({ blob: new Blob(["z"]), warnings: [] });
     const dl = vi.spyOn(download, "downloadBlob").mockImplementation(() => {});
     ui(ready());
     expect(screen.getByTestId("summary").textContent).toMatch(/2 links · 1 joints · 2 meshes/);
-    await act(async () => { fireEvent.click(screen.getByTestId("export")); });
+    expect(screen.queryByText(/export urdf \(\.zip\)/i)).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /continue to simulate/i })); });
     expect(spy).toHaveBeenCalledWith("robot", expect.any(Array), [expect.objectContaining({ id: "j" })], expect.any(Object));
-    expect(dl).toHaveBeenCalledWith(expect.any(Blob), "robot.zip");
+    expect(dl).not.toHaveBeenCalled();
+    expect(state().step).toBe("program");
   });
 
   it("shows server errors with link names", async () => {

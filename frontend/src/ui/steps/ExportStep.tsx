@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Download, Play, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Play, X } from "lucide-react";
 import { useState } from "react";
 import type { Joint } from "../../api/types";
 import { exportRobot } from "../../api/client";
@@ -9,7 +9,6 @@ import { NAME_RE } from "../../model/types";
 import { jointMotion, previewRange, subtreeLinks } from "../../viewer/preview";
 import type { Viewer } from "../../viewer/Viewer";
 import type { Ctx } from "../ctx";
-import { downloadBlob } from "../download";
 import Info from "../Info";
 import { withNames } from "../useLinkMass";
 
@@ -51,9 +50,9 @@ export default function ExportStep({ ctx }: { ctx: Ctx }) {
     setBusy(true);
     setServer([]);
     try {
-      const { blob, warnings } = await exportRobot(robotName, req.links, req.joints, req.bodiesByLink);
-      downloadBlob(blob, `${robotName}.zip`);
-      notify(warnings.length ? `Exported with notes: ${warnings.map((w) => w.message).join(" ")}` : null);
+      const { warnings } = await exportRobot(robotName, req.links, req.joints, req.bodiesByLink);  // server-side checks
+      goTo("program");
+      notify(warnings.length ? `Notes: ${warnings.map((w) => w.message).join(" ")}` : null);
     } catch (e) {
       const { byLink, byJoint, general } = splitExportError((e as Error).message);
       const label = (id: string) => {
@@ -109,7 +108,7 @@ export default function ExportStep({ ctx }: { ctx: Ctx }) {
         </label>
         <button className="btn btn-primary" data-testid="export" disabled={!!blocked || busy}
           title={blocked ? blocked.detail ?? blocked.label : ""} onClick={() => void onExport()}>
-          <Download size={14} />{busy ? "Exporting…" : "Export URDF (.zip)"}
+          {busy ? "Checking…" : <>Continue to Simulate <ArrowRight size={14} /></>}
         </button>
       </div>
     </section>
