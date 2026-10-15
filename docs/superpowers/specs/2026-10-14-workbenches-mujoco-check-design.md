@@ -114,3 +114,9 @@ It runs by itself when Simulate opens and the model changed since the last check
   - The Max torque field: empty → null, a number → value; the placeholder shows the suggestion.
   - The Physics card renders ok, sag and crash results.
 - **Real-app check:** irb1300 holds pose with suggested torques. Setting link2's torque to 10 fails with a sag message naming link2.
+
+## Findings (Task 8, real irb1300)
+
+- The irb1300 exports fine (64 s including the STEP import), but **MuJoCo rejects it**: `link5`'s inertia has negative eigenvalues (URDF `ixx = -0.00273`, `iyy = -0.00146`). As designed, the export falls back to effort 100 for every joint and ships no `mjcf/`. The Physics card reports "Model won't load: … inertia must have positive eigenvalues … link5".
+- Cause, traced: `compute_link_mass_properties` integrates signed tetrahedra over the merged link mesh. `link5`'s mesh gives eigenvalues (−0.00107, −0.00094, 0.00085) × 10⁻³ kg·m², a non-physical tensor from mixed-orientation or overlapping shells inside the link. It is a pre-existing mass-properties bug that ROS/MoveIt never exercised, because they don't simulate dynamics. `link4` and `link6` are positive definite.
+- Next step (its own fix, outside this plan): make link mass properties robust to badly oriented or overlapping part shells, e.g. per-part properties summed with the parallel-axis theorem, fixing winding per part. Then re-run the irb1300 hold check.
