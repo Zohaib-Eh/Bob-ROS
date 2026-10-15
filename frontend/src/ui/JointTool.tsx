@@ -26,6 +26,8 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
   const { model, dispatch, jointDraft: d, setJointDraft, pick, setPick, viewer } = ctx;
   const [animating, setAnimating] = useState(false);
   const suggestions = useEffortSuggestions(ctx);
+  // what was typed in Max torque, so "0" or "0." on the way to "0.18" is not wiped by the parsed value
+  const [effortText, setEffortText] = useState<{ id: string; text: string } | null>(null);
   const stored = d ? model.joints.find((j) => j.id === d.id) ?? null : null;
   const opened = useRef({ id: d?.id ?? null, stored });
 
@@ -201,7 +203,8 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
           {slider ? "Max force" : "Max torque"}
           <input className="field" data-testid="max-effort" type="number" step="any" min="0" style={{ width: 120 }}
             placeholder={suggestions[d.id] ? `auto · ${suggestions[d.id]} ${slider ? "N" : "N·m"}` : "auto"}
-            value={d.maxEffort ?? ""} onChange={(e) => set({ maxEffort: parseEffort(e.target.value) })} />
+            value={effortText?.id === d.id ? effortText.text : d.maxEffort ?? ""}
+            onChange={(e) => { setEffortText({ id: d.id, text: e.target.value }); set({ maxEffort: parseEffort(e.target.value) }); }} />
         </label>
       )}
       {d.motion === "revolute" && (

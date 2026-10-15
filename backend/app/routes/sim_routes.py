@@ -24,5 +24,6 @@ def simulate_check(req: ExportRequest) -> dict:
     """Hold home pose for 2 s in MuJoCo; problems come back as results, never as errors."""
     try:
         return run_in_child(check.physics_check, req.robot_name, req.links, req.joints, req.bodies_by_link)
-    except ChildFailed:
-        return {"ok": False, "kind": "crash", "message": "The physics check crashed."}
+    except ChildFailed as exc:
+        why = "took longer than 60 s" if str(exc) == "timed out" else "crashed"
+        return {"ok": False, "kind": "crash", "message": f"The physics check {why}."}

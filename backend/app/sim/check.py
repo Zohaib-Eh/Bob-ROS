@@ -17,16 +17,28 @@ def _name(m, kind, i) -> str:
     return mujoco.mj_id2name(m, kind, i) or f"#{i}"
 
 
-def _blew_up(d) -> bool:
-    return (not (np.all(np.isfinite(d.qpos)) and np.all(np.isfinite(d.qvel)))
-            or d.warning[mujoco.mjtWarning.mjWARN_BADQACC].number > 0)
+_BAD = (mujoco.mjtWarning.mjWARN_BADQACC, mujoco.mjtWarning.mjWARN_BADQVEL, mujoco.mjtWarning.mjWARN_BADQPOS)
+
+
+def _blow_up_link(m, d) -> str | None:
+    """MuJoCo resets the state itself when it goes bad and records which dof (or qpos) did it."""
+    for w in _BAD:
+        if d.warning[w].number > 0:
+            i = int(d.warning[w].lastinfo)
+            if w == mujoco.mjtWarning.mjWARN_BADQPOS:
+                joint = max((j for j in range(m.njnt) if m.jnt_qposadr[j] <= i), default=0,
+                            key=lambda j: m.jnt_qposadr[j])
+            else:
+                joint = int(m.dof_jntid[min(i, m.nv - 1)]) if m.nv else 0
+            return _name(m, mujoco.mjtObj.mjOBJ_BODY, m.jnt_bodyid[joint]) if m.njnt else "the robot"
+    return None
 
 
 def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict:
     """Hold home pose (0, clamped into the limits) with the motors for `seconds` of simulated time."""
     try:
         m = compile_mjcf(xml, meshes)
-    except ValueError as exc:  # MuJoCo reports compile errors as ValueError
+    except (ValueError, mujoco.FatalError) as exc:  # MuJoCo reports compile errors as ValueError
         return {"ok": False, "kind": "load", "message": f"Model won't load: {exc}"}
     d = mujoco.MjData(m)
     home = np.zeros(m.nq)
@@ -39,13 +51,11 @@ def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict
         d.ctrl[a] = home[m.jnt_qposadr[m.actuator_trnid[a][0]]]
     for step in range(int(round(seconds / m.opt.timestep))):
         mujoco.mj_step(m, d)
-        if _blew_up(d):
-            speeds = [float(np.linalg.norm(d.cvel[b])) if np.all(np.isfinite(d.cvel[b])) else math.inf
-                      for b in range(1, m.nbody)]
-            link = _name(m, mujoco.mjtObj.mjOBJ_BODY, 1 + int(np.argmax(speeds))) if speeds else "the robot"
-            t = round((step + 1) * m.opt.timestep, 2)
+        link = _blow_up_link(m, d)
+        if link:
+            t = round((step + 1) * m.opt.timestep, 3)
             return {"ok": False, "kind": "unstable", "link": link,
-                    "message": f"Simulation blew up after {t} s: check {link}'s mass and inertia."}
+                    "message": f"Simulation blew up after {t:g} s: check {link}'s mass and inertia."}
     worst = None
     for j in range(m.njnt):
         kind = m.jnt_type[j]
@@ -83,7 +93,7 @@ def physics_check(robot_name, links, joints, bodies_by_link) -> dict:
     if path not in z.namelist():  # MuJoCo couldn't load it at export: rebuild to get its reason
         try:
             build_mjcf(z.read(f"{robot_name}/urdf/{robot_name}.urdf").decode(), meshes, None)
-        except ValueError as exc:
+        except (ValueError, mujoco.FatalError) as exc:
             return {"ok": False, "kind": "load", "message": f"Model won't load: {exc}"}
         return {"ok": False, "kind": "load", "message": "Model won't load."}
     return hold_check(z.read(path).decode(), meshes)

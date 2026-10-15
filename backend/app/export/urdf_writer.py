@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 from xml.dom import minidom
 
+import mujoco
 import numpy as np
 import trimesh
 
@@ -301,14 +302,14 @@ def export_package(
     urdf = export_urdf(robot_name, links, joints, bodies_by_link)  # structural errors raise here
     try:
         sug = _suggested_from(urdf, links, joints, meshes)
-    except ValueError:
+    except (ValueError, mujoco.FatalError):
         sug = {}
     efforts = {j.id: j.max_effort or sug.get(j.id, 100.0) for j in joints}
     urdf = export_urdf(robot_name, links, joints, bodies_by_link, efforts)
     names = _joint_names(joints, {l.id: l for l in links})
     try:
         mjcf = build_mjcf(urdf, meshes, {names[j.id]: efforts[j.id] for j in joints})  # fixed joints get no motor
-    except ValueError:
+    except (ValueError, mujoco.FatalError):
         mjcf = None
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:

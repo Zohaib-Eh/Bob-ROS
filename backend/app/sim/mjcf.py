@@ -2,12 +2,15 @@
 import os
 import re
 import tempfile
+import threading
 import xml.etree.ElementTree as ET
 
 import mujoco
 
 TIMESTEP = 0.002
 HOLD_ERROR = 0.05  # rad (or m) of error at which a motor gives full torque: kp = E / HOLD_ERROR
+STIFF = 0.1  # kp <= STIFF * inertia / timestep²: a stiffer motor on a light link oscillates instead of holding
+_last_xml = threading.Lock()  # mj_saveLastXML saves MuJoCo's process-wide "last loaded model"
 
 
 def _urdf_for_mujoco(urdf: str) -> str:
@@ -44,11 +47,12 @@ def _exclude_touching_at_home(root, model: mujoco.MjModel) -> None:
 def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | None) -> str:
     """MJCF text for our URDF. `meshes` maps "<link>.stl" to bytes; `efforts` maps URDF joint names to
     motor strength (None = no motors). Meshes are referenced from ../meshes, next to urdf/."""
-    model = mujoco.MjModel.from_xml_string(_urdf_for_mujoco(urdf), meshes)
     fd, path = tempfile.mkstemp(suffix=".xml")
     os.close(fd)
     try:
-        mujoco.mj_saveLastXML(path, model)
+        with _last_xml:
+            model = mujoco.MjModel.from_xml_string(_urdf_for_mujoco(urdf), meshes)
+            mujoco.mj_saveLastXML(path, model)
         root = ET.parse(path).getroot()
     finally:
         os.unlink(path)
@@ -68,10 +72,13 @@ def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | 
             act = ET.SubElement(root, "actuator")
         for j in root.iter("joint"):
             name = j.get("name")
-            if name in efforts:
+            jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name) if name else -1
+            if name in efforts and jid >= 0:
                 e = float(efforts[name])
+                inertia = float(model.dof_M0[model.jnt_dofadr[jid]])
+                kp = min(e / HOLD_ERROR, STIFF * inertia / TIMESTEP ** 2)
                 ET.SubElement(act, "position", {
-                    "name": f"{name}_motor", "joint": name, "kp": repr(e / HOLD_ERROR), "dampratio": "1",
+                    "name": f"{name}_motor", "joint": name, "kp": repr(kp), "dampratio": "1",
                     "forcelimited": "true", "forcerange": f"{-e:g} {e:g}"})
     _exclude_touching_at_home(root, model)
     return ET.tostring(root, encoding="unicode")

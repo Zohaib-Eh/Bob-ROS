@@ -115,6 +115,17 @@ describe("JointTool", () => {
     expect(state().jointDraft.maxEffort).toBeNull();
   });
 
+  it("Max torque accepts values below 1, typed digit by digit", () => {  // review I-4
+    both(withSuggestion(base(), J({})));
+    fireEvent.click(screen.getByTestId("next-joint"));
+    const field = () => screen.getByTestId("max-effort") as HTMLInputElement;
+    for (const text of ["0", "0.1", "0.18"]) {
+      fireEvent.change(field(), { target: { value: text } });
+      expect(field().value).toBe(text);  // a half-typed number is never wiped
+    }
+    expect(state().jointDraft.maxEffort).toBe(0.18);
+  });
+
   it("a manual rigid joint between picked parts", () => {
     both(base());
     fireEvent.click(screen.getByTestId("next-joint"));    // no suggestion: parts and origin pre-filled
