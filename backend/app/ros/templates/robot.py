@@ -20,6 +20,7 @@ from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
 from std_msgs.msg import String
 
+import grip_logic
 import sim_errors
 
 ROBOT = "__ROBOT__"
@@ -61,6 +62,10 @@ class PlanningFailed(RobotError):
 
 class UnknownObject(RobotError):
     pass
+
+
+class GripError(RobotError):
+    """The gripper caught nothing, an object doesn't fit, or a held object slipped."""
 
 
 class MotionError(RobotError):
@@ -163,6 +168,16 @@ class Robot:
         self._glue = n.create_publisher(String, "/sim/glue", 10)
         n.create_subscription(String, "/sim/glued", self._on_glued,
                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self._holding = None          # (name, object pose in the tool frame when gripped)
+        self._sim_poses = {}          # object -> 4x4 world pose, straight from MuJoCo
+        if self.chain.gripper is not None:
+            from control_msgs.action import ParallelGripperCommand
+            self._gripper = ActionClient(n, ParallelGripperCommand, "/gripper_controller/gripper_cmd")
+            if not self._gripper.wait_for_server(timeout_sec=30):
+                raise PlanningFailed("The gripper controller is not running")
+        if _PHYSICS:
+            from mujoco_ros2_control_msgs.msg import FreeJointStateArray
+            n.create_subscription(FreeJointStateArray, "/sim/free_joint_states", self._on_sim_poses, 10)
         for c in (self._cartesian, self._apply, self._get):
             if not c.wait_for_service(timeout_sec=30):
                 raise PlanningFailed(f"MoveIt service {c.srv_name} is not available")
@@ -230,6 +245,10 @@ class Robot:
         a.object.id = name
         a.object.operation = op
         a.touch_links = [self.chain.tip, self.chain.joints[-1].parent]   # flange and the wrist it sits on
+        g = self.chain.gripper
+        if g is not None:   # the gripper's base and fingers hold it
+            a.touch_links += [g.base] + [l for l, (seg, _) in self.chain.links.items()
+                                         if l not in (g.base, self.chain.tip) and seg == len(self.chain.joints)]
         return a
 
     def _gap(self, name) -> float:
@@ -248,6 +267,8 @@ class Robot:
         return float(np.linalg.norm(out))
 
     def attach(self, name):
+        if self.chain.gripper is not None:
+            return self.grip(name)
         world, attached = self._scene()
         if name not in world:
             raise UnknownObject(f"'{name}' is not a free object in the scene "
@@ -263,6 +284,8 @@ class Robot:
         self._diff(attached=[self._attached(name, CollisionObject.ADD)])
 
     def detach(self, name):
+        if self.chain.gripper is not None:
+            return self.release()
         _, attached = self._scene()
         if name not in attached:
             raise UnknownObject(f"'{name}' is not attached to the tool (attached: {', '.join(attached) or 'none'})")
@@ -272,6 +295,9 @@ class Robot:
 
     def pose(self, name):
         """Where object `name` really is now: (xyz, rpy) in the base frame."""
+        if name in self._sim_poses:   # MuJoCo's own pose (MoveIt's copy of a held object never slips)
+            M = self._sim_poses[name]
+            return tuple(float(v) for v in M[:3, 3]), _rpy(M[:3, :3])
         req = GetPlanningScene.Request()
         req.components.components = (PlanningSceneComponents.WORLD_OBJECT_GEOMETRY
                                      | PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS)
@@ -286,6 +312,84 @@ class Robot:
         if o.header.frame_id and o.header.frame_id != self.chain.base:  # attached: in the tool frame
             M = self._kin.fk(self._current()) @ M
         return tuple(float(v) for v in M[:3, 3]), _rpy(M[:3, :3])
+
+    def _on_sim_poses(self, m):
+        for s in m.free_joints:
+            p = s.pose.pose
+            M = _pose_matrix(p)
+            self._sim_poses[s.name] = M
+
+    def _gripper_cmd(self, position):
+        from control_msgs.action import ParallelGripperCommand
+        goal = ParallelGripperCommand.Goal()
+        goal.command.name = [self.chain.gripper.leader]
+        goal.command.position = [float(position)]
+        self._run(self._gripper, goal, 30)
+        self._settle()
+
+    def gripper_width(self):
+        """Opening left before the fingers are fully closed (m)."""
+        g = self.chain.gripper
+        if g is None:
+            raise GripError("This robot has no gripper")
+        self._current()
+        return 2 * (g.upper - self._joints.get(g.leader, g.lower))
+
+    def _tool_matrix(self):
+        return self._kin.fk(self._current())
+
+    def _object_matrix(self, name):
+        if name in self._sim_poses:
+            return self._sim_poses[name]
+        xyz, rpy = self.pose(name)
+        return _matrix(xyz, rpy)
+
+    def release(self):
+        """Open the gripper fully; a held object is let go (it falls or stays where it is)."""
+        if self.chain.gripper is None:
+            raise GripError("This robot has no gripper")
+        self._gripper_cmd(self.chain.gripper.lower)
+        if self._holding:
+            name, _ = self._holding
+            self._holding = None
+            _, attached = self._scene()
+            if name in attached:
+                self._diff(attached=[self._attached(name, CollisionObject.REMOVE)])
+
+    def grip(self, name=None):
+        """Close the gripper on the object between the fingers; it is then carried with the tool."""
+        g = self.chain.gripper
+        if g is None:
+            raise GripError("This robot has no gripper; use attach(name)")
+        world, _ = self._scene()
+        if name is not None and name not in world:
+            raise UnknownObject(f"'{name}' is not a free object in the scene (objects: {', '.join(world) or 'none'})")
+        obj = next((o for o in _meta()["objects"] if o["name"] == name), None)
+        if obj is not None:
+            T = self._tool_matrix()
+            wide = grip_logic.fits(obj, T[:3, :3] @ np.asarray(g.closing_axis_tcp, float), 2 * (g.upper - g.lower))
+            if wide is not None:
+                raise GripError(f"'{name}' is {wide:.2f} m wide; the gripper opens to {2 * (g.upper - g.lower):.2f} m.")
+        self._gripper_cmd(g.upper)
+        if _PHYSICS and grip_logic.outcome(self.gripper_width(), 0.0) == "empty":
+            raise GripError(f"The gripper closed on nothing: no object between the fingers at {_fmt(self.tool_pose()[0])}.")
+        if name is None:
+            if not world:
+                raise GripError("Nothing to grip: the scene has no objects")
+            name = min(world, key=self._gap)
+        self._diff(attached=[self._attached(name, CollisionObject.ADD)])
+        self._holding = (name, np.linalg.inv(self._tool_matrix()) @ self._object_matrix(name))
+
+    def _slip_check(self):
+        if not (_PHYSICS and self._holding):
+            return
+        name, before = self._holding
+        now = np.linalg.inv(self._tool_matrix()) @ self._object_matrix(name)
+        if grip_logic.slipped(before, now):
+            self._holding = None
+            m = _meta()["masses"].get(name, 0.0)
+            raise GripError(f"'{name}' slipped out of the gripper while moving ({m:g} kg, "
+                            f"grip force {self.chain.gripper.effort:g} N per finger).")
 
     def _load_run_objects(self):
         """Put the run's objects (workcell + SCENE, from sim_ctl) into MoveIt at their start poses."""
@@ -328,6 +432,9 @@ class Robot:
             raise MotionError(sim_errors.lag_message(names, planned, pos, m["efforts"], carrying, hinge))
 
     def reset(self):
+        self._holding = None
+        if self.chain.gripper is not None:
+            self._gripper_cmd(self.chain.gripper.lower)
         self._clear_scene()
         self._load_run_objects()  # workcell + SCENE (sim_ctl.prepare); under MuJoCo the sim already holds them
         self.home()
@@ -433,9 +540,11 @@ class Robot:
             T = T @ M
         return out
 
-    def tool_facing(self, direction) -> tuple:
-        """rpy that points the tool (the flange, along the last joint's axis, away from the arm) toward
-        `direction` in the base frame, turning the home orientation as little as possible."""
+    def tool_facing(self, direction, yaw=None) -> tuple:
+        """rpy that points the tool (the flange, along the last joint's axis, away from the arm; with a
+        gripper, its tool point's z) toward `direction` in the base frame, turning the home orientation
+        as little as possible. yaw (radians): turn about that axis so the jaws close along
+        (cos yaw, sin yaw) in the base x-y plane."""
         d = np.asarray(direction, float)
         if np.linalg.norm(d) < 1e-9:
             raise ValueError("tool_facing needs a non-zero direction")
@@ -443,10 +552,13 @@ class Robot:
         q = _home(self.chain)
         T = self._kin.fk(q)
         R = T[:3, :3]
-        a = R @ np.asarray(self.chain.joints[-1].axis, float)          # approach axis in the base frame
-        # the axis may point either way: outward is away from the rest of the arm (the earlier joint frames)
-        if sum(float(a @ (p - T[:3, 3])) for p in (F[:3, 3] for F in self._joint_frames(q)[:-1])) > 0:
-            a = -a
+        if self.chain.gripper is not None:
+            a = R[:, 2]                                                # the tool point's z is the approach
+        else:
+            a = R @ np.asarray(self.chain.joints[-1].axis, float)      # approach axis in the base frame
+            # the axis may point either way: outward is away from the rest of the arm (the earlier joint frames)
+            if sum(float(a @ (p - T[:3, 3])) for p in (F[:3, 3] for F in self._joint_frames(q)[:-1])) > 0:
+                a = -a
         v, c = np.cross(a, d), float(a @ d)
         if np.linalg.norm(v) < 1e-9 and c > 0:
             turn = np.eye(3)
@@ -457,11 +569,15 @@ class Robot:
         else:
             vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
             turn = np.eye(3) + vx + vx @ vx * (1 / (1 + c))
-        return _rpy(turn @ R)
+        R = turn @ R
+        if yaw is not None:
+            closing = self.chain.gripper.closing_axis_tcp if self.chain.gripper is not None else (1.0, 0.0, 0.0)
+            R = grip_logic.yaw_rotation(R, np.asarray(closing, float), float(yaw))
+        return _rpy(R)
 
-    def tool_down(self) -> tuple:
-        """rpy with the tool pointing straight down (tool_facing((0, 0, -1)))."""
-        return self.tool_facing((0, 0, -1))
+    def tool_down(self, yaw=None) -> tuple:
+        """rpy with the tool pointing straight down (tool_facing((0, 0, -1), yaw))."""
+        return self.tool_facing((0, 0, -1), yaw)
 
     def _run(self, client, goal, timeout):
         handle = _wait(client.send_goal_async(goal), 30)
@@ -502,6 +618,7 @@ class Robot:
         if res.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(res.error_code.val, what)
         self._settle()
+        self._slip_check()
 
     def move_to(self, xyz, rpy=None):
         if rpy is None:
@@ -598,3 +715,4 @@ class Robot:
         if out.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(out.error_code.val, f"straight line to {_fmt(xyz)}")
         self._settle()
+        self._slip_check()

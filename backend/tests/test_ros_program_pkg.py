@@ -121,7 +121,7 @@ def test_bearing_is_the_home_reach_direction(tmp_path):
 def test_library_has_position_only_moves_and_tool_down(ws):
     lib = (ws / "bot_program" / "robot.py").read_text()
     assert "def move_to(self, xyz, rpy=None)" in lib and "def move_line(self, xyz, rpy=None)" in lib
-    assert "def tool_down(self)" in lib and "def _position_ik(self" in lib and "def tool_facing(self, direction)" in lib
+    assert "def tool_down(self, yaw=None)" in lib and "def _position_ik(self" in lib and "def tool_facing(self, direction, yaw=None)" in lib
 
 
 def test_glue_package_is_generated(ws):
@@ -200,3 +200,30 @@ def test_brief_lists_the_workcell_objects(ws, tmp_path):
     workspace_from_zip(two_joint_zip(tmp_path, name="bot"), ws.parent, samples=50)
     text = (ws / "bot_program" / "brief.md").read_text(encoding="utf-8")
     assert "- table: box 1 × 0.5 × 0.05 m at (0.6, 0, 0.3), fixed" in text
+
+
+@pytest.fixture
+def wsg(tmp_path):
+    from tests.ros_helpers import six_axis_with_gripper_zip
+    out = tmp_path / "wsg"
+    assert workspace_from_zip(six_axis_with_gripper_zip(tmp_path), out, samples=50) == "sixg"
+    return out / "src"
+
+
+def test_robot_library_grips(wsg):
+    prog = wsg / "sixg_program"
+    lib = (prog / "robot.py").read_text(encoding="utf-8")
+    assert "class GripError(RobotError)" in lib and "def grip(self, name=None)" in lib
+    assert "def release(self)" in lib and "def gripper_width(self)" in lib
+    assert "def tool_down(self, yaw=None)" in lib and "def tool_facing(self, direction, yaw=None)" in lib
+    assert "slipped out of the gripper while moving" in lib and "The gripper closed on nothing" in lib
+    assert "/gripper_controller/gripper_cmd" in lib
+    compile(lib, "robot.py", "exec")
+    assert (prog / "grip_logic.py").is_file()
+
+
+def test_brief_describes_the_gripper_only_when_there_is_one(wsg, ws):   # Review Focus 5
+    text = (wsg / "sixg_program" / "brief.md").read_text(encoding="utf-8")
+    assert "Gripper:" in text and "r.grip(" in text and "r.release()" in text and "tool point" in text.lower()
+    plain = (ws / "bot_program" / "brief.md").read_text(encoding="utf-8")
+    assert "Gripper:" not in plain and "r.grip(" not in plain

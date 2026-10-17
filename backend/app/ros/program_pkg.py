@@ -58,6 +58,16 @@ assert abs(x - 0.4) < 0.01 and abs(y + 0.3) < 0.01, f"box landed at {(x, y, z)}"
 r.home()
 ```"""
 
+GRIPPER_DOC = """## Gripper
+
+```python
+from robot import GripError   # the gripper caught nothing, an object doesn't fit, or a held object slipped
+r.release()               # open the fingers fully (lets go of what is held)
+r.grip(name)              # close on the object between the fingers; it moves with the tool from then on
+r.gripper_width()         # opening left before fully closed, metres
+r.tool_down(yaw)          # tool pointing down, jaws closing along (cos yaw, sin yaw) in the base x-y plane
+```"""
+
 RULES = """## Rules
 - Write exactly one program per task: `programs/task_NNN_<name>.py`, with the next free number and a short snake_case name saying what it does (2-4 words), e.g. `programs/task_007_stack_two_boxes.py`. For a follow-up, write a new file starting from the previous one.
 - Test it with `../__ROBOT___program/run_task.sh programs/task_NNN_<name>.py`. Every run starts clean: robot at home, the workcell's objects plus your SCENE at their declared places. It ends with `RESULT: ok` or `RESULT: failed: <reason>`.
@@ -103,8 +113,17 @@ def brief(chain: Chain, robot: str, workcell_text: str | None = None) -> str:
         span = "continuous" if j.lower is None else f"{j.lower:.3f} .. {j.upper:.3f} {unit}"
         lines.append(f"- {j.name}: {j.type}, {span}, home {h:.3f}")
     lines += ["", "Workcell (always present; see workcell.yaml):"] + _workcell_lines(workcell_text)
+    if chain.gripper is not None:
+        g = chain.gripper
+        lines += ["", "Gripper: two fingers that squeeze an object to hold it (friction only, nothing is glued).",
+                  f"- Opens to {2 * (g.upper - g.lower) * 1000:.0f} mm; grip force {g.effort:g} N per finger.",
+                  f"- The tool point ({chain.tip}) is between the fingertips: move_to / move_line place it, not the flange.",
+                  "- To pick: r.release() to open, approach from above with r.tool_down(yaw=...) so the jaws close across",
+                  "  two opposite faces (yaw = the object's yaw, or that + pi/2), lower so the object sits between the",
+                  "  fingertips, r.grip(name), then lift. r.release() lets go; heavy or smooth objects can slip."]
     rules = RULES.replace("__MAX_RUNS__", str(MAX_RUNS)).replace("__ROBOT__", robot)
-    return "\n".join(lines + ["", API_DOC, "", rules]) + "\n"
+    api = API_DOC + ("\n\n" + GRIPPER_DOC if chain.gripper is not None else "")
+    return "\n".join(lines + ["", api, "", rules]) + "\n"
 
 
 def _scene_module():
@@ -150,5 +169,5 @@ def program_files(chain: Chain, robot: str, source: str, workcell_text: str | No
         "robot.py": hash_note(source, robot) + _template("robot.py", robot, source),
         "runner.py": hash_note(source, robot) + _template("runner.py", robot, source),
         **{name: hash_note(source, robot) + _template(name, robot, source)
-           for name in ("scene.py", "sim_ctl.py", "sim_errors.py", "scene_sync.py")},
+           for name in ("scene.py", "sim_ctl.py", "sim_errors.py", "scene_sync.py", "grip_logic.py")},
     }
