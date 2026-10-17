@@ -216,9 +216,10 @@ def check_start(xml: str, meshes, robot_bodies: set[str]) -> None:
 
 
 def meta(robot_mjcf: str, objs) -> dict:
-    """What error messages need: motor limits per joint, masses of movable objects, fixed names."""
+    """What the run needs besides the sim: motor limits per joint (error messages), masses of
+    movable objects, fixed names, and every object (robot.py loads them into MoveIt)."""
     root = ET.fromstring(robot_mjcf)
     efforts = {a.get("joint"): float(a.get("forcerange").split()[1])
                for a in root.iter("position") if a.get("forcerange")}
     return {"efforts": efforts, "masses": {o["name"]: o["mass"] for o in objs if not o["fixed"]},
-            "fixed": [o["name"] for o in objs if o["fixed"]]}
+            "fixed": [o["name"] for o in objs if o["fixed"]], "objects": list(objs)}

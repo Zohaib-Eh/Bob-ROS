@@ -25,8 +25,10 @@ def ws(tmp_path):
 
 def test_program_folder_and_tasks_folder_are_generated(ws):
     prog = ws / "bot_program"
-    assert {p.name for p in prog.iterdir()} >= {"brief.md", "run_task.sh", "robot.py", "runner.py"}
+    assert {p.name for p in prog.iterdir()} >= {"brief.md", "run_task.sh", "robot.py", "runner.py",
+                                                "scene.py", "sim_ctl.py", "sim_errors.py"}
     assert (ws / "bot_tasks" / "programs").is_dir()
+    assert (ws / "bot_tasks" / "workcell.yaml").read_text().startswith("# Objects every program runs with")
     text = (prog / "brief.md").read_text()
     assert "arm_joint" in text and "hand_joint" in text and "Tool link: hand" in text
     assert "at most 3 runs" in text and "../bot_program/run_task.sh programs/task_NNN_<name>.py" in text
@@ -129,3 +131,15 @@ def test_glue_package_is_generated(ws):
     cpp = (glue / "src" / "glue_plugin.cpp").read_text()
     assert "MuJoCoROS2ControlPluginBase" in cpp and '"/sim/glue"' in cpp and "eq_active" in cpp
     assert "cad_to_urdf_glue" in (ws / "bot_moveit_config" / "package.xml").read_text()
+
+
+def test_regenerating_keeps_the_users_workcell(ws, tmp_path):
+    (ws / "bot_tasks" / "workcell.yaml").write_text("- {name: t, shape: box, size: [1, 1, 1], xyz: [3, 3, 0.5], fixed: true}\n")
+    workspace_from_zip(two_joint_zip(tmp_path, name="bot"), ws.parent, samples=50)
+    assert (ws / "bot_tasks" / "workcell.yaml").read_text().startswith("- {name: t")
+
+
+def test_session_boots_the_sim_before_moveit():
+    start = (Path(__file__).resolve().parents[2] / "docker" / "jazzy" / "session" / "start.sh").read_text()
+    boot, launch = start.index("python3 -m sim_ctl boot"), start.index("demo.launch.py")
+    assert boot < launch

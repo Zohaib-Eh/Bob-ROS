@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Session container entry: build the workspace, run MoveIt on mock hardware and rosbridge.
+# Session container entry: build the workspace, boot the MuJoCo sim (or mock hardware), run MoveIt and rosbridge.
 set -eo pipefail
 source /opt/ros/jazzy/setup.bash
 echo build > /tmp/stage
 cd /ws && colcon build 2>&1 | tail -n 30
 source /ws/install/setup.bash
 ROBOT=$(basename "$(ls -d src/*_moveit_config)" _moveit_config)
+echo physics > /tmp/stage
+export PYTHONPATH=/ws/src/${ROBOT}_program:$PYTHONPATH
+# MuJoCo when the export has a model (writes /tmp/sim/hardware for the launch, /tmp/physics for the app)
+python3 -m sim_ctl boot || { mkdir -p /tmp/sim; echo mock > /tmp/sim/hardware; echo "off: sim boot crashed" > /tmp/physics; }
 echo moveit > /tmp/stage
 ros2 launch "${ROBOT}_moveit_config" demo.launch.py &
 LAUNCH=$!
