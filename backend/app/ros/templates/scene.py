@@ -3,7 +3,9 @@ the MuJoCo scene. Pure Python + mujoco, so the backend tests run it without ROS.
 import ast
 import math
 import re
+import xml.etree.ElementTree as ET
 
+import numpy as np
 import yaml
 
 FIELDS = {"name", "shape", "size", "xyz", "rpy", "fixed", "mass", "friction"}
@@ -122,3 +124,101 @@ def load_workcell(text: str | None) -> list[dict]:
     if not isinstance(data, list):
         raise SceneError("workcell.yaml must be a list of objects (each starting with '- name: ...')")
     return data
+
+
+PENETRATION = 0.001  # m: resting contact is fine, deeper overlap is a setup mistake
+
+def _quat(rpy) -> list[float]:
+    r, p, y = (v / 2 for v in rpy)
+    cr, sr, cp, sp, cy, sy = math.cos(r), math.sin(r), math.cos(p), math.sin(p), math.cos(y), math.sin(y)
+    return [cr * cp * cy + sr * sp * sy, sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy]
+
+
+def _fmt(v) -> str:
+    return " ".join(repr(float(x)) for x in v)
+
+
+def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str) -> str:
+    """The robot MJCF plus a floor and the objects. Movable objects get a free joint named after
+    them and an inactive weld 'glue_<name>' to the tool; fixed objects get neither."""
+    root = ET.fromstring(robot_mjcf)
+    robot_bodies = {b.get("name") for b in root.iter("body")}
+    for o in objs:
+        if o["name"] in robot_bodies:
+            raise SceneError(f"'{o['name']}' is the name of a robot link; rename the object")
+    compiler = root.find("compiler")
+    if compiler is None:
+        compiler = ET.Element("compiler")
+        root.insert(0, compiler)
+    compiler.set("meshdir", meshdir)
+    world = root.find("worldbody")
+    if world.find("geom[@name='floor']") is None:
+        ET.SubElement(world, "geom", {"name": "floor", "type": "plane", "size": "0 0 1"})
+    eq = None
+    for o in objs:
+        body = ET.SubElement(world, "body", {"name": o["name"], "pos": _fmt(o["xyz"]), "quat": _fmt(_quat(o["rpy"]))})
+        if not o["fixed"]:
+            ET.SubElement(body, "freejoint", {"name": o["name"]})
+        half = [s / 2 for s in o["size"]] if o["shape"] == "box" else [o["size"][0], o["size"][1] / 2]
+        g = {"type": o["shape"], "size": _fmt(half)}
+        if o["mass"] is not None:
+            g["mass"] = repr(o["mass"])
+        if o["friction"] is not None:
+            g["friction"] = f"{o['friction']!r} 0.005 0.0001"
+        ET.SubElement(body, "geom", g)
+        if not o["fixed"]:
+            if eq is None:  # not `find() or ...`: an Element with no children is falsy
+                eq = root.find("equality")
+                if eq is None:
+                    eq = ET.SubElement(root, "equality")
+            ET.SubElement(eq, "weld", {"name": f"glue_{o['name']}", "body1": tool, "body2": o["name"],
+                                       "active": "false"})
+    return ET.tostring(root, encoding="unicode")
+
+
+def glue_on(m, d, e: int) -> None:
+    """Switch weld e on, holding body2 where it is now relative to body1 (no jump).
+    Mirrors glue_plugin.cpp: eq_data = [anchor(3), relpos(3), relquat(4), torquescale]."""
+    import mujoco
+    b1, b2 = m.eq_obj1id[e], m.eq_obj2id[e]
+    q1inv = np.zeros(4)
+    mujoco.mju_negQuat(q1inv, d.xquat[b1])
+    relpos = np.zeros(3)
+    mujoco.mju_rotVecQuat(relpos, d.xpos[b2] - d.xpos[b1], q1inv)
+    relquat = np.zeros(4)
+    mujoco.mju_mulQuat(relquat, q1inv, d.xquat[b2])
+    m.eq_data[e, 0:3] = 0.0
+    m.eq_data[e, 3:6] = relpos
+    m.eq_data[e, 6:10] = relquat
+    d.eq_active[e] = 1
+
+
+def check_start(xml: str, meshes, robot_bodies: set[str]) -> None:
+    """Fail on objects sunk more than PENETRATION into the robot, the floor or each other at home.
+    robot_bodies holds every robot body plus "world"; contacts between two of those are skipped."""
+    import mujoco
+    m = mujoco.MjModel.from_xml_string(xml, meshes or {})
+    d = mujoco.MjData(m)
+    for j in range(m.njnt):  # home: 0 clamped into the limits, like the hold check
+        if m.jnt_limited[j] and m.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE:
+            d.qpos[m.jnt_qposadr[j]] = min(max(0.0, m.jnt_range[j][0]), m.jnt_range[j][1])
+    mujoco.mj_forward(m, d)
+    for i in range(d.ncon):
+        c = d.contact[i]
+        if c.dist >= -PENETRATION:
+            continue
+        a, b = (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, m.geom_bodyid[g]) or "world" for g in (c.geom1, c.geom2))
+        if a in robot_bodies and b in robot_bodies:
+            continue  # built into the robot (or the robot on the floor)
+        a, b = sorted((a, b))
+        raise SceneError(f"'{a}' and '{b}' overlap by {-c.dist * 1000:.0f} mm at the start; move one of them")
+
+
+def meta(robot_mjcf: str, objs) -> dict:
+    """What error messages need: motor limits per joint, masses of movable objects, fixed names."""
+    root = ET.fromstring(robot_mjcf)
+    efforts = {a.get("joint"): float(a.get("forcerange").split()[1])
+               for a in root.iter("position") if a.get("forcerange")}
+    return {"efforts": efforts, "masses": {o["name"]: o["mass"] for o in objs if not o["fixed"]},
+            "fixed": [o["name"] for o in objs if o["fixed"]]}
