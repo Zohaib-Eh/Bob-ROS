@@ -23,7 +23,7 @@ export function useRosSession(ctx: Ctx) {
     setError(null);
     try {
       const req = buildExportRequest(model);
-      const s = await api.startSession(robotName, req.links, req.joints, req.bodiesByLink);
+      const s = await api.startSession(robotName, req.links, req.joints, req.bodiesByLink, req.gripper);
       if (mounted.current) setStatus(s);
     } catch (e) { if (mounted.current) setError(msg(e)); }
   }
