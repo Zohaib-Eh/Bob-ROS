@@ -44,8 +44,19 @@ def test_paths_outside_the_workspace_are_refused(src, bad):
 
 def test_only_programs_are_editable(src):
     r = client.put("/program/files/content", json={"path": "bot_program/robot.py", "content": "x"})
-    assert r.status_code == 400 and r.json()["detail"] == "Only bot_tasks/programs/*.py can be edited."
+    assert r.status_code == 400 and r.json()["detail"] == "Only bot_tasks/programs/*.py and workcell.yaml can be edited."
     assert (src / "bot_program/robot.py").read_text() == "# lib\n"
+
+
+def test_workcell_is_editable_but_not_deletable(src):
+    (src / "bot_tasks" / "workcell.yaml").write_text("# none\n")
+    assert {"path": "bot_tasks/workcell.yaml", "editable": True} in client.get("/program/files").json()
+    body = "- {name: t, shape: box, size: [1, 1, 0.05], xyz: [0.6, 0, 0.3], fixed: true}\n"
+    assert client.put("/program/files/content", json={"path": "bot_tasks/workcell.yaml", "content": body}).status_code == 200
+    assert (src / "bot_tasks" / "workcell.yaml").read_text() == body
+    r = client.delete("/program/files/content", params={"path": "bot_tasks/workcell.yaml"})
+    assert r.status_code == 400 and r.json()["detail"] == "Only bot_tasks/programs/*.py can be deleted."
+    assert (src / "bot_tasks" / "workcell.yaml").exists()
 
 
 @pytest.fixture

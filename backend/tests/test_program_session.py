@@ -12,6 +12,7 @@ class FakeDocker:
         self.calls, self.running, self.info_ok, self.image = [], running, info_ok, image
         self.run_args = None
         self.stage = "ready"
+        self.physics = "mujoco"  # None: a container from before physics support (no /tmp/physics)
 
     def __call__(self, args, capture_output=True, text=True, check=True):
         self.calls.append(args)
@@ -33,6 +34,8 @@ class FakeDocker:
             out = "running" if self.running == "true" else "exited"
         if cmd == "exec" and args[-2:] == ["cat", "/tmp/stage"]:
             out = self.stage
+        if cmd == "exec" and args[-2:] == ["cat", "/tmp/physics"]:
+            rc, out = (0, self.physics + "\n") if self.physics else (1, "")
         if cmd == "exec" and "runner" in " ".join(args):
             out = "hello\nRESULT: ok\n"
         cp = subprocess.CompletedProcess(args, rc, out, "")
@@ -90,6 +93,15 @@ def test_docker_not_running_says_start_docker_desktop(fake):
     fake.info_ok = False
     with pytest.raises(session.SessionError, match="Start Docker Desktop."):
         session.start("bot", *_model())
+
+
+def test_ready_status_says_whether_physics_is_on(fake):
+    _started()
+    assert session.status()["physics"] == "mujoco"
+    fake.physics = "off: the export has no MuJoCo model"
+    assert session.status()["physics"] == "off: the export has no MuJoCo model"
+    fake.physics = None
+    assert session.status()["physics"] == "off: unknown (session started before physics support)"
 
 
 def test_status_reports_ready_and_failed(fake):

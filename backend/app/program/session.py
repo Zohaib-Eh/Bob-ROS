@@ -1,5 +1,5 @@
-"""The ROS session behind the Program step: one container running MoveIt (mock hardware) and
-rosbridge on the robot's generated workspace."""
+"""The ROS session behind the Program step: one container running MoveIt on MuJoCo physics (mock
+hardware when the export has no MuJoCo model) and rosbridge on the robot's generated workspace."""
 import re
 import subprocess
 import threading
@@ -126,7 +126,9 @@ def status() -> dict:
         ready = _docker("exec", SESSION_CONTAINER, "test", "-f", "/tmp/ready", check=False).returncode == 0
         stage = "ready" if ready else "build"
     if stage == "ready":
-        return {"state": "ready", "robot": robot}
+        r = _docker("exec", SESSION_CONTAINER, "cat", "/tmp/physics", check=False)
+        physics = (r.stdout.strip() if r.returncode == 0 else "") or "off: unknown (session started before physics support)"
+        return {"state": "ready", "robot": robot, "physics": physics}
     return {"state": "starting", "robot": robot, "stage": stage, "log": logs(8)}
 
 

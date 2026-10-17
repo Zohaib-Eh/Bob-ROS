@@ -5,6 +5,7 @@ import * as api from "../../api/program";
 import { boxBody } from "../../model/testBodies";
 import { Harness, imported, state } from "../testing";
 import ProgramMode from "./ProgramMode";
+import { stageText } from "./StartupPanel";
 import { POLL } from "./useRosSession";
 
 vi.mock("../../ros/rosbridge", () => ({
@@ -430,5 +431,30 @@ describe("review fixes", () => {
     await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
     expect(screen.getByRole("button", { name: "Build" })).toHaveProperty("disabled", true);
+  });
+});
+
+describe("physics status", () => {
+  async function readyWith(physics: string) {
+    vi.spyOn(api, "listConversations").mockResolvedValue([]);
+    vi.spyOn(api, "sessionStatus").mockResolvedValueOnce({ state: "stopped" }).mockResolvedValue({ state: "ready", robot: "bot", physics });
+    vi.spyOn(api, "startSession").mockResolvedValue({ state: "starting", robot: "bot" });
+    ui();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /start ros/i })); });
+    await screen.findByText(/ROS ready/);
+  }
+
+  it("says when the arm runs in MuJoCo", async () => {
+    await readyWith("mujoco");
+    expect(screen.getByText(/Physics: MuJoCo/)).toBeTruthy();
+  });
+
+  it("says why physics is off", async () => {
+    await readyWith("off: the export has no MuJoCo model");
+    expect(screen.getByText(/Physics off: the export has no MuJoCo model/)).toBeTruthy();
+  });
+
+  it("labels the physics startup stage", () => {
+    expect(stageText({ state: "starting", stage: "physics" })).toBe("Starting physics (MuJoCo)");
   });
 });

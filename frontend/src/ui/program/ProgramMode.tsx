@@ -191,7 +191,11 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
             {showPanel && <StartupPanel status={status} />}
           </span>
         ) : (
-          <span className="muted">{status.state === "ready" ? "ROS ready" : "ROS not running"}</span>
+          <span className="muted">
+            {status.state === "ready" ? "ROS ready" : "ROS not running"}
+            {status.state === "ready" && status.physics
+              && ` · ${status.physics === "mujoco" ? "Physics: MuJoCo" : `Physics ${status.physics}`}`}
+          </span>
         )}
         <span className="spacer" />
         {status.state === "stopped" || status.state === "failed"

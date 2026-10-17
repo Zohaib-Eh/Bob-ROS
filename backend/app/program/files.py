@@ -21,8 +21,12 @@ def safe(src, rel: str) -> Path:
     return p
 
 
-def editable(robot: str, rel: str) -> bool:
+def deletable(robot: str, rel: str) -> bool:
     return re.fullmatch(rf"{re.escape(robot)}_tasks/programs/[A-Za-z0-9_]+\.py", rel) is not None
+
+
+def editable(robot: str, rel: str) -> bool:
+    return deletable(robot, rel) or rel == f"{robot}_tasks/workcell.yaml"
 
 
 def tree(src, robot: str) -> list[dict]:
@@ -47,14 +51,14 @@ def read(src, rel: str) -> str:
 def write(src, robot: str, rel: str, content: str) -> None:
     p = safe(src, rel)
     if not editable(robot, rel):
-        raise PermissionError(f"Only {robot}_tasks/programs/*.py can be edited.")
+        raise PermissionError(f"Only {robot}_tasks/programs/*.py and workcell.yaml can be edited.")
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8", newline="\n")
 
 
 def delete(src, robot: str, rel: str) -> None:
     p = safe(src, rel)
-    if not editable(robot, rel):
+    if not deletable(robot, rel):
         raise PermissionError(f"Only {robot}_tasks/programs/*.py can be deleted.")
     if not p.is_file():
         raise FileNotFoundError(rel)

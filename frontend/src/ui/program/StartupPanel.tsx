@@ -6,6 +6,7 @@ export const STAGES: { id: Stage; label: string }[] = [
   { id: "collisions", label: "Checking collisions" },
   { id: "image", label: "Building Docker image (first time only)" },
   { id: "build", label: "Building workspace" },
+  { id: "physics", label: "Starting physics (MuJoCo)" },
   { id: "moveit", label: "Starting MoveIt" },
   { id: "bridge", label: "Starting bridge" },
   { id: "ready", label: "Ready" },
