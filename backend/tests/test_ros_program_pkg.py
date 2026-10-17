@@ -26,7 +26,7 @@ def ws(tmp_path):
 def test_program_folder_and_tasks_folder_are_generated(ws):
     prog = ws / "bot_program"
     assert {p.name for p in prog.iterdir()} >= {"brief.md", "run_task.sh", "robot.py", "runner.py",
-                                                "scene.py", "sim_ctl.py", "sim_errors.py"}
+                                                "scene.py", "sim_ctl.py", "sim_errors.py", "scene_sync.py"}
     assert (ws / "bot_tasks" / "programs").is_dir()
     assert (ws / "bot_tasks" / "workcell.yaml").read_text().startswith("# Objects every program runs with")
     text = (prog / "brief.md").read_text()
@@ -142,4 +142,4 @@ def test_regenerating_keeps_the_users_workcell(ws, tmp_path):
 def test_session_boots_the_sim_before_moveit():
     start = (Path(__file__).resolve().parents[2] / "docker" / "jazzy" / "session" / "start.sh").read_text()
     boot, launch = start.index("python3 -m sim_ctl boot"), start.index("demo.launch.py")
-    assert boot < launch
+    assert boot < launch < start.index("python3 -m scene_sync")

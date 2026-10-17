@@ -23,6 +23,9 @@ until MOVEIT=$(ros2 action list 2>/dev/null | grep -c '^/move_action$'); (( MOVE
   (( SECONDS < DEADLINE )) || { echo "session startup timed out after 180 s"; exit 1; }
   sleep 1
 done
+if [ "$(cat /tmp/sim/hardware 2>/dev/null)" = mujoco ]; then
+  python3 -m scene_sync &  # simulated object poses into MoveIt's scene
+fi
 touch /tmp/ready
 echo ready > /tmp/stage
 echo "session ready: ${ROBOT}"

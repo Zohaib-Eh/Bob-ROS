@@ -117,5 +117,5 @@ def program_files(chain: Chain, robot: str, source: str) -> dict[str, str]:
         "robot.py": hash_note(source, robot) + _template("robot.py", robot, source),
         "runner.py": hash_note(source, robot) + _template("runner.py", robot, source),
         **{name: hash_note(source, robot) + _template(name, robot, source)
-           for name in ("scene.py", "sim_ctl.py", "sim_errors.py")},
+           for name in ("scene.py", "sim_ctl.py", "sim_errors.py", "scene_sync.py")},
     }
