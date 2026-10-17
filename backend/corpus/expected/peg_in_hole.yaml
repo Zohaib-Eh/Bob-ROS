@@ -3,7 +3,7 @@ generated: true
 parts: {min: 2}
 statuses: {failed: 0, approximate: 0}
 links:
-  - {name: block, bodies: ["Open CASCADE STEP translator 7.8 1.1"]}
-  - {name: peg, bodies: ["Open CASCADE STEP translator 7.8 1.2"]}
+  - {name: block, bodies: [block]}
+  - {name: peg, bodies: [peg]}
 joints:
   - {parent: block, child: peg, type: [revolute, cylindrical], axis: [0, 0, 1]}

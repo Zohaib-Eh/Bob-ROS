@@ -10,10 +10,15 @@ from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
 from OCC.Core.BRepTools import breptools
 from OCC.Core.gp import gp_Ax2, gp_Dir, gp_Pnt
 from OCC.Core.Interface import Interface_Static
-from OCC.Core.STEPControl import STEPControl_AsIs, STEPControl_Writer
+from OCC.Core.STEPCAFControl import STEPCAFControl_Writer
+from OCC.Core.STEPControl import STEPControl_AsIs
+from OCC.Core.TDataStd import TDataStd_Name
+from OCC.Core.TDocStd import TDocStd_Document
 from OCC.Core.TopAbs import TopAbs_FACE
 from OCC.Core.TopExp import TopExp_Explorer
 from OCC.Core.TopoDS import TopoDS_Compound, TopoDS_Shell
+from OCC.Core.XCAFApp import XCAFApp_Application
+from OCC.Core.XCAFDoc import XCAFDoc_DocumentTool
 
 
 def _peg_in_hole(path: Path) -> None:
@@ -21,12 +26,16 @@ def _peg_in_hole(path: Path) -> None:
     hole = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0.25, 0.25, -0.1), gp_Dir(0, 0, 1)), 0.1, 0.4).Shape()
     block = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(0.5, 0.5, 0.2).Shape(), hole).Shape()
     peg = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0.25, 0.25, -0.4), gp_Dir(0, 0, 1)), 0.1, 1.0).Shape()
-    b, comp = BRep_Builder(), TopoDS_Compound()
-    b.MakeCompound(comp); b.Add(comp, block); b.Add(comp, peg)
-    w = STEPControl_Writer()
+    # named parts: OCCT's default product names carry a per-process counter
+    doc = TDocStd_Document("MDTV-XCAF")
+    XCAFApp_Application.GetApplication().NewDocument("MDTV-XCAF", doc)
+    tool = XCAFDoc_DocumentTool.ShapeTool(doc.Main())
+    for name, shape in (("block", block), ("peg", peg)):
+        TDataStd_Name.Set(tool.AddShape(shape, False), name)
+    w = STEPCAFControl_Writer()
     Interface_Static.SetCVal("xstep.cascade.unit", "MM")
     Interface_Static.SetCVal("write.step.unit", "M")
-    w.Transfer(comp, STEPControl_AsIs); w.Write(str(path))
+    w.Transfer(doc, STEPControl_AsIs); w.Write(str(path))
 
 
 def _open_shell(path: Path) -> None:
