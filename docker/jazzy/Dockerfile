@@ -18,3 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-mujoco-ros2-control \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir --break-system-packages -c /tmp/pin.txt mujoco
+# Gripper: the parallel-gripper controller, and CoACD for convex finger collision pieces.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-jazzy-parallel-gripper-controller \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir --break-system-packages -c /tmp/pin.txt coacd

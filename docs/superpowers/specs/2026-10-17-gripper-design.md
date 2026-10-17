@@ -171,3 +171,17 @@ Success looks like this:
 - Whether the mirrored finger uses a joint equality or a tendon plus equality, whichever `mujoco_ros2_control` drives correctly (decided in plan Task 1).
 - The TCP fingertip-end rule for odd finger shapes (use the finger bodies' extent along the gripper axis).
 - How slip is sampled. After each motion is the minimum, and during motion is better if cheap.
+
+## Task 1 findings (2026-10-17)
+
+The probe was a two-finger mimic gripper under `mujoco_ros2_control`, closing on a 0.04 m box on a pedestal. All gate checks passed:
+
+- **Controller:** `parallel_gripper_action_controller/GripperActionController`, from `ros-jazzy-parallel-gripper-controller` 4.42.1 (already pulled in by ros2-controllers).
+  - Action: `control_msgs/action/ParallelGripperCommand` on `/gripper_controller/gripper_cmd`. The command is a `sensor_msgs/JointState` (name, position), and the result has `state`, `stalled` and `reached_goal`.
+  - Parameters: `joint`, `max_effort`, `allow_stalling`, `stall_timeout`, `stall_velocity_threshold`, `goal_tolerance`, `state_interfaces`, `max_effort_interface`, `max_velocity`.
+- **Mimic:** declared in the ros2_control block as `<joint name="follower"><param name="mimic">leader</param><param name="multiplier">1</param> state interfaces only</joint>`, plus the URDF `<mimic>`. `mujoco_ros2_control` logs "is a mimic joint mimicking joint …". Its "Unable to find the actuator" warning for the follower is expected. `/joint_states` reports both fingers.
+- **MuJoCo:** the URDF importer turns `<mimic>` into a joint equality by itself (`neq = 1`, type joint), so the export adds no extra coupling.
+- **Contact:** the fingers stop on the box.
+  - *The coupling is soft under load.* The leader stopped at 15.2 mm and the follower at 7.3 mm, so the equality gives way under grip force. The export must stiffen it (equality `solref`), and Task 6 tests the fingers stay within 1 mm while squeezing.
+  - *The controller reported `reached_goal` and not `stalled`*, because the remaining error was inside its default `goal_tolerance`. Set `goal_tolerance: 0.001`. `robot.py` judges the grip by finger width (`grip_logic.outcome`), not by these flags.
+- **CoACD:** `coacd` 1.0.14 installs on the host and in the image (numpy 1.26.4 kept).
