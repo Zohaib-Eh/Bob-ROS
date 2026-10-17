@@ -143,3 +143,30 @@ def test_session_boots_the_sim_before_moveit():
     start = (Path(__file__).resolve().parents[2] / "docker" / "jazzy" / "session" / "start.sh").read_text()
     boot, launch = start.index("python3 -m sim_ctl boot"), start.index("demo.launch.py")
     assert boot < launch < start.index("python3 -m scene_sync")
+
+
+def test_robot_library_speaks_physics(ws):
+    lib = (ws / "bot_program" / "robot.py").read_text()
+    assert "class MotionError(RobotError)" in lib and "def pose(self, name)" in lib
+    assert "Objects can't appear mid-run. Declare '{name}' in SCENE at the top of the program (or in workcell.yaml)." in lib
+    assert '"/sim/glue"' in lib and "sim_errors.lag_message(" in lib and "sim_errors.blow_up(" in lib
+    assert "_meta()[\"objects\"]" in lib  # reset loads the run's objects into MoveIt
+    compile(lib, "robot.py", "exec")
+    runner = (ws / "bot_program" / "runner.py").read_text()
+    assert "sim_ctl.prepare(path)" in runner and "except scene.SceneError" in runner
+    compile(runner, "runner.py", "exec")
+
+
+def test_brief_teaches_scene_and_pose(ws):
+    text = (ws / "bot_program" / "brief.md").read_text()
+    assert "SCENE = [" in text and "workcell.yaml" in text and "r.pose(" in text
+    assert "r.add_box(" not in text and "Physics is real" in text
+    assert "Workcell (always present; see workcell.yaml):" in text and "- (empty)" in text
+
+
+def test_brief_lists_the_workcell_objects(ws, tmp_path):
+    (ws / "bot_tasks" / "workcell.yaml").write_text(
+        "- {name: table, shape: box, size: [1, 0.5, 0.05], xyz: [0.6, 0, 0.3], fixed: true}\n")
+    workspace_from_zip(two_joint_zip(tmp_path, name="bot"), ws.parent, samples=50)
+    text = (ws / "bot_program" / "brief.md").read_text(encoding="utf-8")
+    assert "- table: box 1 × 0.5 × 0.05 m at (0.6, 0, 0.3), fixed" in text

@@ -2,13 +2,23 @@
 import runpy
 import sys
 import traceback
+from pathlib import Path
 
+import scene
+import sim_ctl
 from robot import Robot, RobotError
+
+HARDWARE = Path("/tmp/sim/hardware")
 
 
 def main(path: str) -> int:
     try:
+        if HARDWARE.exists() and HARDWARE.read_text().strip() == "mujoco":
+            sim_ctl.prepare(path)  # the world this program declared: workcell + SCENE, arm at home
         Robot().reset()
+    except scene.SceneError as exc:  # the program's objects are wrong; the program can fix that
+        print(f"RESULT: failed: {exc}", flush=True)
+        return 1
     except Exception as exc:  # the session itself is broken; nothing the program can fix
         print(f"RESULT: failed: could not reset the simulation ({exc})", flush=True)
         return 1

@@ -1,5 +1,6 @@
 """Files of the generated <robot>_program folder: the task library LLM-written programs call
 (robot.py), the container-side runner, run_task.sh for the agent, and the agent's brief."""
+import importlib.util
 import math
 from pathlib import Path
 
@@ -18,9 +19,11 @@ API_DOC = """## Library
 
 ```python
 from robot import Robot   # errors: Unreachable, Collision, PlanningFailed, UnknownObject (all RobotError)
-r = Robot()                                    # connected; robot at home, scene empty
-r.add_box(name, size_xyz, xyz, rpy=(0, 0, 0))  # box centred at xyz
-r.add_cylinder(name, radius, height, xyz, rpy=(0, 0, 0))  # axis along its local z
+SCENE = [dict(name="part", shape="box", size=(x, y, z), xyz=(x, y, z), rpy=(0, 0, 0), mass=0.2)]
+                          # at the top of the program: objects that exist when the run starts
+                          # (box size = full x y z; cylinder size = (radius, height), axis along local z;
+                          # mass in kg, optional; fixed=True = bolted down). Objects can't be added mid-run.
+r = Robot()                                    # connected; robot at home, workcell + SCENE objects placed
 r.move_to(xyz, rpy=None)  # tool link to a position; with rpy also that orientation; planned around obstacles
 r.move_line(xyz, rpy=None)  # straight line; without rpy keeps the current orientation (under 6 joints: any orientation, short steps)
 r.tool_down()             # an orientation (rpy) with the tool pointing straight down, for this robot
@@ -28,7 +31,8 @@ r.tool_facing(direction)  # an orientation (rpy) pointing the tool along a base-
 r.move_joints(q)          # joint values in joint order
 r.home()
 r.attach(name)            # the object rides on the tool link (pick); the tool must be within 2 cm of it
-r.detach(name)            # the object stays where it is (place)
+r.detach(name)            # the object is released and falls under gravity (place it low)
+r.pose(name)              # where an object really is now: (xyz, rpy)
 r.solutions(xyz, rpy)     # every exact joint solution, nearest first; [] = unreachable
 r.tool_pose()             # current (xyz, rpy) of the tool link
 ```
@@ -37,8 +41,10 @@ Example (pick and place):
 
 ```python
 from robot import Robot
+
+SCENE = [dict(name="box", shape="box", size=(0.05, 0.05, 0.05), xyz=(0.5, 0.2, 0.025), mass=0.2)]
+
 r = Robot()
-r.add_box("box", (0.05, 0.05, 0.05), (0.5, 0.2, 0.025))
 down = r.tool_down()                       # tool pointing straight down
 r.move_to((0.5, 0.2, 0.15), down)
 r.move_line((0.5, 0.2, 0.055), down)       # tool 5 mm above the box's top face (0.05)
@@ -47,12 +53,15 @@ r.move_line((0.5, 0.2, 0.15), down)
 r.move_to((0.4, -0.3, 0.15), down)
 r.move_line((0.4, -0.3, 0.055), down)
 r.detach("box")
+(x, y, z), _ = r.pose("box")               # check where it really landed
+assert abs(x - 0.4) < 0.01 and abs(y + 0.3) < 0.01, f"box landed at {(x, y, z)}"
 r.home()
 ```"""
 
 RULES = """## Rules
 - Write exactly one program per task: `programs/task_NNN_<name>.py`, with the next free number and a short snake_case name saying what it does (2-4 words), e.g. `programs/task_007_stack_two_boxes.py`. For a follow-up, write a new file starting from the previous one.
-- Test it with `../__ROBOT___program/run_task.sh programs/task_NNN_<name>.py`. Every run starts clean (robot at home, no objects) and ends with `RESULT: ok` or `RESULT: failed: <reason>`.
+- Test it with `../__ROBOT___program/run_task.sh programs/task_NNN_<name>.py`. Every run starts clean: robot at home, the workcell's objects plus your SCENE at their declared places. It ends with `RESULT: ok` or `RESULT: failed: <reason>`.
+- Physics is real: motors have limits, objects have weight, and released objects fall. Check results with r.pose() instead of assuming them.
 - Fix and re-run until `RESULT: ok`. You have at most __MAX_RUNS__ runs per task; after that, stop and explain what is still wrong.
 - Positions are in metres in the base frame, z up; keep objects above the floor (z > 0) and inside the reach.
 - Only edit files under `programs/`. Do not run any other command.
@@ -76,7 +85,7 @@ def bearing(chain: Chain) -> float:
     return math.degrees(math.atan2(T[1, 3], T[0, 3])) if math.hypot(T[0, 3], T[1, 3]) > 1e-9 else 0.0
 
 
-def brief(chain: Chain, robot: str) -> str:
+def brief(chain: Chain, robot: str, workcell_text: str | None = None) -> str:
     T = fk(chain, home(chain))
     lines = [f"# Robot: {robot}", "",
              f"You write Python programs that move the {robot} robot arm in a ROS 2 simulation.",
@@ -93,8 +102,32 @@ def brief(chain: Chain, robot: str) -> str:
         unit = "m" if j.type == "prismatic" else "rad"
         span = "continuous" if j.lower is None else f"{j.lower:.3f} .. {j.upper:.3f} {unit}"
         lines.append(f"- {j.name}: {j.type}, {span}, home {h:.3f}")
+    lines += ["", "Workcell (always present; see workcell.yaml):"] + _workcell_lines(workcell_text)
     rules = RULES.replace("__MAX_RUNS__", str(MAX_RUNS)).replace("__ROBOT__", robot)
     return "\n".join(lines + ["", API_DOC, "", rules]) + "\n"
+
+
+def _scene_module():
+    spec = importlib.util.spec_from_file_location("cad_to_urdf_scene", HERE / "templates" / "scene.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _workcell_lines(text: str | None) -> list[str]:
+    scene = _scene_module()
+    try:
+        objs = scene.validate(scene.load_workcell(text), "workcell.yaml")
+    except scene.SceneError as exc:  # never break generation; every run will report it too
+        return [f"- (workcell.yaml has an error: {exc})"]
+    out = []
+    for o in objs:
+        s = o["size"]
+        shape = (f"box {s[0]:g} × {s[1]:g} × {s[2]:g} m" if o["shape"] == "box"
+                 else f"cylinder radius {s[0]:g} m, height {s[1]:g} m")
+        where = ", ".join(f"{v:g}" for v in o["xyz"])
+        out.append(f"- {o['name']}: {shape} at ({where}), " + ("fixed" if o["fixed"] else f"{o['mass']:.3g} kg"))
+    return out or ["- (empty)"]
 
 
 def _template(name: str, robot: str, source: str) -> str:
@@ -110,9 +143,9 @@ def glue_files() -> dict[str, str]:
     return {p.relative_to(d).as_posix(): p.read_text(encoding="utf-8") for p in d.rglob("*") if p.is_file()}
 
 
-def program_files(chain: Chain, robot: str, source: str) -> dict[str, str]:
+def program_files(chain: Chain, robot: str, source: str, workcell_text: str | None = None) -> dict[str, str]:
     return {
-        "brief.md": brief(chain, robot),
+        "brief.md": brief(chain, robot, workcell_text),
         "run_task.sh": _template("run_task.sh", robot, source),
         "robot.py": hash_note(source, robot) + _template("robot.py", robot, source),
         "runner.py": hash_note(source, robot) + _template("runner.py", robot, source),

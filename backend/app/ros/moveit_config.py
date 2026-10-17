@@ -302,7 +302,9 @@ def generate(robot: str, description_dir: Path, out_src: Path, source: str, samp
         from .kinematics_pkg import kinematics_files  # local: kinematics_pkg imports this module
         write_files(tmp / f"{robot}_kinematics", kinematics_files(robot, source))
         from .program_pkg import glue_files, program_files  # local: program_pkg imports this module
-        write_files(tmp / f"{robot}_program", program_files(chain, robot, source))
+        wc = Path(out_src) / f"{robot}_tasks" / "workcell.yaml"
+        write_files(tmp / f"{robot}_program",
+                    program_files(chain, robot, source, wc.read_text(encoding="utf-8") if wc.exists() else None))
         write_files(tmp / "cad_to_urdf_glue", glue_files())
         _swap_in(Path(out_src), tmp, sorted(p.name for p in tmp.iterdir()))
         (Path(out_src) / f"{robot}_tasks" / "programs").mkdir(parents=True, exist_ok=True)

@@ -1,8 +1,10 @@
 """Task library for __ROBOT__: the functions LLM-written programs call. MoveIt plans every motion.
 Units: metres and radians, in the robot's base frame."""
 import importlib
+import json
 import math
 import time
+from pathlib import Path
 
 import numpy as np
 import rclpy
@@ -13,8 +15,12 @@ from moveit_msgs.msg import (AttachedCollisionObject, CollisionObject, Constrain
                              PlanningSceneComponents, PositionConstraint)
 from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath, GetPlanningScene
 from rclpy.action import ActionClient
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
+from std_msgs.msg import String
+
+import sim_errors
 
 ROBOT = "__ROBOT__"
 GROUP = "arm"
@@ -26,6 +32,14 @@ _UNREACHABLE = {"NO_IK_SOLUTION", "INVALID_GOAL_CONSTRAINTS", "GOAL_CONSTRAINTS_
 _NO_PATH = {"FAILURE", "PLANNING_FAILED", "TIMED_OUT"}
 _COLLISION = {"GOAL_IN_COLLISION", "START_STATE_IN_COLLISION", "INVALID_MOTION_PLAN",
               "MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE"}
+_SIM = Path("/tmp/sim")
+_PHYSICS = (_SIM / "hardware").exists() and (_SIM / "hardware").read_text().strip() == "mujoco"
+
+
+def _meta() -> dict:
+    """Written by sim_ctl before the run: motor limits, object masses, fixed names, every object."""
+    p = _SIM / "meta.json"
+    return json.loads(p.read_text()) if p.exists() else {"efforts": {}, "masses": {}, "fixed": [], "objects": []}
 
 
 class RobotError(Exception):
@@ -46,6 +60,10 @@ class PlanningFailed(RobotError):
 
 class UnknownObject(RobotError):
     pass
+
+
+class MotionError(RobotError):
+    """The simulated arm could not do what was planned (weak motor, heavy load, contact)."""
 
 
 def _matrix(xyz, rpy) -> np.ndarray:
@@ -136,9 +154,14 @@ class Robot:
         self._apply = n.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self._get = n.create_client(GetPlanningScene, "/get_planning_scene")
         self._joints = {}
+        self._velocities = {}
         self._stamp = 0
         n.create_subscription(JointState, "/joint_states",
                               self._on_joints, 10)
+        self._glued = set()
+        self._glue = n.create_publisher(String, "/sim/glue", 10)
+        n.create_subscription(String, "/sim/glued", self._on_glued,
+                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         for c in (self._cartesian, self._apply, self._get):
             if not c.wait_for_service(timeout_sec=30):
                 raise PlanningFailed(f"MoveIt service {c.srv_name} is not available")
@@ -173,11 +196,32 @@ class Robot:
         co.operation = CollisionObject.ADD
         self._diff(world=[co])
 
+    @staticmethod
+    def _no_mid_run_objects(name):
+        if _PHYSICS:
+            msg = f"Objects can't appear mid-run. Declare '{name}' in SCENE at the top of the program (or in workcell.yaml)."
+            raise RobotError(msg)
+
     def add_box(self, name, size_xyz, xyz, rpy=(0, 0, 0)):
+        self._no_mid_run_objects(name)
         self._add(name, SolidPrimitive.BOX, size_xyz, xyz, rpy)
 
     def add_cylinder(self, name, radius, height, xyz, rpy=(0, 0, 0)):
+        self._no_mid_run_objects(name)
         self._add(name, SolidPrimitive.CYLINDER, (height, radius), xyz, rpy)
+
+    def _on_glued(self, m):
+        self._glued = set(filter(None, m.data.split(",")))
+
+    def _glue_cmd(self, op, name):
+        """attach/detach in MuJoCo (cad_to_urdf_glue), waiting until the sim confirms it."""
+        done = (lambda: name in self._glued) if op == "attach" else (lambda: name not in self._glued)
+        self._glue.publish(String(data=f"{op} {name}"))
+        end = time.time() + 2.0
+        while not done() and time.time() < end:
+            rclpy.spin_once(_node(), timeout_sec=0.05)
+        if not done():
+            raise MotionError(f"The simulation did not confirm {op} of '{name}'")
 
     def _attached(self, name, op) -> AttachedCollisionObject:
         a = AttachedCollisionObject()
@@ -211,15 +255,84 @@ class Robot:
         if gap > ATTACH_REACH:
             raise UnknownObject(f"'{name}' is {gap:.2f} m from the tool; move the tool to touch it first "
                                 f"(within {ATTACH_REACH * 100:.0f} cm, e.g. 5 mm above its top face)")
+        if _PHYSICS:
+            if name in _meta()["fixed"]:
+                raise UnknownObject(f"'{name}' is fixed (bolted down in the workcell) and can't be picked up")
+            self._glue_cmd("attach", name)
         self._diff(attached=[self._attached(name, CollisionObject.ADD)])
 
     def detach(self, name):
         _, attached = self._scene()
         if name not in attached:
             raise UnknownObject(f"'{name}' is not attached to the tool (attached: {', '.join(attached) or 'none'})")
+        if _PHYSICS:
+            self._glue_cmd("detach", name)   # released: it falls under gravity from here
         self._diff(attached=[self._attached(name, CollisionObject.REMOVE)])
 
+    def pose(self, name):
+        """Where object `name` really is now: (xyz, rpy) in the base frame."""
+        req = GetPlanningScene.Request()
+        req.components.components = (PlanningSceneComponents.WORLD_OBJECT_GEOMETRY
+                                     | PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS)
+        sc = _wait(self._get.call_async(req), 10).scene
+        objs = {o.id: o for o in sc.world.collision_objects}
+        for a in sc.robot_state.attached_collision_objects:
+            objs[a.object.id] = a.object
+        if name not in objs:
+            raise UnknownObject(f"No object '{name}' (objects: {', '.join(sorted(objs)) or 'none'})")
+        o = objs[name]
+        M = _pose_matrix(o.pose) @ _pose_matrix(o.primitive_poses[0])
+        if o.header.frame_id and o.header.frame_id != self.chain.base:  # attached: in the tool frame
+            M = self._kin.fk(self._current()) @ M
+        return tuple(float(v) for v in M[:3, 3]), _rpy(M[:3, :3])
+
+    def _load_run_objects(self):
+        """Put the run's objects (workcell + SCENE, from sim_ctl) into MoveIt at their start poses."""
+        adds = []
+        for o in _meta()["objects"]:
+            co = CollisionObject()
+            co.id = o["name"]
+            co.header.frame_id = self.chain.base
+            co.pose = _pose(o["xyz"], o["rpy"])
+            box = o["shape"] == "box"
+            dims = o["size"] if box else (o["size"][1], o["size"][0])   # cylinder: (height, radius)
+            co.primitives = [SolidPrimitive(type=SolidPrimitive.BOX if box else SolidPrimitive.CYLINDER,
+                                            dimensions=[float(d) for d in dims])]
+            co.primitive_poses = [_pose((0, 0, 0), (0, 0, 0))]
+            co.operation = CollisionObject.ADD
+            adds.append(co)
+        if adds:
+            self._diff(world=adds)
+
+    def _physics_check(self, trajectory, code: int):
+        """After a motion in MuJoCo: a blown-up sim, or a joint the controller gave up on."""
+        if not _PHYSICS:
+            return
+        self._settle()
+        names = self.joint_names
+        pos = [self._joints.get(n, 0.0) for n in names]
+        vel = [self._velocities.get(n, 0.0) for n in names]
+        boom = sim_errors.blow_up(names, pos, vel, {j.name: j.child for j in self.chain.joints})
+        if boom:
+            raise MotionError(boom)
+        if _ERRORS.get(code) == "CONTROL_FAILED" and trajectory.joint_trajectory.points:
+            # ponytail: compares with the last waypoint, not the sample at abort time; use the timed
+            # sample if messages name the wrong joint
+            jt = trajectory.joint_trajectory
+            goal = dict(zip(jt.joint_names, jt.points[-1].positions))
+            planned = [goal.get(n, p) for n, p in zip(names, pos)]
+            m = _meta()
+            carrying = {k: m["masses"][k] for k in sorted(self._glued) if k in m["masses"]}
+            hinge = {j.name: j.type != "prismatic" for j in self.chain.joints}
+            raise MotionError(sim_errors.lag_message(names, planned, pos, m["efforts"], carrying, hinge))
+
     def reset(self):
+        self._clear_scene()
+        if _PHYSICS:  # sim_ctl already reset the simulated world; mirror its objects in MoveIt
+            self._load_run_objects()
+        self.home()
+
+    def _clear_scene(self):
         _, attached = self._scene()
         if attached:
             self._diff(attached=[self._attached(n, CollisionObject.REMOVE) for n in attached])
@@ -231,10 +344,10 @@ class Robot:
             removals.append(co)
         if removals:
             self._diff(world=removals)
-        self.home()
 
     def _on_joints(self, m):
         self._joints.update(zip(m.name, m.position))
+        self._velocities.update(zip(m.name, m.velocity))
         self._stamp += 1
 
     def _settle(self):
@@ -379,6 +492,7 @@ class Robot:
         req.goal_constraints = [constraints]
         goal.planning_options.plan_only = False
         res = self._run(self._move, goal, 120)
+        self._physics_check(res.planned_trajectory, res.error_code.val)
         if res.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(res.error_code.val, what)
         self._settle()
@@ -473,6 +587,7 @@ class Robot:
                                  "of the way (an obstacle, a joint limit or the edge of the reach is in the way); "
                                  "try move_to or a different path")
         out = self._run(self._exec, ExecuteTrajectory.Goal(trajectory=res.solution), 120)
+        self._physics_check(res.solution, out.error_code.val)
         if out.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(out.error_code.val, f"straight line to {_fmt(xyz)}")
         self._settle()
