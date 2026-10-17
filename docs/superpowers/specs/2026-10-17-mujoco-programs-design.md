@@ -132,3 +132,19 @@ These are not in this spec, but they are planned. Each gets its own spec right a
 4. **File ▸ Import:** URDF, MuJoCo zip, finished project, and workcell files.
 
 After those come mobile bases, then RL, then real hardware and calibration.
+
+## Task 1 findings (2026-10-17)
+
+Measured on the irb1300 in the session image, `ros-jazzy-mujoco-ros2-control` 0.1.2 from apt, MuJoCo 3.16.0. All of the plan's gate checks passed.
+
+- **(a) Hardware plugin:** `mujoco_ros2_control/MujocoSystemInterface`. Its node is the package's own `ros2 run mujoco_ros2_control ros2_control_node`, not controller_manager's. Services live under `/mujoco_ros2_control_node/`: `reset_world`, `set_free_joint_state`, `set_pause`, `step_simulation`.
+- **(b) Pose publisher:** `mujoco_ros2_control_plugins/FreeJointStatePublisherPlugin`.
+  - Parameters: `frame_id` ("" = world), `body_names` ([] = all free bodies), `topic` (default `free_joint_states`, namespaced under the node and plugin key), `publish_rate` (default 50 Hz).
+- **(c) Message:** `mujoco_ros2_control_msgs/msg/FreeJointStateArray`. It has `free_joints[]`, and each entry has `name` (the body name) and `pose.pose` (`geometry_msgs/Pose`).
+- **(d) Plugin loading:** plugins load from ROS parameters under `mujoco_plugins.<key>.type`, passed to the node as a parameters file, not as URDF hardware params. The plugin base class is `mujoco_ros2_control_plugins::MuJoCoROS2ControlPluginBase`, and the MuJoCo header comes from `mujoco_vendor` (`/opt/ros/jazzy/opt/mujoco_vendor/include`).
+- **(e) MuJoCo:** Python `mujoco` 3.16.0 with numpy 1.26.4 in the image, and 3.16.0 on the host.
+- **Position actuators:** the exported `position` motors load as they are. The plugin matches them to joints and logs "Using MuJoCo position actuator". Controllers go active within 2 s.
+- **(f) Restart time:** a sim-node restart plus controller spawn takes 2.6 to 3.3 s.
+- **(g) MoveIt and reset:** MoveIt executes after a sim restart without restarting `move_group`. `reset_world` works while controllers stay active, and moves after a reset succeed.
+- **(h) Topic reload:** not tested, because a restart takes only about 3 s.
+- **Droop (new finding):** the exported motors are proportional only, so gravity leaves a steady error. joint2 settled at 0.321 rad for a 0.3 rad goal, and joint3 at 0.028 for a 0 rad goal. That is 0.016 to 0.028 rad, about 1 to 2 cm at the tool. A real arm's controller feeds gravity torque forward. Fix: route gravity compensation through the actuators (`gravcomp` on robot bodies, `actuatorgravcomp` on joints, `actuatorfrcrange` = the motor limit). The motors then supply the holding torque inside their torque limit, and a payload or a too-weak motor still droops.
