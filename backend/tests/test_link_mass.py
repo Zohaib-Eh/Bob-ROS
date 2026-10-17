@@ -59,3 +59,17 @@ def test_inverted_box_raises_instead_of_negative_mass():
     body = _body_from_trimesh(mesh)
     with pytest.raises(ValueError, match="volume"):
         compute_link_mass_properties([body], density_kg_m3=1000.0)
+
+
+def test_open_part_far_from_origin_keeps_positive_inertia():
+    # a 10 cm cube with a pinhole, 1.5 m from the world origin (like irb1300 link5):
+    # integrating about the far origin turned the gap into negative inertia
+    side = 0.1
+    mesh = trimesh.creation.box(extents=(side,) * 3).subdivide().subdivide().subdivide()
+    mesh.apply_translation((0.8, 0.8, 1.2))
+    mesh = trimesh.Trimesh(mesh.vertices, mesh.faces[1:], process=False)
+    body = _body_from_trimesh(mesh)
+    mass, _, inertia = compute_link_mass_properties([body], density_kg_m3=1000.0)
+    expected_i = (mass / 6.0) * side**2
+    for i in inertia[:3]:
+        assert math.isclose(i, expected_i, rel_tol=0.02)

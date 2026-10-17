@@ -24,6 +24,13 @@ def compute_link_mass_properties(
         )
         combined = mesh if combined is None else combined + mesh
 
+    # Integrate about the part's own centre: about a far-away world origin, any tiny
+    # gap in the mesh is amplified by r^2 and can make the inertia negative.
+    offset = None
+    if combined is not None and len(combined.vertices):
+        offset = combined.bounds.mean(axis=0)
+        combined.apply_translation(-offset)
+
     # degenerate meshes divide by ~0 volume inside trimesh; we reject them below
     with np.errstate(invalid="ignore", divide="ignore"):
         volume = None if combined is None else combined.volume
@@ -36,7 +43,7 @@ def compute_link_mass_properties(
 
     combined.density = density_kg_m3
     mass = float(combined.mass)
-    com = tuple(combined.center_mass.tolist())
+    com = tuple((combined.center_mass + offset).tolist())
     inertia_tensor = combined.moment_inertia  # 3x3, about center of mass
     inertia_vector = [
         float(inertia_tensor[0, 0]), float(inertia_tensor[1, 1]),
