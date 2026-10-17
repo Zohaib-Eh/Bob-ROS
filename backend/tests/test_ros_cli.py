@@ -8,7 +8,8 @@ def test_cli_writes_the_three_packages(tmp_path, capsys):
     z = two_joint_zip(tmp_path)
     assert main([str(z), "-o", str(tmp_path / "ws"), "--samples", "50"]) == 0
     src = tmp_path / "ws" / "src"
-    assert {p.name for p in src.iterdir()} == {"bot", "bot_moveit_config", "bot_kinematics", "bot_program", "bot_tasks"}
+    assert {p.name for p in src.iterdir()} == {"bot", "bot_moveit_config", "bot_kinematics", "bot_program", "bot_tasks",
+                                               "cad_to_urdf_glue"}
     assert "bot_moveit_config" in capsys.readouterr().out
 
 
