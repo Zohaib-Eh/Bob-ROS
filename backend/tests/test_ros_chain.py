@@ -105,3 +105,46 @@ def test_zero_length_axis_is_declined():
     urdf = _robot(_rev("j", "base", "a").replace("0 0 1", "0 0 0"), links=("base", "a"))
     with pytest.raises(UnsupportedRobot, match="Joint 'j' has a zero-length axis."):
         parse_chain(urdf)
+
+
+def _sixg_urdf(tmp_path):
+    from tests.ros_helpers import six_axis_with_gripper_zip
+    return zipfile.ZipFile(six_axis_with_gripper_zip(tmp_path)).read("sixg/urdf/sixg.urdf").decode()
+
+
+def test_six_with_gripper_is_a_six_joint_arm_with_tip_tcp_and_a_gripper(tmp_path):
+    c = parse_chain(_sixg_urdf(tmp_path))
+    assert [j.name for j in c.joints] == [f"l{i}_joint" for i in range(1, 7)] and c.tip == "tcp"
+    g = c.gripper
+    assert (g.leader, g.follower, g.base) == ("gfl_joint", "gfr_joint", "gbase")
+    assert (g.lower, g.upper, g.effort) == pytest.approx((0.0, 0.025, 40.0))
+    # in the tcp frame the leader closes along +x (tcp_joint puts x on the leader's closing direction)
+    assert g.closing_axis_tcp == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)
+    assert "tcp" in c.links and "gfl" in c.links
+
+
+def _slide(name, parent, child, mimic=None):
+    m = f'<mimic joint="{mimic}"/>' if mimic else ""
+    return (f'<joint name="{name}" type="prismatic"><parent link="{parent}"/><child link="{child}"/>'
+            f'<axis xyz="1 0 0"/><limit lower="0" upper="0.02" effort="40" velocity="1"/>{m}</joint>')
+
+
+def test_two_prismatic_leaves_without_mimic_are_still_branching():
+    urdf = _robot(_rev("j1", "base", "a") + _slide("f1", "a", "b") + _slide("f2", "a", "c"), links=("base", "a", "b", "c"))
+    with pytest.raises(UnsupportedRobot, match="Robot has 2 moving branches"):
+        parse_chain(urdf)
+
+
+def test_mimic_finger_pair_is_the_gripper_even_without_a_tcp_link():
+    urdf = _robot(_rev("j1", "base", "a") + _slide("f1", "a", "b") + _slide("f2", "a", "c", mimic="f1"),
+                  links=("base", "a", "b", "c"))
+    c = parse_chain(urdf)
+    assert [j.name for j in c.joints] == ["j1"] and c.tip == "a" and c.gripper.leader == "f1"
+
+
+def test_robot_without_gripper_parses_as_before(tmp_path):   # Review Focus 5
+    from tests.ros_helpers import six_axis_zip, two_joint_zip
+    c = parse_chain(zipfile.ZipFile(six_axis_zip(tmp_path)).read("six/urdf/six.urdf").decode())
+    assert len(c.joints) == 6 and c.tip == "l6" and c.gripper is None
+    c = parse_chain(zipfile.ZipFile(two_joint_zip(tmp_path)).read("bot/urdf/bot.urdf").decode())
+    assert c.tip == "hand" and c.gripper is None

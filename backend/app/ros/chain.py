@@ -45,12 +45,24 @@ class ChainJoint:
 
 
 @dataclass
+class GripperInfo:
+    leader: str
+    follower: str
+    base: str
+    lower: float
+    upper: float
+    effort: float
+    closing_axis_tcp: np.ndarray   # the leader's closing direction in the tip (tcp) frame
+
+
+@dataclass
 class Chain:
     robot: str
     base: str
     tip: str
     joints: list[ChainJoint]
     links: dict[str, tuple[int, np.ndarray]]  # link -> (segment, pose in segment frame)
+    gripper: GripperInfo | None = None
 
 
 def parse_chain(urdf_text: str) -> Chain:
@@ -67,9 +79,15 @@ def parse_chain(urdf_text: str) -> Chain:
     if len(roots) != 1:
         raise UnsupportedRobot(f"URDF has {len(roots)} root links; expected one.")
 
+    fingers = _finger_pair(joints, children)   # gripper fingers count as fixed for the arm
+
+    finger_names = {*fingers, *fingers.values()}
+
+    def moving(j) -> bool:
+        return j.get("type") != "fixed" and j.get("name") not in finger_names
+
     def moving_below(link: str) -> bool:
-        return any(j.get("type") != "fixed" or moving_below(j.find("child").get("link"))
-                   for j in children.get(link, []))
+        return any(moving(j) or moving_below(j.find("child").get("link")) for j in children.get(link, []))
 
     wheels = [j for j in joints
               if j.get("type") == "continuous" and not moving_below(j.find("child").get("link"))]
@@ -81,8 +99,7 @@ def parse_chain(urdf_text: str) -> Chain:
             raise UnsupportedRobot(
                 f"Joint '{j.get('name')}' is {j.get('type')}; only revolute, prismatic, "
                 "continuous and fixed joints are supported.")
-    leaves = [j for j in joints
-              if j.get("type") != "fixed" and not moving_below(j.find("child").get("link"))]
+    leaves = [j for j in joints if moving(j) and not moving_below(j.find("child").get("link"))]
     if len(leaves) > 1:
         raise UnsupportedRobot(
             f"Robot has {len(leaves)} moving branches; only single-arm robots are supported yet.")
@@ -97,7 +114,7 @@ def parse_chain(urdf_text: str) -> Chain:
         for j in children.get(link, []):
             child = j.find("child").get("link")
             O = T @ origin_matrix(j.find("origin"))
-            if j.get("type") == "fixed":
+            if not moving(j):   # fixed, or a gripper finger (at 0, so its link still has a pose)
                 walk(child, seg, O)
                 continue
             lower = upper = None
@@ -116,7 +133,38 @@ def parse_chain(urdf_text: str) -> Chain:
             walk(child, len(chain_joints), np.eye(4))
 
     walk(roots[0], 0, np.eye(4))
-    return Chain(root.get("name"), roots[0], chain_joints[-1].child, chain_joints, link_poses)
+    tip = "tcp" if "tcp" in link_poses else chain_joints[-1].child
+    gripper = _gripper_info(fingers, joints, link_poses, tip) if fingers else None
+    return Chain(root.get("name"), roots[0], tip, chain_joints, link_poses, gripper)
+
+
+def _finger_pair(joints, children) -> dict[str, str]:
+    """{leader: follower} names of a gripper: two prismatic leaf joints on one link, the follower
+    with <mimic joint=leader>. Empty when there is none."""
+    by_name = {j.get("name"): j for j in joints}
+    leaf = lambda j: not any(c.get("type") != "fixed" for c in children.get(j.find("child").get("link"), []))
+    for f in joints:
+        mimic = f.find("mimic")
+        lead = by_name.get(mimic.get("joint")) if mimic is not None else None
+        if (lead is not None and f.get("type") == lead.get("type") == "prismatic" and leaf(f) and leaf(lead)
+                and f.find("parent").get("link") == lead.find("parent").get("link")):
+            return {lead.get("name"): f.get("name")}
+    return {}
+
+
+def _gripper_info(fingers, joints, link_poses, tip) -> GripperInfo:
+    leader_name, follower_name = next(iter(fingers.items()))
+    j = next(j for j in joints if j.get("name") == leader_name)
+    base = j.find("parent").get("link")
+    lim = j.find("limit")
+    ax_el = j.find("axis")
+    axis = np.array([float(v) for v in (ax_el.get("xyz") if ax_el is not None else "1 0 0").split()])
+    _, T_base = link_poses[base]
+    _, T_tip = link_poses[tip]
+    R_joint = (T_base @ origin_matrix(j.find("origin")))[:3, :3]   # base and tip share the last segment
+    closing = T_tip[:3, :3].T @ (R_joint @ (axis / np.linalg.norm(axis)))
+    return GripperInfo(leader_name, follower_name, base, float(lim.get("lower")), float(lim.get("upper")),
+                       float(lim.get("effort", 0)), closing)
 
 
 def home(chain: Chain) -> list[float]:
