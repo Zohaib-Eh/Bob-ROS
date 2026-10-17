@@ -80,5 +80,11 @@ def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | 
                 ET.SubElement(act, "position", {
                     "name": f"{name}_motor", "joint": name, "kp": repr(kp), "dampratio": "1",
                     "forcelimited": "true", "forcerange": f"{-e:g} {e:g}"})
+                # Gravity fed forward through the motor, as a real arm controller does, and
+                # capped with it: no droop at rest, but a too-weak motor or a payload still sags.
+                j.set("actuatorgravcomp", "true")
+                j.set("actuatorfrcrange", f"{-e:g} {e:g}")
+        for b in root.find("worldbody").iter("body"):
+            b.set("gravcomp", "1")
     _exclude_touching_at_home(root, model)
     return ET.tostring(root, encoding="unicode")

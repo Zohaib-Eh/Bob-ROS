@@ -11,6 +11,8 @@ from app.sim.torque import required_efforts
 
 SAG_HINGE = math.radians(5)
 SAG_SLIDE = 0.005
+KICK_HINGE = 0.01   # rad: start offset from home, well under SAG_HINGE
+KICK_SLIDE = 0.0005  # m
 
 
 def _name(m, kind, i) -> str:
@@ -46,9 +48,18 @@ def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict
         if m.jnt_limited[j]:
             a = m.jnt_qposadr[j]
             home[a] = min(max(0.0, m.jnt_range[j][0]), m.jnt_range[j][1])
-    d.qpos[:] = home
     for a in range(m.nu):
         d.ctrl[a] = home[m.jnt_qposadr[m.actuator_trnid[a][0]]]
+    # Start slightly off home: with gravity fed forward an exact home pose is a perfect balance,
+    # which would hide a model that blows up on the first real motion.
+    d.qpos[:] = home
+    for j in range(m.njnt):
+        kind = m.jnt_type[j]
+        if kind in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
+            a = m.jnt_qposadr[j]
+            kick = KICK_HINGE if kind == mujoco.mjtJoint.mjJNT_HINGE else KICK_SLIDE
+            hi = m.jnt_range[j][1] if m.jnt_limited[j] else math.inf
+            d.qpos[a] = home[a] + kick if home[a] + kick <= hi else home[a] - kick
     for step in range(int(round(seconds / m.opt.timestep))):
         mujoco.mj_step(m, d)
         link = _blow_up_link(m, d)

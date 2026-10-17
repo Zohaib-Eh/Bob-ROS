@@ -29,6 +29,27 @@ def test_mjcf_keeps_links_and_adds_one_motor_per_moving_joint(tmp_path):
     assert m.nu == 2 and m.opt.timestep == pytest.approx(0.002)
 
 
+def test_motors_hold_their_target_without_gravity_droop(tmp_path):
+    # a real controller feeds gravity torque forward; proportional-only motors settled 1-2 cm low (Task 1)
+    import mujoco
+    urdf, meshes = _parts(tmp_path)
+    req = required_efforts(compile_mjcf(build_mjcf(urdf, meshes, None), meshes))
+    m = compile_mjcf(build_mjcf(urdf, meshes, suggest(req)), meshes)
+    d = mujoco.MjData(m)
+    for _ in range(int(1.0 / m.opt.timestep)):
+        mujoco.mj_step(m, d)
+    hand = m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "hand_joint")]
+    assert abs(d.qpos[hand]) < 0.002
+
+
+def test_gravity_holding_counts_against_the_motor_limit(tmp_path):
+    root = ET.fromstring(build_mjcf(*_parts(tmp_path), {"arm_joint": 50.0, "hand_joint": 20.0}))
+    joints = {j.get("name"): j for j in root.iter("joint")}
+    assert joints["hand_joint"].get("actuatorgravcomp") == "true"
+    assert joints["hand_joint"].get("actuatorfrcrange") == "-20 20"
+    assert all(b.get("gravcomp") == "1" for b in root.find("worldbody").iter("body"))
+
+
 def test_no_efforts_means_no_motors(tmp_path):
     urdf, meshes = _parts(tmp_path)
     assert compile_mjcf(build_mjcf(urdf, meshes, None), meshes).nu == 0
