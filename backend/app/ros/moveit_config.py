@@ -220,7 +220,7 @@ def _package_xml(robot: str, note: str) -> str:
     deps = [robot, "moveit_ros_move_group", "moveit_configs_utils", "moveit_kinematics",
             "moveit_planners_ompl", "moveit_simple_controller_manager", "trac_ik_kinematics_plugin",
             "controller_manager", "joint_state_broadcaster", "joint_trajectory_controller",
-            "robot_state_publisher", "xacro", "launch", "launch_ros", "mujoco_ros2_control"]
+            "robot_state_publisher", "xacro", "launch", "launch_ros", "mujoco_ros2_control", "cad_to_urdf_glue"]
     dep_lines = "\n".join(f"  <exec_depend>{d}</exec_depend>" for d in deps)
     return f"""<?xml version="1.0"?>
 {note}<package format="3">
@@ -293,8 +293,9 @@ def generate(robot: str, description_dir: Path, out_src: Path, source: str, samp
         write_files(tmp / f"{robot}_moveit_config", moveit_files(chain, robot, source, pairs))
         from .kinematics_pkg import kinematics_files  # local: kinematics_pkg imports this module
         write_files(tmp / f"{robot}_kinematics", kinematics_files(robot, source))
-        from .program_pkg import program_files  # local: program_pkg imports this module
+        from .program_pkg import glue_files, program_files  # local: program_pkg imports this module
         write_files(tmp / f"{robot}_program", program_files(chain, robot, source))
+        write_files(tmp / "cad_to_urdf_glue", glue_files())
         _swap_in(Path(out_src), tmp, sorted(p.name for p in tmp.iterdir()))
         (Path(out_src) / f"{robot}_tasks" / "programs").mkdir(parents=True, exist_ok=True)
     finally:

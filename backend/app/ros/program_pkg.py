@@ -104,6 +104,12 @@ def _template(name: str, robot: str, source: str) -> str:
             .replace("__CONTAINER__", SESSION_CONTAINER))
 
 
+def glue_files() -> dict[str, str]:
+    """The cad_to_urdf_glue MuJoCo plugin package (robot-independent)."""
+    d = HERE / "templates" / "glue"
+    return {p.relative_to(d).as_posix(): p.read_text(encoding="utf-8") for p in d.rglob("*") if p.is_file()}
+
+
 def program_files(chain: Chain, robot: str, source: str) -> dict[str, str]:
     return {
         "brief.md": brief(chain, robot),

@@ -120,3 +120,12 @@ def test_library_has_position_only_moves_and_tool_down(ws):
     lib = (ws / "bot_program" / "robot.py").read_text()
     assert "def move_to(self, xyz, rpy=None)" in lib and "def move_line(self, xyz, rpy=None)" in lib
     assert "def tool_down(self)" in lib and "def _position_ik(self" in lib and "def tool_facing(self, direction)" in lib
+
+
+def test_glue_package_is_generated(ws):
+    glue = ws / "cad_to_urdf_glue"
+    assert (glue / "src" / "glue_plugin.cpp").is_file() and (glue / "plugins.xml").is_file()
+    assert (glue / "package.xml").is_file() and (glue / "CMakeLists.txt").is_file()
+    cpp = (glue / "src" / "glue_plugin.cpp").read_text()
+    assert "MuJoCoROS2ControlPluginBase" in cpp and '"/sim/glue"' in cpp and "eq_active" in cpp
+    assert "cad_to_urdf_glue" in (ws / "bot_moveit_config" / "package.xml").read_text()
