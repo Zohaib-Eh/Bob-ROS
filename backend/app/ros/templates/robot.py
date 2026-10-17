@@ -25,6 +25,7 @@ import sim_errors
 ROBOT = "__ROBOT__"
 GROUP = "arm"
 ATTACH_REACH = 0.02   # m: attach() needs the tool frame this close to the object's surface
+STILL = 0.01          # rad/s (m/s): under physics, the next motion waits until every joint is this slow
 _kin = importlib.import_module(f"{ROBOT}_kinematics")
 _home = importlib.import_module(f"{ROBOT}_kinematics._chain").home
 _ERRORS = {v: k for k, v in vars(MoveItErrorCodes).items() if k.isupper() and isinstance(v, int)}
@@ -304,8 +305,9 @@ class Robot:
         if adds:
             self._diff(world=adds)
 
-    def _physics_check(self, trajectory, code: int):
-        """After a motion in MuJoCo: a blown-up sim, or a joint the controller gave up on."""
+    def _physics_check(self, trajectory, code: int, elapsed: float):
+        """After a motion in MuJoCo: a blown-up sim, or a joint the controller gave up on
+        `elapsed` seconds into the trajectory."""
         if not _PHYSICS:
             return
         self._settle()
@@ -316,11 +318,10 @@ class Robot:
         if boom:
             raise MotionError(boom)
         if _ERRORS.get(code) == "CONTROL_FAILED" and trajectory.joint_trajectory.points:
-            # ponytail: compares with the last waypoint, not the sample at abort time; use the timed
-            # sample if messages name the wrong joint
             jt = trajectory.joint_trajectory
-            goal = dict(zip(jt.joint_names, jt.points[-1].positions))
-            planned = [goal.get(n, p) for n, p in zip(names, pos)]
+            times = [p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in jt.points]
+            now = dict(zip(jt.joint_names, sim_errors.planned_at(times, [list(p.positions) for p in jt.points], elapsed)))
+            planned = [now.get(n, p) for n, p in zip(names, pos)]
             m = _meta()
             carrying = {k: m["masses"][k] for k in sorted(self._glued) if k in m["masses"]}
             hinge = {j.name: j.type != "prismatic" for j in self.chain.joints}
@@ -351,9 +352,14 @@ class Robot:
         self._stamp += 1
 
     def _settle(self):
-        """Wait for a joint state that arrived after the motion finished."""
+        """Wait for a joint state that arrived after the motion finished. Under physics also wait
+        until the arm is at rest: the controller reports success within tolerance while it still
+        settles, and MoveIt rejects a next motion that starts from a stale pose."""
         seen, end = self._stamp, time.time() + 2
         while self._stamp == seen and time.time() < end:
+            rclpy.spin_once(_node(), timeout_sec=0.05)
+        while (_PHYSICS and time.time() < end
+               and any(abs(self._velocities.get(n, 0.0)) > STILL for n in self.joint_names)):
             rclpy.spin_once(_node(), timeout_sec=0.05)
 
     # --- state -------------------------------------------------------------------------------
@@ -491,8 +497,9 @@ class Robot:
         req.start_state.is_diff = True
         req.goal_constraints = [constraints]
         goal.planning_options.plan_only = False
+        t0 = time.time()
         res = self._run(self._move, goal, 120)
-        self._physics_check(res.planned_trajectory, res.error_code.val)
+        self._physics_check(res.planned_trajectory, res.error_code.val, time.time() - t0 - res.planning_time)
         if res.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(res.error_code.val, what)
         self._settle()
@@ -586,8 +593,9 @@ class Robot:
             raise PlanningFailed(f"a straight line to {_fmt(xyz)} is only possible for {res.fraction * 100:.0f}% "
                                  "of the way (an obstacle, a joint limit or the edge of the reach is in the way); "
                                  "try move_to or a different path")
+        t0 = time.time()
         out = self._run(self._exec, ExecuteTrajectory.Goal(trajectory=res.solution), 120)
-        self._physics_check(res.solution, out.error_code.val)
+        self._physics_check(res.solution, out.error_code.val, time.time() - t0)
         if out.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(out.error_code.val, f"straight line to {_fmt(xyz)}")
         self._settle()

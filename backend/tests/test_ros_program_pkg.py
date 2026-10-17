@@ -139,10 +139,18 @@ def test_regenerating_keeps_the_users_workcell(ws, tmp_path):
     assert (ws / "bot_tasks" / "workcell.yaml").read_text().startswith("- {name: t")
 
 
-def test_session_boots_the_sim_before_moveit():
+def test_session_picks_hardware_before_moveit_and_boots_the_sim_after():
+    # the MuJoCo node reads /robot_description, which MoveIt's robot_state_publisher publishes
     start = (Path(__file__).resolve().parents[2] / "docker" / "jazzy" / "session" / "start.sh").read_text()
-    boot, launch = start.index("python3 -m sim_ctl boot"), start.index("demo.launch.py")
-    assert boot < launch < start.index("python3 -m scene_sync")
+    hw, launch = start.index("python3 -m sim_ctl hardware"), start.index("demo.launch.py")
+    assert hw < launch < start.index("python3 -m sim_ctl boot") < start.index("python3 -m scene_sync")
+
+
+def test_sim_node_listens_on_the_robot_description_topic():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app" / "ros" / "templates"))
+    import sim_ctl
+    assert "~/robot_description:=/robot_description" in sim_ctl.control_node_cmd("bot")
 
 
 def test_robot_library_speaks_physics(ws):

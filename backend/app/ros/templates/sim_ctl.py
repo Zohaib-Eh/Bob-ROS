@@ -79,18 +79,21 @@ def _stop_sim():
     pid_file.unlink(missing_ok=True)
 
 
-def _start_sim(robot: str):
+def control_node_cmd(robot: str) -> str:
+    """The MuJoCo control node. It reads the robot (with hardware:=mujoco and mujoco_model =
+    /tmp/sim/scene.xml) from /robot_description, which MoveIt's robot_state_publisher latches."""
     share = f"/ws/install/{robot}_moveit_config/share/{robot}_moveit_config"
-    desc = _ros(f"xacro {share}/config/{robot}.urdf.xacro hardware:=mujoco mujoco_model:={SIM / 'scene.xml'}", 30)
-    if desc.returncode != 0:
-        raise SimError(f"Could not build the robot description: {desc.stderr.strip()[-300:]}")
-    (SIM / "description.yaml").write_text(yaml.safe_dump({"/**": {"ros__parameters": {"robot_description": desc.stdout}}}))
+    return (f"ros2 run mujoco_ros2_control ros2_control_node --ros-args "
+            f"--params-file {share}/config/ros2_controllers.yaml --params-file {SIM / 'plugins.yaml'} "
+            "-r ~/robot_description:=/robot_description")
+
+
+def _start_sim(robot: str):
     (SIM / "plugins.yaml").write_text(plugins_yaml())
     with open(SIM / "control.log", "w") as log:
         p = subprocess.Popen(
-            ["bash", "-c", "source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && exec ros2 run "
-             f"mujoco_ros2_control ros2_control_node --ros-args --params-file {share}/config/ros2_controllers.yaml "
-             f"--params-file {SIM / 'description.yaml'} --params-file {SIM / 'plugins.yaml'}"],
+            ["bash", "-c", "source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && exec "
+             + control_node_cmd(robot)],
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     (SIM / "control.pid").write_text(str(p.pid))
     try:
@@ -101,23 +104,58 @@ def _start_sim(robot: str):
         ok = False
     if not ok or p.poll() is not None:
         raise SimError(f"The simulation did not start within {RESTART_TIMEOUT:.0f} s:\n{_log_tail()}")
+    _wait_for_arm_controller()
+
+
+def _wait_for_arm_controller():
+    """MoveIt's action client reconnects to a restarted controller on its own, but not instantly:
+    a motion sent too early fails with 'Action client not connected'."""
+    import rclpy
+    from control_msgs.action import FollowJointTrajectory
+    from rclpy.action import ActionClient
+    if not rclpy.ok():
+        rclpy.init()
+    node = rclpy.create_node("cad_to_urdf_sim_wait")
+    try:
+        if not ActionClient(node, FollowJointTrajectory, "/arm_controller/follow_joint_trajectory").wait_for_server(10):
+            raise SimError(f"The arm controller did not come up after the simulation restarted:\n{_log_tail()}")
+    finally:
+        node.destroy_node()
+    time.sleep(1.0)  # ponytail: margin for MoveIt's own client; poll MoveIt's connection if this proves flaky
+
+
+def _call(node, srv_type, name: str, req, what: str):
+    import rclpy
+    cli = node.create_client(srv_type, name)
+    if not cli.wait_for_service(timeout_sec=10):
+        raise SimError(f"The simulation is not answering (no {name}):\n{_log_tail()}")
+    fut = cli.call_async(req)
+    rclpy.spin_until_future_complete(node, fut, timeout_sec=10)
+    if not fut.done():
+        raise SimError(f"Could not {what}: no answer from {name}")
+    return fut.result()
 
 
 def _reset_sim():
-    """reset_world through rclpy (the ros2 CLI costs ~4 s per call); controllers stay active."""
+    """reset_world through rclpy (the ros2 CLI costs ~4 s per call). The arm controller is off
+    meanwhile: it would otherwise keep commanding the previous run's last pose and swing the arm back."""
     import rclpy
+    from controller_manager_msgs.srv import SwitchController
     from mujoco_ros2_control_msgs.srv import ResetWorld
     if not rclpy.ok():
         rclpy.init()
     node = rclpy.create_node("cad_to_urdf_sim_ctl")
     try:
-        cli = node.create_client(ResetWorld, f"/{NODE}/reset_world")
-        if not cli.wait_for_service(timeout_sec=10):
-            raise SimError(f"The simulation is not answering (no /{NODE}/reset_world):\n{_log_tail()}")
-        fut = cli.call_async(ResetWorld.Request())
-        rclpy.spin_until_future_complete(node, fut, timeout_sec=10)
-        if not fut.done() or not fut.result().success:
-            raise SimError("Could not reset the simulation" + (f": {fut.result().message}" if fut.done() else ""))
+        def switch(**kw):
+            r = _call(node, SwitchController, "/controller_manager/switch_controller",
+                      SwitchController.Request(strictness=SwitchController.Request.STRICT, **kw), "switch controllers")
+            if not r.ok:
+                raise SimError(f"Could not switch the arm controller ({kw})")
+        switch(deactivate_controllers=["arm_controller"])
+        r = _call(node, ResetWorld, f"/{NODE}/reset_world", ResetWorld.Request(), "reset the simulation")
+        if not r.success:
+            raise SimError(f"Could not reset the simulation: {r.message}")
+        switch(activate_controllers=["arm_controller"])
     finally:
         node.destroy_node()
 
@@ -136,22 +174,28 @@ def prepare(program):
     _start_sim(robot)
 
 
-def boot():
+def hardware():
+    """Before MoveIt starts: mujoco when the export has a MuJoCo model, else mock (as before)."""
     SIM.mkdir(parents=True, exist_ok=True)
     robot, _ = _robot_and_tool()
-    if not (WS_SRC / robot / "mjcf" / f"{robot}.xml").exists():
+    if (WS_SRC / robot / "mjcf" / f"{robot}.xml").exists():
+        (SIM / "hardware").write_text("mujoco")
+    else:
         (SIM / "hardware").write_text("mock")
         Path("/tmp/physics").write_text("off: the export has no MuJoCo model (see the Physics card in Simulate)")
+
+
+def boot():
+    """After MoveIt is up (it publishes /robot_description): start the sim with the workcell."""
+    if (SIM / "hardware").read_text().strip() != "mujoco":
         return
-    (SIM / "hardware").write_text("mujoco")
     try:
         prepare(None)
         Path("/tmp/physics").write_text("mujoco")
-    except (scene.SceneError, SimError) as exc:
+    except (scene.SceneError, SimError) as exc:  # runs will fail with the same reason until it is fixed
         _stop_sim()
-        (SIM / "hardware").write_text("mock")
         Path("/tmp/physics").write_text(f"off: {str(exc).splitlines()[0]}")
 
 
 if __name__ == "__main__":
-    {"boot": boot}[sys.argv[1]]()
+    {"hardware": hardware, "boot": boot}[sys.argv[1]]()

@@ -42,6 +42,17 @@ def test_motors_hold_their_target_without_gravity_droop(tmp_path):
     assert abs(d.qpos[hand]) < 0.002
 
 
+def test_a_vertical_axis_still_needs_torque_to_move_the_arm(tmp_path):
+    # arm_joint turns about z: no gravity torque, but accelerating the arm at the joint limits takes torque
+    import mujoco
+    from app.ros.moveit_config import MAX_ACCELERATION
+    urdf, meshes = _parts(tmp_path)
+    m = compile_mjcf(build_mjcf(urdf, meshes, None), meshes)
+    req = required_efforts(m)
+    dof = m.jnt_dofadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "arm_joint")]
+    assert req["arm_joint"] >= 0.5 * float(m.dof_M0[dof]) * MAX_ACCELERATION
+
+
 def test_gravity_holding_counts_against_the_motor_limit(tmp_path):
     root = ET.fromstring(build_mjcf(*_parts(tmp_path), {"arm_joint": 50.0, "hand_joint": 20.0}))
     joints = {j.get("name"): j for j in root.iter("joint")}
@@ -58,8 +69,8 @@ def test_no_efforts_means_no_motors(tmp_path):
 def test_required_torque_is_larger_nearer_the_base(tmp_path):
     urdf, meshes = _parts(tmp_path)
     req = required_efforts(compile_mjcf(build_mjcf(urdf, meshes, None), meshes))
-    # arm_joint turns about z (vertical): gravity needs ~no torque there; hand_joint about y lifts the hand
-    assert req["hand_joint"] > 0.1 and req["arm_joint"] < 0.01 * req["hand_joint"]
+    # arm_joint turns about z (vertical): only inertia, no gravity; hand_joint about y also lifts the hand
+    assert req["hand_joint"] > req["arm_joint"] > 0.1
 
 
 def test_links_touching_at_home_do_not_collide(tmp_path):

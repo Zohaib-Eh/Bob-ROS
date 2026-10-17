@@ -2,6 +2,18 @@
 import math
 
 
+def planned_at(times, points, t) -> list[float]:
+    """Joint positions the trajectory (waypoint times, positions) asks for at time t, linearly
+    interpolated; clamped to the first/last waypoint outside the trajectory."""
+    if t <= times[0]:
+        return list(points[0])
+    for k in range(1, len(times)):
+        if t <= times[k]:
+            f = (t - times[k - 1]) / (times[k] - times[k - 1]) if times[k] > times[k - 1] else 1.0
+            return [a + (b - a) * f for a, b in zip(points[k - 1], points[k])]
+    return list(points[-1])
+
+
 def lag_message(names, planned, actual, efforts, carrying, hinge) -> str:
     """Name the joint furthest behind, what it carried and its motor limit."""
     i = max(range(len(names)), key=lambda k: abs(planned[k] - actual[k]))

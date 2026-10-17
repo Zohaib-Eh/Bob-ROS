@@ -6,10 +6,9 @@ echo build > /tmp/stage
 cd /ws && colcon build 2>&1 | tail -n 30
 source /ws/install/setup.bash
 ROBOT=$(basename "$(ls -d src/*_moveit_config)" _moveit_config)
-echo physics > /tmp/stage
 export PYTHONPATH=/ws/src/${ROBOT}_program:$PYTHONPATH
-# MuJoCo when the export has a model (writes /tmp/sim/hardware for the launch, /tmp/physics for the app)
-python3 -m sim_ctl boot || { mkdir -p /tmp/sim; echo mock > /tmp/sim/hardware; echo "off: sim boot crashed" > /tmp/physics; }
+# MuJoCo when the export has a model, else mock (writes /tmp/sim/hardware for the launch)
+python3 -m sim_ctl hardware || { mkdir -p /tmp/sim; echo mock > /tmp/sim/hardware; echo "off: sim setup crashed" > /tmp/physics; }
 echo moveit > /tmp/stage
 ros2 launch "${ROBOT}_moveit_config" demo.launch.py &
 LAUNCH=$!
@@ -24,6 +23,9 @@ until MOVEIT=$(ros2 action list 2>/dev/null | grep -c '^/move_action$'); (( MOVE
   sleep 1
 done
 if [ "$(cat /tmp/sim/hardware 2>/dev/null)" = mujoco ]; then
+  echo physics > /tmp/stage
+  # the sim reads /robot_description, which MoveIt's robot_state_publisher now publishes
+  python3 -m sim_ctl boot || echo "off: sim boot crashed" > /tmp/physics
   python3 -m scene_sync &  # simulated object poses into MoveIt's scene
 fi
 touch /tmp/ready

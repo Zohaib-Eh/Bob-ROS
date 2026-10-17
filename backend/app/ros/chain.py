@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import numpy as np
 
 MOVING = ("revolute", "prismatic", "continuous")
+MAX_VELOCITY = 1.0       # rad/s (m/s for prismatic): placeholder until set from the datasheet
+MAX_ACCELERATION = 2.0   # rad/s^2 (m/s^2); joint_limits.yaml and the motor sizing both use these
 
 
 class UnsupportedRobot(ValueError):

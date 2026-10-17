@@ -8,12 +8,10 @@ from pathlib import Path
 
 from app.export.urdf_writer import cmakelists, package_xml
 
-from .chain import Chain, home, parse_chain
+from .chain import MAX_ACCELERATION, MAX_VELOCITY, Chain, home, parse_chain
 from .collisions import disabled_pairs, link_meshes
 
 ROS_NAME = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
-MAX_VELOCITY = 1.0       # rad/s (m/s for prismatic): placeholder until set from the datasheet
-MAX_ACCELERATION = 2.0   # rad/s^2 (m/s^2)
 
 
 WORKCELL_TEMPLATE = """# Objects every program runs with (table, fixtures, parts). Same format as a program's SCENE.
