@@ -6,6 +6,7 @@ import { partProblems, type Problem } from "../../model/problems";
 import type { Ctx } from "../ctx";
 import { fmtLen, shortName } from "../format";
 import Info from "../Info";
+import MountCard from "../MountCard";
 
 const REEXPORT = "Re-export this part from your CAD tool as a closed solid (STEP works best), then use Replace.";
 
@@ -70,6 +71,7 @@ export default function PartsStep({ ctx }: { ctx: Ctx }) {
           ))}
         </div>
       )}
+      <MountCard ctx={ctx} />
     </section>
   );
 }

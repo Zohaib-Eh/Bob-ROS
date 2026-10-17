@@ -9,7 +9,7 @@ import { partProblems } from "./model/problems";
 import Banner from "./ui/Banner";
 import Browser from "./ui/Browser";
 import { glyphsFor, tintsFor } from "./ui/colors";
-import type { Ctx, PickMode } from "./ui/ctx";
+import type { Ctx, PickedFace, PickMode } from "./ui/ctx";
 import InfoCard from "./ui/InfoCard";
 import JointTool from "./ui/JointTool";
 import MarkerLayer from "./ui/MarkerLayer";
@@ -32,6 +32,7 @@ export default function App() {
   const [selection, setSelection] = useState<Selection>(null);
   const [pick, setPick] = useState<PickMode>("select");
   const [jointDraft, setJointDraft] = useState<JointDraft | null>(null);
+  const [pickedFace, setPickedFace] = useState<PickedFace | null>(null);
   const [banner, notify] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>({ done: 0, total: 0, running: false, paused: false });
   const [robotName, setRobotName] = useState("robot");
@@ -64,6 +65,7 @@ export default function App() {
     const r = routePick(s.pick, hit, additive, s.model, s.selection, s.jointDraft);
     if (r.selection !== undefined) setSelection(r.selection);
     if (r.draft) setJointDraft(r.draft);
+    if (r.face) setPickedFace(r.face);
     if (r.action) dispatch(r.action);
     if (r.mode) setPick(r.mode);
   }, []);
@@ -133,7 +135,7 @@ export default function App() {
   };
 
   const ctx: Ctx = { model, dispatch, canUndo: history.past.length > 0, canRedo: history.future.length > 0, undoDepth: history.past.length, step,
-    goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, viewer, notify, scale, setScale,
+    goTo, selection, setSelection, pick, setPick, jointDraft, setJointDraft, pickedFace, setPickedFace, viewer, notify, scale, setScale,
     robotName, setRobotName, autoGrouped, setAutoGrouped, detecting: progress.running, hovered };
 
   if (step === "program") {

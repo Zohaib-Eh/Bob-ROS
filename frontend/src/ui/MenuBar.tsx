@@ -51,7 +51,7 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
     setBusy(true);
     try {
       const res = await importFile(file, scale, setImp);
-      dispatch({ type: "import", bodies: res.bodies, warnings: res.warnings });
+      dispatch({ type: "import", bodies: res.bodies, warnings: res.warnings, source: file.name });
       goTo("parts");
     } catch (e) {
       notify(`Import of ${file.name} failed: ${(e as Error).message}`);
@@ -100,6 +100,8 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
           {item("Open project…", () => openRef.current?.click(), sim, why)}
           {item("Save project", () => downloadBlob(new Blob([saveProject(model)], { type: "application/json" }), "project.json"))}
           {item("Import CAD…", () => importRef.current?.click(), sim || busy, why)}
+          {item("Add part from CAD…", () => importRef.current?.click(), sim || busy || !Object.keys(model.bodies).length,
+            sim ? why : "Adds another file's parts to this robot, e.g. a gripper")}
           {item("Export URDF + MuJoCo (.zip)", () => void onExport(), !!blocked, blocked ?? undefined)}
         </div>}
       </span>

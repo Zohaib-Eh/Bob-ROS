@@ -20,6 +20,20 @@ describe("MenuBar", () => {
     expect(state().links).toHaveLength(1);
   });
 
+  it("File ▸ Add part from CAD adds a second file's parts and records which file they came from", async () => {
+    bar();
+    open("File");
+    expect(screen.getByRole("menuitem", { name: "Add part from CAD…" })).toHaveProperty("disabled", true);   // nothing to add to yet
+    vi.spyOn(client, "importFile")
+      .mockResolvedValueOnce({ bodies: [boxBody("arm", [0, 0, 0], [1, 1, 1])], applied_scale: 0.001, warnings: [] })
+      .mockResolvedValueOnce({ bodies: [boxBody("plate", [2, 0, 0], [3, 1, 1])], applied_scale: 0.001, warnings: [] });
+    await act(async () => { fireEvent.change(screen.getByTestId("import-input"), { target: { files: [new File(["x"], "robot.step")] } }); });
+    expect(screen.getByRole("menuitem", { name: "Add part from CAD…" })).toHaveProperty("disabled", false);   // menu still open
+    await act(async () => { fireEvent.change(screen.getByTestId("import-input"), { target: { files: [new File(["x"], "gripper.step")] } }); });
+    expect(state().links).toHaveLength(2);
+    expect(state().sources).toEqual(["robot.step", "gripper.step"]);
+  });
+
   it("Edit ▸ Undo undoes, and is disabled with nothing to undo", () => {
     bar(imported([boxBody("x", [0, 0, 0], [1, 1, 1])]));
     const before = state().links.length;

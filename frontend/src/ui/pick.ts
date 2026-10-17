@@ -2,10 +2,10 @@ import { contactCenter, snapAt, type JointDraft } from "../model/jointDraft";
 import type { Action } from "../model/reducer";
 import type { ModelState } from "../model/types";
 import type { Hit } from "../viewer/Viewer";
-import type { PickMode } from "./ctx";
+import type { PickedFace, PickMode } from "./ctx";
 import type { Selection } from "./selection";
 
-export interface PickResult { selection?: Selection; draft?: JointDraft; action?: Action; mode?: PickMode }
+export interface PickResult { selection?: Selection; draft?: JointDraft; action?: Action; mode?: PickMode; face?: PickedFace }
 
 /** What a click in the 3D view does, by pick mode. Empty space never leaves a pick mode. */
 export function routePick(mode: PickMode, hit: Hit, additive: boolean, m: ModelState, selection: Selection,
@@ -14,6 +14,10 @@ export function routePick(mode: PickMode, hit: Hit, additive: boolean, m: ModelS
     if (!hit) return { selection: null };
     const prev = additive && selection?.kind === "bodies" ? selection.ids : [];
     return { selection: { kind: "bodies", ids: [...new Set([...prev, hit.bodyId])] } };
+  }
+  if (mode === "mount-from" || mode === "mount-to") {
+    const faceIndex = hit ? (m.bodies[hit.bodyId]?.faces ?? []).findIndex((f) => f.triangle_indices.includes(hit.triangle)) : -1;
+    return hit && faceIndex >= 0 ? { face: { mode, bodyId: hit.bodyId, faceIndex }, mode: "select" } : {};
   }
   const link = hit ? m.links.find((l) => l.body_ids.includes(hit.bodyId)) : undefined;
   if (!hit || !link) return {};

@@ -1,5 +1,6 @@
 export const GLOSSARY = {
   link: ["Link", "A set of parts bolted together that move as one piece. Each link becomes one <link> in the URDF."],
+  mount: ["Mount", "Moves every part from one imported file so a flat face on it sits flush and centred on a flat face of the robot, like bolting a gripper's plate to the flange. Turn rotates it about that face."],
   base: ["Base link", "The link that stays still — usually the part that sits on the ground. Every other link hangs off it through joints."],
   joint: ["Joint", "Connects two links and says how one moves relative to the other."],
   origin: ["Joint origin", "The point the joint moves around, for example the centre of a shaft."],

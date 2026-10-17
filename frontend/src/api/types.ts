@@ -23,6 +23,7 @@ export interface Body {
   faces: Face[];
   status: Status;
   warnings: PartWarning[];
+  source?: string;   // the CAD file it was imported from (unique per import); absent in older projects
 }
 
 export interface Link {

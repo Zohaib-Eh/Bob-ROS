@@ -1,12 +1,14 @@
 import type { Body, Joint, Link, PartWarning } from "../api/types";
 import { baseGuess } from "./geometry";
+import { transformBody, type Mat4 } from "./mount";
 import { membership } from "./pairs";
 import { DEFAULT_DENSITY, emptyModel, type ModelState, type Suggestion } from "./types";
 
 export type LinkProps = Partial<Pick<Link, "density_kg_m3" | "mass_override_kg" | "accept_approximate_mass">>;
 
 export type Action =
-  | { type: "import"; bodies: Body[]; warnings: PartWarning[] }
+  | { type: "import"; bodies: Body[]; warnings: PartWarning[]; source?: string }
+  | { type: "transformSource"; source: string; matrix: Mat4 }
   | { type: "merge"; linkIds: string[] }
   | { type: "mergeSmall"; pairs: { linkId: string; neighbourId: string }[] }
   | { type: "moveBody"; bodyId: string; toLinkId: string }
@@ -30,6 +32,14 @@ export type Action =
 
 /** New limits for one joint; `continuous` turns a revolute that spins freely into a no-limit joint. */
 export interface LimitChange { jointId: string; lower: number | null; upper: number | null; continuous: boolean }
+
+/** `name`, or `name (2)`, `name (3)`… when an earlier import already used it. */
+function uniqueSource(name: string, bodies: Record<string, Body>): string {
+  const used = new Set(Object.values(bodies).map((b) => b.source));
+  let n = name;
+  for (let k = 2; used.has(n); k++) n = `${name} (${k})`;
+  return n;
+}
 
 export function sanitizeName(raw: string): string {
   let n = raw.trim().replace(/[^A-Za-z0-9_-]/g, "_");
@@ -88,9 +98,15 @@ export function modelReducer(s: ModelState, a: Action): ModelState {
     case "import": {
       const taken = new Set(s.links.map((l) => l.name));
       const bodies = { ...s.bodies };
-      for (const b of a.bodies) bodies[b.id] = b;
+      const source = a.source && uniqueSource(a.source, s.bodies);
+      for (const b of a.bodies) bodies[b.id] = source ? { ...b, source } : b;
       const links = [...s.links, ...a.bodies.map((b) => newLink(b, taken))];
       return tidy({ ...s, bodies, links, fileWarnings: [...s.fileWarnings, ...a.warnings] });
+    }
+    case "transformSource": {
+      const bodies = { ...s.bodies };
+      for (const b of Object.values(s.bodies)) if (b.source === a.source) bodies[b.id] = transformBody(b, a.matrix);
+      return { ...s, bodies };
     }
     case "merge": {
       const [target, ...others] = [...new Set(a.linkIds)];
