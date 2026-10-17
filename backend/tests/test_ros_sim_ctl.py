@@ -75,3 +75,8 @@ def test_plugins_file_loads_pose_publisher_and_glue():
     assert cfg["free_joint_state_publisher"]["type"] == "mujoco_ros2_control_plugins/FreeJointStatePublisherPlugin"
     assert cfg["free_joint_state_publisher"]["topic"] == "/sim/free_joint_states"
     assert cfg["glue"]["type"] == "cad_to_urdf_glue/GluePlugin"
+
+
+def test_controllers_include_the_gripper_only_when_there_is_one():
+    assert sim_ctl.controller_names(False) == ["arm_controller"]
+    assert sim_ctl.controller_names(True) == ["arm_controller", "gripper_controller"]

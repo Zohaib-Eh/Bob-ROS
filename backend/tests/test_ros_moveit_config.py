@@ -239,3 +239,50 @@ def test_regenerating_sweeps_backups_a_locked_file_left_behind(tmp_path):
     generate("bot", d / "bot", src, source="bot.zip", samples=50)
     assert not stale.exists()
     assert (src / ".hidden_user_folder").exists()          # only our own backups are swept
+
+
+@pytest.fixture
+def wsg(tmp_path):
+    from tests.ros_helpers import six_axis_with_gripper_zip
+    d = unzip(six_axis_with_gripper_zip(tmp_path), tmp_path / "xg")
+    src = tmp_path / "wsg" / "src"
+    generate("sixg", d / "sixg", src, source="sixg.zip", samples=200)
+    return src
+
+
+def test_gripper_controller_and_mimic_in_ros2_control(wsg):
+    xacro = (wsg / "sixg_moveit_config" / "config" / "sixg.ros2_control.xacro").read_text()
+    assert '<joint name="gfl_joint">' in xacro and '<param name="mimic">gfl_joint</param>' in xacro
+    follower = xacro[xacro.index('<joint name="gfr_joint">'):]
+    assert "command_interface" not in follower[:follower.index("</joint>")]
+    c = _yaml(wsg / "sixg_moveit_config" / "config" / "ros2_controllers.yaml")
+    assert c["controller_manager"]["ros__parameters"]["gripper_controller"]["type"] == \
+        "parallel_gripper_action_controller/GripperActionController"
+    g = c["gripper_controller"]["ros__parameters"]
+    assert g == {"joint": "gfl_joint", "max_effort": 40.0, "allow_stalling": True, "stall_timeout": 0.5,
+                 "stall_velocity_threshold": 0.001, "goal_tolerance": 0.001}
+    assert "gfl_joint" not in c["arm_controller"]["ros__parameters"]["joints"]
+
+
+def test_srdf_has_a_gripper_group_end_effector_and_states(wsg):
+    srdf = ET.fromstring((wsg / "sixg_moveit_config" / "config" / "sixg.srdf").read_text())
+    groups = {g.get("name"): g for g in srdf.findall("group")}
+    assert [j.get("name") for j in groups["gripper"].findall("joint")] == ["gfl_joint", "gfr_joint"]
+    assert groups["arm"].find("chain").get("tip_link") == "tcp"
+    ee = srdf.find("end_effector")
+    assert (ee.get("name"), ee.get("parent_link"), ee.get("group")) == ("gripper", "gbase", "gripper")
+    states = {s.get("name"): s for s in srdf.findall("group_state") if s.get("group") == "gripper"}
+    assert float(states["open"].find("joint").get("value")) == 0.0
+    assert float(states["closed"].find("joint").get("value")) == pytest.approx(0.025)
+
+
+def test_mock_launch_spawns_the_gripper_controller(wsg):
+    launch = (wsg / "sixg_moveit_config" / "launch" / "demo.launch.py").read_text()
+    assert '"gripper_controller"' in launch
+
+
+def test_robot_without_gripper_has_no_gripper_config(ws):   # Review Focus 5
+    c = _yaml(ws / "bot_moveit_config" / "config" / "ros2_controllers.yaml")
+    assert "gripper_controller" not in c and "gripper_controller" not in c["controller_manager"]["ros__parameters"]
+    assert "gripper" not in (ws / "bot_moveit_config" / "config" / "bot.srdf").read_text()
+    assert "gripper_controller" not in (ws / "bot_moveit_config" / "launch" / "demo.launch.py").read_text()

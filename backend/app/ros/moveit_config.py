@@ -40,6 +40,24 @@ def write_files(root: Path, files: dict[str, str]) -> None:
         p.write_text(text, encoding="utf-8", newline="\n")
 
 
+def _srdf_gripper(chain: Chain) -> str:
+    g = chain.gripper
+    if g is None:
+        return ""
+    return f"""
+  <group name="gripper">
+    <joint name="{g.leader}"/>
+    <joint name="{g.follower}"/>
+  </group>
+  <group_state name="open" group="gripper">
+    <joint name="{g.leader}" value="{g.lower!r}"/>
+  </group_state>
+  <group_state name="closed" group="gripper">
+    <joint name="{g.leader}" value="{g.upper!r}"/>
+  </group_state>
+  <end_effector name="gripper" parent_link="{g.base}" group="gripper"/>"""
+
+
 def _srdf(chain: Chain, robot: str, pairs, note: str) -> str:
     state = "\n".join(f'    <joint name="{j.name}" value="{v!r}"/>' for j, v in zip(chain.joints, home(chain)))
     skips = "\n".join(f'  <disable_collisions link1="{a}" link2="{b}" reason="{r}"/>'
@@ -51,7 +69,7 @@ def _srdf(chain: Chain, robot: str, pairs, note: str) -> str:
   </group>
   <group_state name="home" group="arm">
 {state}
-  </group_state>
+  </group_state>{_srdf_gripper(chain)}
   <!-- Link pairs MoveIt skips: joined by a joint (Adjacent), touching at home (Default),
        or never touching in random poses (Never). -->
 {skips}
@@ -89,9 +107,29 @@ def _joint_limits_yaml(chain: Chain, note: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _controllers_yaml(names: str, note: str) -> str:
+def _gripper_controller_yaml(g) -> tuple[str, str]:
+    """(controller_manager entry, parameters block) for the gripper; empty without one. goal_tolerance
+    is tight because the controller reported reached_goal while stopped on an object (Task 1)."""
+    if g is None:
+        return "", ""
+    return ("""    gripper_controller:
+      type: parallel_gripper_action_controller/GripperActionController
+""", f"""
+gripper_controller:
+  ros__parameters:
+    joint: {g.leader}
+    max_effort: {g.effort!r}
+    allow_stalling: true
+    stall_timeout: 0.5
+    stall_velocity_threshold: 0.001
+    goal_tolerance: 0.001
+""")
+
+
+def _controllers_yaml(names: str, note: str, gripper=None) -> str:
     # 0.1 rad (~6°) of lag aborts a move; 0.02 rad is the accuracy a move must end within
     per_joint = "\n".join(f"      {n}:\n        trajectory: 0.1\n        goal: 0.02" for n in names.split(", "))
+    g_entry, g_params = _gripper_controller_yaml(gripper)
     return note + f"""controller_manager:
   ros__parameters:
     update_rate: 100
@@ -99,7 +137,7 @@ def _controllers_yaml(names: str, note: str) -> str:
       type: joint_trajectory_controller/JointTrajectoryController
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
-
+{g_entry}
 arm_controller:
   ros__parameters:
     joints: [{names}]
@@ -110,7 +148,7 @@ arm_controller:
       stopped_velocity_tolerance: 0.05
       goal_time: 1.0
 {per_joint}
-"""
+{g_params}"""
 
 
 def _moveit_controllers_yaml(names: str, note: str) -> str:
@@ -161,6 +199,21 @@ def _ros2_control_xacro(chain: Chain, robot: str, note: str) -> str:
         <state_interface name="velocity"/>
         <state_interface name="effort"/>
       </joint>""" for j in chain.joints)
+    if chain.gripper is not None:
+        g = chain.gripper
+        joints += f"""
+      <joint name="{g.leader}">
+        <command_interface name="position"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+      <joint name="{g.follower}">
+        <param name="mimic">{g.leader}</param>
+        <param name="multiplier">1</param>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>"""
     return f"""<?xml version="1.0"?>
 {note}<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="{robot}_ros2_control" params="name initial_positions_file hardware mujoco_model">
@@ -198,7 +251,7 @@ def _urdf_xacro(robot: str, note: str) -> str:
 """
 
 
-def _launch(robot: str, note: str) -> str:
+def _launch(robot: str, note: str, gripper: bool = False) -> str:
     return note + f'''"""MoveIt headless: robot_state_publisher, move_group, and on mock hardware ros2_control too.
 Hardware comes from /tmp/sim/hardware (written by sim_ctl). Under mujoco, sim_ctl runs the
 control node itself so it can restart the simulation without restarting MoveIt."""
@@ -222,7 +275,7 @@ def generate_launch_description():
         nodes += [Node(package="controller_manager", executable="ros2_control_node",
                        parameters=[controllers], remappings=[("~/robot_description", "/robot_description")]),
                   Node(package="controller_manager", executable="spawner",
-                       arguments=["joint_state_broadcaster", "arm_controller"])]
+                       arguments=["joint_state_broadcaster", "arm_controller"{', "gripper_controller"' if gripper else ''}])]
     return LaunchDescription(nodes)
 '''
 
@@ -257,7 +310,7 @@ def moveit_files(chain: Chain, robot: str, source: str, pairs) -> dict[str, str]
         f"config/{robot}.srdf": _srdf(chain, robot, pairs, x),
         "config/kinematics.yaml": _kinematics_yaml(robot, h),
         "config/joint_limits.yaml": _joint_limits_yaml(chain, h),
-        "config/ros2_controllers.yaml": _controllers_yaml(names, h),
+        "config/ros2_controllers.yaml": _controllers_yaml(names, h, chain.gripper),
         "config/moveit_controllers.yaml": _moveit_controllers_yaml(names, h),
         "config/ompl_planning.yaml": _ompl_yaml(h),
         "config/initial_positions.yaml": h + f"initial_positions:\n{initial}\n",
@@ -270,7 +323,7 @@ cartesian_limits:
 """,
         f"config/{robot}.ros2_control.xacro": _ros2_control_xacro(chain, robot, x),
         f"config/{robot}.urdf.xacro": _urdf_xacro(robot, x),
-        "launch/demo.launch.py": _launch(robot, h),
+        "launch/demo.launch.py": _launch(robot, h, chain.gripper is not None),
         "CMakeLists.txt": h + f"""cmake_minimum_required(VERSION 3.8)
 project({robot}_moveit_config)
 find_package(ament_cmake REQUIRED)
