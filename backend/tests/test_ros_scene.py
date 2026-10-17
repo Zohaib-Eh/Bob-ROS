@@ -65,6 +65,15 @@ def test_no_scene_and_empty_workcell_mean_no_objects():
     assert scene.load_workcell(None) == [] and scene.load_workcell("") == [] and scene.load_workcell("# none\n") == []
 
 
+def test_workcell_yaml_typo_is_a_scene_error():  # review I-2
+    with pytest.raises(scene.SceneError, match="workcell.yaml is not valid YAML"):
+        scene.load_workcell("- {name: table, size: [1,2}\n")
+
+
+def test_program_with_a_syntax_error_has_no_scene_so_python_reports_it():  # review I-6
+    assert scene.read_scene("SCENE = [\nprint(\n") == []
+
+
 def test_workcell_must_be_a_list():
     with pytest.raises(scene.SceneError, match="workcell.yaml must be a list of objects"):
         scene.load_workcell("table: {}\n")

@@ -165,6 +165,28 @@ def test_robot_library_speaks_physics(ws):
     compile(runner, "runner.py", "exec")
 
 
+def test_mock_hardware_runs_also_get_their_scene_objects(ws):  # review I-1
+    runner = (ws / "bot_program" / "runner.py").read_text()
+    assert "HARDWARE" not in runner  # prepare runs for every run; it knows mock from mujoco
+    lib = (ws / "bot_program" / "robot.py").read_text()
+    reset = lib[lib.index("    def reset(self):"):lib.index("    def _clear_scene(self):")]
+    assert "if _PHYSICS" not in reset and "self._load_run_objects()" in reset
+
+
+def test_moveit_waits_for_the_controller_to_report_a_lag(ws):  # review I-5
+    import yaml
+    cfg = yaml.safe_load((ws / "bot_moveit_config" / "config" / "moveit_controllers.yaml").read_text())
+    ctl = yaml.safe_load((ws / "bot_moveit_config" / "config" / "ros2_controllers.yaml").read_text())
+    goal_time = ctl["arm_controller"]["ros__parameters"]["constraints"]["goal_time"]
+    assert cfg["trajectory_execution"]["allowed_goal_duration_margin"] > goal_time
+
+
+def test_scene_sync_survives_a_bad_tick(ws):  # review I-4
+    src = (ws / "bot_program" / "scene_sync.py").read_text()
+    tick = src[src.index("    def tick():"):src.index("    n.create_subscription")]
+    assert "except Exception" in tick
+
+
 def test_brief_teaches_scene_and_pose(ws):
     text = (ws / "bot_program" / "brief.md").read_text()
     assert "SCENE = [" in text and "workcell.yaml" in text and "r.pose(" in text

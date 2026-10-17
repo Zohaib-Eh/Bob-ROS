@@ -329,8 +329,7 @@ class Robot:
 
     def reset(self):
         self._clear_scene()
-        if _PHYSICS:  # sim_ctl already reset the simulated world; mirror its objects in MoveIt
-            self._load_run_objects()
+        self._load_run_objects()  # workcell + SCENE (sim_ctl.prepare); under MuJoCo the sim already holds them
         self.home()
 
     def _clear_scene(self):

@@ -37,8 +37,34 @@ def plan(ws_src: Path, robot: str, tool: str, program_source):
     return xml, scene.meta(robot_mjcf, objs)
 
 
-def decide(new_xml: str, loaded_path: Path) -> str:
-    return "reset" if loaded_path.exists() and loaded_path.read_text() == new_xml else "restart"
+def objects_meta(ws_src: Path, robot: str, program_source) -> dict:
+    """Mock hardware (no MuJoCo model): the same objects, validated, for MoveIt only."""
+    wc_path = ws_src / f"{robot}_tasks" / "workcell.yaml"
+    workcell = scene.validate(scene.load_workcell(wc_path.read_text() if wc_path.exists() else None), "workcell.yaml")
+    program = scene.validate(scene.read_scene(program_source), "SCENE") if program_source else []
+    objs = scene.merge(workcell, program)
+    return {"efforts": {}, "masses": {o["name"]: o["mass"] for o in objs if not o["fixed"]},
+            "fixed": [o["name"] for o in objs if o["fixed"]], "objects": objs}
+
+
+def decide(new_xml: str, loaded_path: Path, alive: bool) -> str:
+    """reset only a running sim that already has this exact scene; anything else restarts."""
+    return "reset" if alive and loaded_path.exists() and loaded_path.read_text() == new_xml else "restart"
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Readers (scene_sync, robot.py) never see a half-written file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def _sim_alive() -> bool:
+    try:
+        os.killpg(int((SIM / "control.pid").read_text()), 0)
+        return True
+    except (FileNotFoundError, ProcessLookupError, ValueError, PermissionError):
+        return False
 
 
 def plugins_yaml() -> str:
@@ -161,17 +187,34 @@ def _reset_sim():
 
 
 def prepare(program):
-    """Before a run: the program's scene (program = path relative to <robot>_tasks/, or None)."""
+    """Before a run: the program's scene (program = path relative to <robot>_tasks/, or None).
+    Under mock hardware only the object list is written (robot.py adds it to MoveIt)."""
+    SIM.mkdir(parents=True, exist_ok=True)
     robot, tool = _robot_and_tool()
     source = (WS_SRC / f"{robot}_tasks" / program).read_text() if program else None
-    xml, info = plan(WS_SRC, robot, tool, source)
-    (SIM / "meta.json").write_text(json.dumps(info))
-    if decide(xml, SIM / "scene.xml") == "reset" and (SIM / "control.pid").exists():
-        _reset_sim()
+    hw = SIM / "hardware"
+    if not (hw.exists() and hw.read_text().strip() == "mujoco"):
+        write_atomic(SIM / "meta.json", json.dumps(objects_meta(WS_SRC, robot, source)))
         return
-    (SIM / "scene.xml").write_text(xml)
-    _stop_sim()
-    _start_sim(robot)
+    xml, info = plan(WS_SRC, robot, tool, source)
+    write_atomic(SIM / "meta.json", json.dumps(info))
+    try:
+        if decide(xml, SIM / "scene.xml", _sim_alive()) == "reset":
+            try:
+                _reset_sim()
+                Path("/tmp/physics").write_text("mujoco")
+                return
+            except SimError:
+                pass  # a stuck sim or controller: start fresh below
+        _stop_sim()
+        write_atomic(SIM / "scene.xml", xml)  # the sim node loads it at start
+        _start_sim(robot)
+        Path("/tmp/physics").write_text("mujoco")
+    except SimError as exc:
+        _stop_sim()
+        (SIM / "scene.xml").unlink(missing_ok=True)  # a failed start never counts as "this scene is loaded"
+        Path("/tmp/physics").write_text(f"off: {str(exc).splitlines()[0]}")
+        raise
 
 
 def hardware():
@@ -190,10 +233,8 @@ def boot():
     if (SIM / "hardware").read_text().strip() != "mujoco":
         return
     try:
-        prepare(None)
-        Path("/tmp/physics").write_text("mujoco")
-    except (scene.SceneError, SimError) as exc:  # runs will fail with the same reason until it is fixed
-        _stop_sim()
+        prepare(None)  # writes /tmp/physics; every later run's prepare updates it again
+    except (scene.SceneError, SimError) as exc:  # runs fail with the same reason until it is fixed
         Path("/tmp/physics").write_text(f"off: {str(exc).splitlines()[0]}")
 
 

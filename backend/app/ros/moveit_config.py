@@ -114,7 +114,12 @@ arm_controller:
 
 
 def _moveit_controllers_yaml(names: str, note: str) -> str:
-    return note + f"""moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+    # MoveIt must outwait the controller's goal_time (1.0 s), or it cancels a lagging move itself
+    # (TIMED_OUT) before the controller reports which joint fell behind
+    return note + f"""trajectory_execution:
+  allowed_execution_duration_scaling: 1.2
+  allowed_goal_duration_margin: 2.0
+moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
 moveit_simple_controller_manager:
   controller_names: [arm_controller]
   arm_controller:

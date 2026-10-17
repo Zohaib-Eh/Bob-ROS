@@ -90,8 +90,20 @@ def test_box_inside_the_floor_is_an_overlap(bot):
 
 def test_object_named_like_a_robot_link_is_rejected(bot):
     objs = scene.validate([_far_box(name="hand")], "SCENE")
-    with pytest.raises(scene.SceneError, match="'hand' is the name of a robot link"):
+    with pytest.raises(scene.SceneError, match="'hand' is a name the robot model already uses"):
         scene.build_scene_xml(bot[0], objs, "hand", bot[1])
+
+
+@pytest.mark.parametrize("name", ["arm_joint", "world"])
+def test_object_named_like_a_robot_joint_or_world_is_rejected(bot, name):  # review M-8
+    objs = scene.validate([_far_box(name=name)], "SCENE")
+    with pytest.raises(scene.SceneError, match=f"'{name}' is a name the robot model already uses"):
+        scene.build_scene_xml(bot[0], objs, "hand", bot[1])
+
+
+def test_a_scene_mujoco_cannot_load_keeps_mujocos_message():  # review M-9
+    with pytest.raises(scene.SceneError, match="The scene won't load in MuJoCo: .*"):
+        scene.check_start("<mujoco><worldbody><geom type='nonsense'/></worldbody></mujoco>", None, {"world"})
 
 
 def test_glued_box_follows_the_tool_and_released_box_falls(bot):

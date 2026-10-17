@@ -2,19 +2,15 @@
 import runpy
 import sys
 import traceback
-from pathlib import Path
 
 import scene
 import sim_ctl
 from robot import Robot, RobotError
 
-HARDWARE = Path("/tmp/sim/hardware")
-
 
 def main(path: str) -> int:
     try:
-        if HARDWARE.exists() and HARDWARE.read_text().strip() == "mujoco":
-            sim_ctl.prepare(path)  # the world this program declared: workcell + SCENE, arm at home
+        sim_ctl.prepare(path)  # the world this program declared: workcell + SCENE (MuJoCo or MoveIt only)
         Robot().reset()
     except scene.SceneError as exc:  # the program's objects are wrong; the program can fix that
         print(f"RESULT: failed: {exc}", flush=True)

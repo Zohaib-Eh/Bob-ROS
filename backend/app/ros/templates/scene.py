@@ -106,8 +106,13 @@ def _plain(node):
 
 
 def read_scene(source: str) -> list[dict]:
-    """The program's top-level SCENE = [...] as raw objects (validate separately); [] if absent."""
-    for stmt in ast.parse(source).body:
+    """The program's top-level SCENE = [...] as raw objects (validate separately); [] if absent.
+    A program that doesn't parse has no SCENE: running it then reports the SyntaxError as usual."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    for stmt in tree.body:
         if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
                 and isinstance(stmt.targets[0], ast.Name) and stmt.targets[0].id == "SCENE"):
             try:
@@ -118,7 +123,10 @@ def read_scene(source: str) -> list[dict]:
 
 
 def load_workcell(text: str | None) -> list[dict]:
-    data = yaml.safe_load(text) if text else None
+    try:
+        data = yaml.safe_load(text) if text else None
+    except yaml.YAMLError as exc:
+        raise SceneError(f"workcell.yaml is not valid YAML: {exc}".replace("\n", " "))
     if data is None:
         return []
     if not isinstance(data, list):
@@ -143,10 +151,10 @@ def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str) 
     """The robot MJCF plus a floor and the objects. Movable objects get a free joint named after
     them and an inactive weld 'glue_<name>' to the tool; fixed objects get neither."""
     root = ET.fromstring(robot_mjcf)
-    robot_bodies = {b.get("name") for b in root.iter("body")}
-    for o in objs:
-        if o["name"] in robot_bodies:
-            raise SceneError(f"'{o['name']}' is the name of a robot link; rename the object")
+    taken = {e.get("name") for tag in ("body", "joint") for e in root.iter(tag)} | {"world"}
+    for o in objs:  # an object is a body and a free joint of the same name
+        if o["name"] in taken:
+            raise SceneError(f"'{o['name']}' is a name the robot model already uses (a link or joint); rename the object")
     compiler = root.find("compiler")
     if compiler is None:
         compiler = ET.Element("compiler")
@@ -198,7 +206,10 @@ def check_start(xml: str, meshes, robot_bodies: set[str]) -> None:
     """Fail on objects sunk more than PENETRATION into the robot, the floor or each other at home.
     robot_bodies holds every robot body plus "world"; contacts between two of those are skipped."""
     import mujoco
-    m = mujoco.MjModel.from_xml_string(xml, meshes or {})
+    try:
+        m = mujoco.MjModel.from_xml_string(xml, meshes or {})
+    except (ValueError, mujoco.FatalError) as exc:  # MuJoCo reports compile errors as ValueError
+        raise SceneError(f"The scene won't load in MuJoCo: {exc}".replace("\n", " "))
     d = mujoco.MjData(m)
     for j in range(m.njnt):  # home: 0 clamped into the limits, like the hold check
         if m.jnt_limited[j] and m.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE:

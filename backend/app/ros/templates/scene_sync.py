@@ -47,6 +47,12 @@ def main():
                           for s in m.free_joints}
 
     def tick():
+        try:
+            sync()
+        except Exception as exc:  # never take the session down (start.sh waits on this process)
+            n.get_logger().warning(f"scene sync skipped a tick: {exc}")
+
+    def sync():
         meta = Path("/tmp/sim/meta.json")
         movable = set(json.loads(meta.read_text())["masses"]) if meta.exists() else set()
         todo = moved({k: v for k, v in state["poses"].items() if k in movable}, state["last"], state["glued"])

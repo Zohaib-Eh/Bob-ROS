@@ -45,11 +45,29 @@ def test_plan_catches_overlap_with_the_robot(src):
         sim_ctl.plan(src, "bot", "hand", prog)
 
 
-def test_decide_resets_only_for_the_identical_scene(tmp_path):
+def test_decide_resets_only_a_live_sim_on_the_identical_scene(tmp_path):  # review I-3
     p = tmp_path / "scene.xml"
-    assert sim_ctl.decide("<mujoco/>", p) == "restart"
+    assert sim_ctl.decide("<mujoco/>", p, alive=True) == "restart"
     p.write_text("<mujoco/>")
-    assert sim_ctl.decide("<mujoco/>", p) == "reset" and sim_ctl.decide("<mujoco></mujoco>", p) == "restart"
+    assert sim_ctl.decide("<mujoco/>", p, alive=True) == "reset"
+    assert sim_ctl.decide("<mujoco></mujoco>", p, alive=True) == "restart"
+    assert sim_ctl.decide("<mujoco/>", p, alive=False) == "restart"   # crashed or never started
+
+
+def test_objects_without_an_mjcf_still_come_from_workcell_and_scene(src):  # review I-1
+    (src / "bot" / "mjcf" / "bot.xml").unlink()
+    (src / "bot_tasks" / "workcell.yaml").write_text(
+        "- {name: table, shape: box, size: [0.4, 0.4, 0.05], xyz: [2, 2, 0.025], fixed: true}\n")
+    info = sim_ctl.objects_meta(src, "bot", "SCENE = [dict(name='a', shape='box', size=(0.05, 0.05, 0.05), xyz=(2, 2, 0.1))]\n")
+    assert [o["name"] for o in info["objects"]] == ["table", "a"] and info["fixed"] == ["table"]
+    with pytest.raises(sim_ctl.scene.SceneError, match="SCENE must be plain values"):
+        sim_ctl.objects_meta(src, "bot", "x = 1\nSCENE = [dict(name='a', shape='box', size=(x, x, x), xyz=(0, 0, 0))]\n")
+
+
+def test_meta_is_written_atomically(tmp_path):  # review I-4: scene_sync reads it 10x a second
+    p = tmp_path / "meta.json"
+    sim_ctl.write_atomic(p, '{"a": 1}')
+    assert p.read_text() == '{"a": 1}' and [f.name for f in tmp_path.iterdir()] == ["meta.json"]
 
 
 def test_plugins_file_loads_pose_publisher_and_glue():
