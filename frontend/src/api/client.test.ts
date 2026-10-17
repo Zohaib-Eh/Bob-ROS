@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, detectJoints, errorText, exportRobot, importFile } from "./client";
+import { ApiError, detectJoints, errorText, exportRobot, importFile, physicsCheck } from "./client";
+import { startSession } from "./program";
 
 const ok = (body: unknown, headers: Record<string, string> = {}) =>
   new Response(typeof body === "string" ? body : JSON.stringify(body), { status: 200, headers });
@@ -53,6 +54,20 @@ describe("api client", () => {
 
   it("formats validation-error arrays", () => {
     expect(errorText([{ loc: ["body", "x"], msg: "field required" }])).toBe("body.x: field required");
+  });
+
+  it("export, physics check and session start send the gripper in the backend's field names", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => ok("{}"));
+    const g = { leader: "jl", follower: "jr", tcp_offset: 0.01 };
+    await exportRobot("r", [], [], {}, g);
+    await physicsCheck("r", [], [], {}, g);
+    await startSession("r", [], [], {}, g);
+    for (const [, init] of spy.mock.calls) {
+      expect(JSON.parse(String((init as RequestInit).body)).gripper)
+        .toEqual({ leader_joint_id: "jl", follower_joint_id: "jr", tcp_offset_m: 0.01 });
+    }
+    await exportRobot("r", [], [], {});
+    expect(JSON.parse(String((spy.mock.calls.at(-1)![1] as RequestInit).body)).gripper).toBeNull();
   });
 
   it("returns the zip blob and parsed export warnings", async () => {

@@ -5,6 +5,7 @@ import { pairKey } from "../../model/pairs";
 import AllLimits from "../AllLimits";
 import type { Ctx } from "../ctx";
 import { shortName } from "../format";
+import GripperCard from "../GripperCard";
 import Info from "../Info";
 
 export default function ConnectStep({ ctx }: { ctx: Ctx }) {
@@ -63,6 +64,7 @@ export default function ConnectStep({ ctx }: { ctx: Ctx }) {
       <button className="btn" data-testid="new-joint" onClick={() => { setJointDraft(emptyDraft()); setPick("fixed"); }}>
         <Link2 size={14} />New joint <kbd>J</kbd>
       </button>
+      <GripperCard ctx={ctx} />
     </section>
   );
 }

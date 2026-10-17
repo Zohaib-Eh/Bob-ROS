@@ -2,13 +2,14 @@ import type { Body, Joint, Link, PartWarning } from "../api/types";
 import { baseGuess } from "./geometry";
 import { transformBody, type Mat4 } from "./mount";
 import { membership } from "./pairs";
-import { DEFAULT_DENSITY, emptyModel, type ModelState, type Suggestion } from "./types";
+import { DEFAULT_DENSITY, emptyModel, type GripperSel, type ModelState, type Suggestion } from "./types";
 
 export type LinkProps = Partial<Pick<Link, "density_kg_m3" | "mass_override_kg" | "accept_approximate_mass">>;
 
 export type Action =
   | { type: "import"; bodies: Body[]; warnings: PartWarning[]; source?: string }
   | { type: "transformSource"; source: string; matrix: Mat4 }
+  | { type: "setGripper"; gripper: GripperSel | null }
   | { type: "merge"; linkIds: string[] }
   | { type: "mergeSmall"; pairs: { linkId: string; neighbourId: string }[] }
   | { type: "moveBody"; bodyId: string; toLinkId: string }
@@ -94,6 +95,17 @@ function mergeLinks(s: ModelState, target: string, others: string[]): ModelState
 }
 
 export function modelReducer(s: ModelState, a: Action): ModelState {
+  const next = reduce(s, a);
+  return next.gripper && !gripperJointsExist(next) ? { ...next, gripper: null } : next;
+}
+
+/** The gripper refers to joints; once either is gone or no longer sliding, the gripper goes too. */
+function gripperJointsExist(s: ModelState): boolean {
+  const g = s.gripper!;
+  return [g.leader, g.follower].every((id) => s.joints.some((j) => j.id === id && j.type === "prismatic"));
+}
+
+function reduce(s: ModelState, a: Action): ModelState {
   switch (a.type) {
     case "import": {
       const taken = new Set(s.links.map((l) => l.name));
@@ -103,6 +115,8 @@ export function modelReducer(s: ModelState, a: Action): ModelState {
       const links = [...s.links, ...a.bodies.map((b) => newLink(b, taken))];
       return tidy({ ...s, bodies, links, fileWarnings: [...s.fileWarnings, ...a.warnings] });
     }
+    case "setGripper":
+      return { ...s, gripper: a.gripper };
     case "transformSource": {
       const bodies = { ...s.bodies };
       for (const b of Object.values(s.bodies)) if (b.source === a.source) bodies[b.id] = transformBody(b, a.matrix);

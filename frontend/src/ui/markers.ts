@@ -1,13 +1,14 @@
 import type { Vec3 } from "../api/types";
 import type { StepId } from "../model/checklist";
 import { bodyBox, linkBox, type Box } from "../model/geometry";
+import { tcpPoint } from "../model/gripper";
 import { chainDepth } from "../model/nextJoint";
 import { touchingPairs } from "../model/pairs";
 import { partProblems } from "../model/problems";
 import type { ModelState } from "../model/types";
 import type { Selection } from "./selection";
 
-export interface Marker { id: string; at: Vec3; kind: "problem" | "joint" | "loose"; label: string; target: Selection }
+export interface Marker { id: string; at: Vec3; kind: "problem" | "joint" | "loose" | "tcp"; label: string; target: Selection }
 
 const top = (b: Box): Vec3 => [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, b.max[2]];
 const mid = (b: Box): Vec3 => [0, 1, 2].map((i) => (b.min[i] + b.max[i]) / 2) as Vec3;
@@ -30,6 +31,10 @@ export function markersFor(step: StepId, m: ModelState): Marker[] {
       out.push({ id: `joint-${j.id}`, at: j.origin_xyz, kind: "joint",
         label: `${name(j.parent_link_id)} → ${name(j.child_link_id)}`, target: { kind: "joint", id: j.id } });
     }
+  }
+  if ((step === "connect" || step === "export") && m.gripper) {
+    out.push({ id: "tcp", at: tcpPoint(m, m.gripper), kind: "tcp", label: "Tool point (between the fingertips)",
+      target: { kind: "joint", id: m.gripper.leader } });
   }
   if (step === "connect" && m.rootLinkId) {
     // only the frontier: loose links that touch the connected chain (the next ones to connect)

@@ -1,4 +1,4 @@
-import type { Body, DetectResponse, Joint, Link, PartWarning } from "../api/types";
+import type { Body, DetectResponse, GripperSel, Joint, Link, PartWarning } from "../api/types";
 
 export interface Suggestion {
   key: string;
@@ -17,10 +17,13 @@ export interface ModelState {
   rootLinkId: string | null;
   joints: Joint[];
   suggestions: Record<string, Suggestion>;
+  gripper: GripperSel | null;
 }
 
+export type { GripperSel };
+
 export const emptyModel = (): ModelState => ({
-  bodies: {}, fileWarnings: [], links: [], ignored: [], rootLinkId: null, joints: [], suggestions: {},
+  bodies: {}, fileWarnings: [], links: [], ignored: [], rootLinkId: null, joints: [], suggestions: {}, gripper: null,
 });
 
 export const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;

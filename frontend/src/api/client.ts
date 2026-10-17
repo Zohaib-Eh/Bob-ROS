@@ -116,16 +116,24 @@ export async function suggestEfforts(robotName: string, links: Link[], joints: J
 
 export type PhysicsResult = { ok: boolean; kind: "ok" | "load" | "unstable" | "sag" | "crash"; message: string;
   link?: string; joint?: string; needed?: number; has?: number };
+import type { GripperSel } from "./types";
+export type { GripperSel };
+
+/** The model's gripper in the backend's field names (null = robot has no gripper). */
+export const gripperBody = (g: GripperSel | null | undefined) =>
+  g ? { leader_joint_id: g.leader, follower_joint_id: g.follower, tcp_offset_m: g.tcp_offset } : null;
+
 export async function physicsCheck(robotName: string, links: Link[], joints: Joint[],
-  bodiesByLink: Record<string, Body[]>): Promise<PhysicsResult> {
-  return (await send("/simulate/check", json({ robot_name: robotName, links, joints, bodies_by_link: bodiesByLink }))).json();
+  bodiesByLink: Record<string, Body[]>, gripper: GripperSel | null = null): Promise<PhysicsResult> {
+  return (await send("/simulate/check", json({ robot_name: robotName, links, joints, bodies_by_link: bodiesByLink,
+    gripper: gripperBody(gripper) }))).json();
 }
 
 export async function exportRobot(
-  robotName: string, links: Link[], joints: Joint[], bodiesByLink: Record<string, Body[]>,
+  robotName: string, links: Link[], joints: Joint[], bodiesByLink: Record<string, Body[]>, gripper: GripperSel | null = null,
 ): Promise<{ blob: Blob; warnings: PartWarning[] }> {
   const res = await send("/export", json({
-    robot_name: robotName, links, joints, bodies_by_link: bodiesByLink }));
+    robot_name: robotName, links, joints, bodies_by_link: bodiesByLink, gripper: gripperBody(gripper) }));
   const header = res.headers.get("X-Export-Warnings");
   return { blob: await res.blob(), warnings: header ? JSON.parse(header) : [] };
 }

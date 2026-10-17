@@ -35,6 +35,10 @@ export interface Link {
   accept_approximate_mass: boolean;
 }
 
+/** Two sliding finger joints; the follower mirrors the leader. tcp_offset (m) pushes the tool point
+ *  further out along the gripper axis. */
+export interface GripperSel { leader: string; follower: string; tcp_offset: number }
+
 export type JointType =
   | "revolute" | "continuous" | "prismatic" | "cylindrical" | "planar" | "spherical" | "fixed";
 

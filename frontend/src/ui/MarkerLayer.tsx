@@ -1,9 +1,9 @@
-import { AlertTriangle, Link2Off, Locate } from "lucide-react";
+import { AlertTriangle, Crosshair, Link2Off, Locate } from "lucide-react";
 import { useEffect, useReducer } from "react";
 import type { Viewer } from "../viewer/Viewer";
 import type { Marker } from "./markers";
 
-const ICON = { problem: AlertTriangle, joint: Locate, loose: Link2Off } as const;
+const ICON = { problem: AlertTriangle, joint: Locate, loose: Link2Off, tcp: Crosshair } as const;
 
 /** HTML pins that follow points of the 3D model. */
 export default function MarkerLayer({ viewer, markers, onClick }: {
