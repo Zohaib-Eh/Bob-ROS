@@ -377,6 +377,9 @@ class Robot:
             if not world:
                 raise GripError("Nothing to grip: the scene has no objects")
             name = min(world, key=self._gap)
+        if not _PHYSICS and self._gap(name) > ATTACH_REACH:   # mock fingers touch nothing: check reach instead
+            raise UnknownObject(f"'{name}' is {self._gap(name):.2f} m from the tool point; move the fingers around it "
+                                f"first (within {ATTACH_REACH * 100:.0f} cm)")
         self._diff(attached=[self._attached(name, CollisionObject.ADD)])
         self._holding = (name, np.linalg.inv(self._tool_matrix()) @ self._object_matrix(name))
 

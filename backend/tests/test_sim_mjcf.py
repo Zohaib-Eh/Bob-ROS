@@ -24,7 +24,7 @@ def test_mjcf_keeps_links_and_adds_one_motor_per_moving_joint(tmp_path):
     assert {"arm", "hand"} <= bodies
     acts = {a.get("joint"): a for a in root.find("actuator")}
     assert set(acts) == {"arm_joint", "hand_joint"}
-    assert acts["arm_joint"].get("forcerange") == "-50 50" and float(acts["arm_joint"].get("kp")) == pytest.approx(1000)
+    assert acts["arm_joint"].get("forcerange") == "-50 50" and float(acts["arm_joint"].get("kp")) == pytest.approx(5000)   # 50 N·m at 0.01 rad
     m = compile_mjcf(xml, meshes)
     assert m.nu == 2 and m.opt.timestep == pytest.approx(0.002)
 

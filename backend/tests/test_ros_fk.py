@@ -86,3 +86,14 @@ def test_irb1300_export_has_a_spherical_wrist(irb1300_zip):
     with zipfile.ZipFile(irb1300_zip) as z:
         c = parse_chain(z.read("irb1300/urdf/irb1300.urdf").decode())
     assert max(_wrist_gaps(c, [0.0] * 6)) < 1e-4
+
+
+def test_fk_reaches_a_tip_link_past_the_last_joint(tmp_path):
+    # the gripper's tcp sits on fixed links after joint 6: fk must include that offset (and turn)
+    import zipfile
+    from tests.ros_helpers import six_axis_with_gripper_zip
+    c = parse_chain(zipfile.ZipFile(six_axis_with_gripper_zip(tmp_path)).read("sixg/urdf/sixg.urdf").decode())
+    T = fk(c, [0.0] * 6)
+    assert T[:3, 3] == pytest.approx([0.85, 0.0, 0.95], abs=1e-6)   # fingertips, 0.07 past the flange
+    assert T[:3, 2] == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)     # tool z = approach, along the arm
+    assert link_poses(c, [0.0] * 6)["tcp"] == pytest.approx(T)

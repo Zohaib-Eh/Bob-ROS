@@ -35,6 +35,26 @@ def _within_limits(q, chain):
     return np.array(out)
 
 
+def _arm_only(urdf_path: str, chain) -> str:
+    """The URDF EAIK should see: a gripper's finger joints turned fixed (EAIK solves at most 6
+    moving joints, and the fingers aren't part of the arm's IK). Unchanged path without a gripper."""
+    if chain.gripper is None:
+        return urdf_path
+    import tempfile
+    import xml.etree.ElementTree as ET
+    root = ET.parse(urdf_path).getroot()
+    for j in root.iter("joint"):
+        if j.get("name") in (chain.gripper.leader, chain.gripper.follower):
+            j.set("type", "fixed")
+            for tag in ("axis", "limit", "mimic"):
+                for el in j.findall(tag):
+                    j.remove(el)
+    fd, path = tempfile.mkstemp(suffix=".urdf")
+    with open(fd, "w", encoding="utf-8") as f:
+        f.write(ET.tostring(root, encoding="unicode"))
+    return path
+
+
 class Kinematics:
     def __init__(self, urdf_path: str):
         with open(urdf_path, encoding="utf-8") as f:
@@ -42,7 +62,7 @@ class Kinematics:
         self._bot, self._why = None, ""
         try:
             from eaik.IK_URDF import UrdfRobot
-            bot = UrdfRobot(urdf_path)
+            bot = UrdfRobot(_arm_only(urdf_path, self.chain))
             if hasattr(bot, "hasKnownDecomposition") and not bot.hasKnownDecomposition():
                 self._why = "EAIK knows no decomposition for this geometry"
             else:

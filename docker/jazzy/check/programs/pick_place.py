@@ -8,7 +8,7 @@ def beyond_flange(r, dist):
     """Point `dist` metres out from the tool frame along the flange direction (away from the arm)."""
     q = r._current()
     T = r._kin.fk(q)
-    a = T[:3, :3] @ np.asarray(r.chain.joints[-1].axis, float)
+    a = r._joint_frames(q)[-1][:3, :3] @ np.asarray(r.chain.joints[-1].axis, float)   # last joint's axis, base frame
     if sum(float(a @ (F[:3, 3] - T[:3, 3])) for F in r._joint_frames(q)[:-1]) > 0:
         a = -a
     return tuple(T[:3, 3] + a * dist)

@@ -34,7 +34,7 @@ def test_l_shaped_finger_splits_into_convex_pieces():
     b = l_finger_body("l")
     whole = trimesh.Trimesh(np.array(b.vertices), np.array(b.triangles))
     assert whole.is_watertight and whole.is_winding_consistent and not whole.is_convex
-    assert whole.volume == pytest.approx(0.01 * 0.02 * 0.06 + 0.008 * 0.02 * 0.008)
+    assert whole.volume == pytest.approx(0.01 * 0.02 * 0.06 + 0.004 * 0.02 * 0.008)
     pieces = convex_pieces(b.vertices, b.triangles)
     assert len(pieces) >= 2
     meshes = [trimesh.Trimesh(np.array(v), np.array(t)) for v, t in pieces]

@@ -54,10 +54,10 @@ def _boxes_body(id_, boxes, R=None, t=(0.0, 0.0, 0.0)):
 
 def l_finger_body(id_, side=-1.0, R=None, t=(0.0, 0.0, 0.0)):
     """The fixture's L-shaped finger as ONE watertight solid (an L outline in x-z extruded along y,
-    y ±0.01): upright x 0.025..0.035 from the centre, hook at the bottom reaching in to 0.017.
+    y ±0.01): upright x 0.025..0.035 from the centre, hook at the bottom reaching in to 0.021.
     side -1 = the finger on -x, +1 = its mirror on +x."""
     import numpy as np
-    xz = [(0.035, -0.06), (0.017, -0.06), (0.017, -0.052), (0.025, -0.052), (0.025, 0.0), (0.035, 0.0)]
+    xz = [(0.035, -0.06), (0.021, -0.06), (0.021, -0.052), (0.025, -0.052), (0.025, 0.0), (0.035, 0.0)]
     ring = [(-side * -x if side > 0 else -x, z) for x, z in xz]   # x mirrored onto the chosen side
     v = np.array([(x, y, z) for y in (-0.01, 0.01) for x, z in ring])
     n = len(ring)

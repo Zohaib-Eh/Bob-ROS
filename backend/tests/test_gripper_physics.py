@@ -61,7 +61,7 @@ def test_follower_has_no_motor_and_mirrors_the_leader():
     m, d = _scene()
     names = {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, m.actuator_trnid[a][0]) for a in range(m.nu)}
     assert "gfl_joint" in names and "gfr_joint" not in names
-    _run(m, d, 1.0, {_act(m, "gfl_joint"): 0.01})   # hooks would meet at 0.017
+    _run(m, d, 1.0, {_act(m, "gfl_joint"): 0.01})   # hooks would meet at 0.021
     assert _q(m, d, "gfl_joint") == pytest.approx(0.01, abs=1e-3)
     assert _q(m, d, "gfr_joint") == pytest.approx(_q(m, d, "gfl_joint"), abs=1e-3)
 
@@ -76,7 +76,7 @@ def test_fingers_dont_stall_on_a_hull_the_uprights_reach_the_box():
     m, d = _scene(box_mass=0.2)
     _run(m, d, 1.5, {_act(m, "gfl_joint"): 0.025})
     # open gap 0.05, box 0.04: each finger travels ~0.005 before the uprights touch it (a hull over the
-    # hook corner would stop them earlier, at ~0.0 since the hooks are already within 0.034)
+    # hook corner would stop them earlier, at ~0.0 since the hooks are already within 0.042)
     assert _q(m, d, "gfl_joint") == pytest.approx(0.005, abs=1.5e-3)
 
 

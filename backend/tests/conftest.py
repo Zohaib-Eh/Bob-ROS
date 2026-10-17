@@ -104,7 +104,7 @@ def peg_in_hole_step_path(tmp_path) -> str:
 def gripper_shapes():
     """Two-finger test gripper, metres. Base plate x ±0.04, y ±0.02, z 0..0.01 (its top face is the
     mounting face; the fingers hang down along -z). Each finger is one L-shaped solid: an upright
-    (inner faces 0.05 m apart when open) with a hook at the bottom curling inward (tips 0.034 m apart),
+    (inner faces 0.05 m apart when open) with a hook at the bottom curling inward (tips 0.042 m apart),
     so a single convex hull would fill the corner between upright and hook."""
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Fuse
 
@@ -112,9 +112,9 @@ def gripper_shapes():
         return BRepPrimAPI_MakeBox(gp_Pnt(x0, y0, z0), gp_Pnt(x1, y1, z1)).Shape()
     base = box(-0.04, -0.02, 0.0, 0.04, 0.02, 0.01)
     finger_l = BRepAlgoAPI_Fuse(box(-0.035, -0.01, -0.06, -0.025, 0.01, 0.0),
-                                box(-0.025, -0.01, -0.06, -0.017, 0.01, -0.052)).Shape()
+                                box(-0.025, -0.01, -0.06, -0.021, 0.01, -0.052)).Shape()
     finger_r = BRepAlgoAPI_Fuse(box(0.025, -0.01, -0.06, 0.035, 0.01, 0.0),
-                                box(0.017, -0.01, -0.06, 0.025, 0.01, -0.052)).Shape()
+                                box(0.021, -0.01, -0.06, 0.025, 0.01, -0.052)).Shape()
     return {"gripper_base": base, "finger_l": finger_l, "finger_r": finger_r}
 
 

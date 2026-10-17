@@ -8,7 +8,9 @@ import xml.etree.ElementTree as ET
 import mujoco
 
 TIMESTEP = 0.002
-HOLD_ERROR = 0.05  # rad (or m) of error at which a motor gives full torque: kp = E / HOLD_ERROR
+HOLD_ERROR = 0.01  # rad (or m) of error at which a motor gives full torque: kp = E / HOLD_ERROR
+# (a proportional servo trails a moving target in proportion to speed; 0.05 let a weak wrist trail
+# 0.075 rad on a slow descent, a real drive tracks far tighter)
 STIFF = 0.1  # kp <= STIFF * inertia / timestep²: a stiffer motor on a light link oscillates instead of holding
 GRIP_ERROR = 0.002          # m short of target at which a finger motor pushes with its full grip force
 GRIP_FRICTION = "1 0.005 0.0001"

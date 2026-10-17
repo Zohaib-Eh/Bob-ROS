@@ -34,7 +34,10 @@ def wrist_centre(r, q):
 
 r = Robot()
 rpy = r.tool_down()
-a = _matrix((0, 0, 0), rpy)[:3, :3] @ np.asarray(r.chain.joints[-1].axis, float)
+# the last joint's axis in the tip frame (the tip may be a tool point past the flange, e.g. a gripper's tcp)
+q0 = [0.0 if j.lower is None else min(max(0.0, j.lower), j.upper) for j in r.chain.joints]
+local = r._kin.fk(q0)[:3, :3].T @ (joint_frames(r.chain, q0)[-1][:3, :3] @ np.asarray(r.chain.joints[-1].axis, float))
+a = _matrix((0, 0, 0), rpy)[:3, :3] @ local
 assert abs(abs(a[2]) - 1) < 1e-9, a                  # the approach axis is vertical
 if len(r.joint_names) >= 6:
     (x, y, z), _ = r.tool_pose()

@@ -31,7 +31,9 @@ def segment_poses(chain: Chain, q) -> list[np.ndarray]:
 
 
 def fk(chain: Chain, q) -> np.ndarray:
-    return segment_poses(chain, q)[-1]
+    """Base-frame pose of the tip link, including fixed links after the last joint (e.g. a gripper's tcp)."""
+    seg, T = chain.links.get(chain.tip, (len(chain.joints), np.eye(4)))
+    return segment_poses(chain, q)[seg] @ T
 
 
 def link_poses(chain: Chain, q) -> dict[str, np.ndarray]:
