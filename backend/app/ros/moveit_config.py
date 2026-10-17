@@ -84,6 +84,8 @@ def _joint_limits_yaml(chain: Chain, note: str) -> str:
 
 
 def _controllers_yaml(names: str, note: str) -> str:
+    # 0.1 rad (~6°) of lag aborts a move; 0.02 rad is the accuracy a move must end within
+    per_joint = "\n".join(f"      {n}:\n        trajectory: 0.1\n        goal: 0.02" for n in names.split(", "))
     return note + f"""controller_manager:
   ros__parameters:
     update_rate: 100
@@ -98,6 +100,10 @@ arm_controller:
     command_interfaces: [position]
     state_interfaces: [position, velocity]
     allow_nonzero_velocity_at_trajectory_end: true
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 1.0
+{per_joint}
 """
 
 
@@ -142,16 +148,23 @@ def _ros2_control_xacro(chain: Chain, robot: str, note: str) -> str:
           <param name="initial_value">${{initial_positions['{j.name}']}}</param>
         </state_interface>
         <state_interface name="velocity"/>
+        <state_interface name="effort"/>
       </joint>""" for j in chain.joints)
     return f"""<?xml version="1.0"?>
 {note}<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-  <xacro:macro name="{robot}_ros2_control" params="name initial_positions_file hardware">
+  <xacro:macro name="{robot}_ros2_control" params="name initial_positions_file hardware mujoco_model">
     <xacro:property name="initial_positions" value="${{xacro.load_yaml(initial_positions_file)['initial_positions']}}"/>
     <ros2_control name="${{name}}" type="system">
       <hardware>
-        <!-- hardware:=mock for now; Gazebo and MuJoCo arrive with the simulation container. -->
+        <!-- mock: joints are wherever they are told to be. mujoco: physics on scene.xml (sim_ctl writes it). -->
         <xacro:if value="${{hardware == 'mock'}}">
           <plugin>mock_components/GenericSystem</plugin>
+        </xacro:if>
+        <xacro:if value="${{hardware == 'mujoco'}}">
+          <plugin>mujoco_ros2_control/MujocoSystemInterface</plugin>
+          <param name="mujoco_model">${{mujoco_model}}</param>
+          <param name="headless">true</param>
+          <param name="sim_speed_factor">1.0</param>
         </xacro:if>
       </hardware>
 {joints}
@@ -166,34 +179,40 @@ def _urdf_xacro(robot: str, note: str) -> str:
 {note}<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="{robot}">
   <xacro:arg name="initial_positions_file" default="$(find {robot}_moveit_config)/config/initial_positions.yaml"/>
   <xacro:arg name="hardware" default="mock"/>
+  <xacro:arg name="mujoco_model" default="/tmp/sim/scene.xml"/>
   <xacro:include filename="$(find {robot})/urdf/{robot}.urdf"/>
   <xacro:include filename="{robot}.ros2_control.xacro"/>
-  <xacro:{robot}_ros2_control name="{robot}" initial_positions_file="$(arg initial_positions_file)" hardware="$(arg hardware)"/>
+  <xacro:{robot}_ros2_control name="{robot}" initial_positions_file="$(arg initial_positions_file)" hardware="$(arg hardware)" mujoco_model="$(arg mujoco_model)"/>
 </robot>
 """
 
 
 def _launch(robot: str, note: str) -> str:
-    return note + f'''"""MoveIt on mock hardware, headless: robot_state_publisher, ros2_control, controllers, move_group."""
+    return note + f'''"""MoveIt headless: robot_state_publisher, move_group, and on mock hardware ros2_control too.
+Hardware comes from /tmp/sim/hardware (written by sim_ctl). Under mujoco, sim_ctl runs the
+control node itself so it can restart the simulation without restarting MoveIt."""
+from pathlib import Path
+
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
 
 
 def generate_launch_description():
-    cfg = MoveItConfigsBuilder("{robot}", package_name="{robot}_moveit_config").to_moveit_configs()
+    flag = Path("/tmp/sim/hardware")
+    hardware = flag.read_text().strip() if flag.exists() else "mock"
+    cfg = (MoveItConfigsBuilder("{robot}", package_name="{robot}_moveit_config")
+           .robot_description(mappings={{"hardware": hardware}}).to_moveit_configs())
     controllers = str(cfg.package_path / "config" / "ros2_controllers.yaml")
-    return LaunchDescription([
-        Node(package="robot_state_publisher", executable="robot_state_publisher",
-             parameters=[cfg.robot_description]),
-        Node(package="controller_manager", executable="ros2_control_node",
-             parameters=[controllers],
-             remappings=[("~/robot_description", "/robot_description")]),
-        Node(package="controller_manager", executable="spawner",
-             arguments=["joint_state_broadcaster", "arm_controller"]),
-        Node(package="moveit_ros_move_group", executable="move_group",
-             parameters=[cfg.to_dict()]),
-    ])
+    nodes = [Node(package="robot_state_publisher", executable="robot_state_publisher",
+                  parameters=[cfg.robot_description]),
+             Node(package="moveit_ros_move_group", executable="move_group", parameters=[cfg.to_dict()])]
+    if hardware == "mock":
+        nodes += [Node(package="controller_manager", executable="ros2_control_node",
+                       parameters=[controllers], remappings=[("~/robot_description", "/robot_description")]),
+                  Node(package="controller_manager", executable="spawner",
+                       arguments=["joint_state_broadcaster", "arm_controller"])]
+    return LaunchDescription(nodes)
 '''
 
 
@@ -201,7 +220,7 @@ def _package_xml(robot: str, note: str) -> str:
     deps = [robot, "moveit_ros_move_group", "moveit_configs_utils", "moveit_kinematics",
             "moveit_planners_ompl", "moveit_simple_controller_manager", "trac_ik_kinematics_plugin",
             "controller_manager", "joint_state_broadcaster", "joint_trajectory_controller",
-            "robot_state_publisher", "xacro", "launch", "launch_ros"]
+            "robot_state_publisher", "xacro", "launch", "launch_ros", "mujoco_ros2_control"]
     dep_lines = "\n".join(f"  <exec_depend>{d}</exec_depend>" for d in deps)
     return f"""<?xml version="1.0"?>
 {note}<package format="3">

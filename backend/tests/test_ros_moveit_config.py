@@ -57,6 +57,29 @@ def test_xacro_files_parse_and_list_every_joint(ws):
     ET.fromstring(top)
 
 
+def test_mujoco_hardware_branch_reads_the_scene_file(ws):
+    xacro = (ws / "bot_moveit_config" / "config" / "bot.ros2_control.xacro").read_text()
+    assert "hardware == 'mujoco'" in xacro and "mujoco_ros2_control/MujocoSystemInterface" in xacro
+    assert '<param name="mujoco_model">${mujoco_model}</param>' in xacro and '<param name="headless">true</param>' in xacro
+    assert xacro.count('<state_interface name="effort"/>') == 2
+    top = (ws / "bot_moveit_config" / "config" / "bot.urdf.xacro").read_text()
+    assert '<xacro:arg name="mujoco_model" default="/tmp/sim/scene.xml"/>' in top
+    assert 'mujoco_model="$(arg mujoco_model)"' in top
+
+
+def test_arm_controller_aborts_when_a_joint_falls_behind(ws):
+    c = _yaml(ws / "bot_moveit_config" / "config" / "ros2_controllers.yaml")["arm_controller"]["ros__parameters"]
+    assert c["constraints"]["goal_time"] == 1.0
+    assert c["constraints"]["arm_joint"] == {"trajectory": 0.1, "goal": 0.02}
+    assert c["constraints"]["hand_joint"] == {"trajectory": 0.1, "goal": 0.02}
+
+
+def test_launch_leaves_the_control_node_to_sim_ctl_under_physics(ws):
+    src = (ws / "bot_moveit_config" / "launch" / "demo.launch.py").read_text()
+    assert '"/tmp/sim/hardware"' in src and 'if hardware == "mock":' in src
+    assert 'mappings={"hardware": hardware}' in src
+
+
 def test_launch_file_is_valid_python(ws):
     src = (ws / "bot_moveit_config" / "launch" / "demo.launch.py").read_text()
     compile(src, "demo.launch.py", "exec")
