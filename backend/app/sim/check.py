@@ -91,11 +91,11 @@ def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict
             "message": f"{link} sags {amount}: needs ~{needed:.3g} {unit}, has {has:g}."}
 
 
-def physics_check(robot_name, links, joints, bodies_by_link) -> dict:
+def physics_check(robot_name, links, joints, bodies_by_link, gripper=None) -> dict:
     """Runs in a child process: export (which builds the MJCF), then hold."""
     from app.export.urdf_writer import export_package
     try:
-        data = export_package(robot_name, links, joints, bodies_by_link)
+        data = export_package(robot_name, links, joints, bodies_by_link, gripper=gripper)
     except ValueError as exc:
         return {"ok": False, "kind": "load", "message": str(exc)}
     z = zipfile.ZipFile(io.BytesIO(data))

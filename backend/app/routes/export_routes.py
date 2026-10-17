@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from app.export.urdf_writer import export_package, unused_body_warnings
-from app.models import Body, Joint, Link
+from app.models import Body, Gripper, Joint, Link
 
 router = APIRouter()
 
@@ -14,13 +14,14 @@ class ExportRequest(BaseModel):
     links: list[Link]
     joints: list[Joint]
     bodies_by_link: dict[str, list[Body]]
+    gripper: Gripper | None = None
 
 
 @router.post("/export")
 def export(request: ExportRequest) -> Response:
     try:
         data = export_package(
-            request.robot_name, request.links, request.joints, request.bodies_by_link
+            request.robot_name, request.links, request.joints, request.bodies_by_link, gripper=request.gripper
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))

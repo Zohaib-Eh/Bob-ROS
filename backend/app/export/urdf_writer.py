@@ -12,8 +12,9 @@ import trimesh
 
 from scipy.spatial.transform import Rotation
 
+from app.export.gripper import DEFAULT_GRIP_FORCE, checked, convex_pieces, inward_joints, tcp_point
 from app.massprops.link_mass import compute_link_mass_properties
-from app.models import Body, Joint, Link, PartWarning
+from app.models import Body, Gripper, Joint, Link, PartWarning
 from app.sim.mjcf import build_mjcf, compile_mjcf
 from app.sim.torque import required_efforts, suggest
 from app.validate.structural import validate_structure
@@ -47,7 +48,8 @@ def _mesh_ref(robot_name: str, link: Link) -> str:
     return f"package://{robot_name}/meshes/{link.name}.stl"
 
 
-def _add_link_element(robot, robot_name: str, link: Link, T: np.ndarray) -> None:
+def _add_link_element(robot, robot_name: str, link: Link, T: np.ndarray, pieces: int = 0) -> None:
+    """pieces > 0: the collision is that many convex meshes `<link>_c<i>.stl` (gripper links)."""
     link_el = ET.SubElement(robot, "link", {"name": link.name})
     inv = np.linalg.inv(T)
     R = T[:3, :3]
@@ -67,11 +69,14 @@ def _add_link_element(robot, robot_name: str, link: Link, T: np.ndarray) -> None
 
     # Meshes are in world coordinates, so geometry origin = inverse(link frame).
     xyz, rpy = _xyz_rpy(inv)
-    for tag in ("visual", "collision"):
+    refs = [("visual", _mesh_ref(robot_name, link))]
+    refs += ([("collision", f"package://{robot_name}/meshes/{link.name}_c{i}.stl") for i in range(pieces)]
+             if pieces else [("collision", _mesh_ref(robot_name, link))])
+    for tag, ref in refs:
         geom_el = ET.SubElement(link_el, tag)
         ET.SubElement(geom_el, "origin", {"xyz": xyz, "rpy": rpy})
         geometry = ET.SubElement(geom_el, "geometry")
-        ET.SubElement(geometry, "mesh", {"filename": _mesh_ref(robot_name, link)})
+        ET.SubElement(geometry, "mesh", {"filename": ref})
 
 
 def _joint_names(joints: list[Joint], links_by_id) -> dict[str, str]:
@@ -142,27 +147,61 @@ def export_urdf(
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
     efforts: dict[str, float] | None = None,
+    gripper: Gripper | None = None,
+    collision_pieces: dict[str, int] | None = None,
 ) -> str:
-    """URDF text. `efforts` maps joint ids to motor strength; a missing one is written as 100."""
+    """URDF text. `efforts` maps joint ids to motor strength; a missing one is written as 100.
+    With `gripper`: both finger axes point inward, the follower <mimic>s the leader, and a fixed
+    `tcp` link sits between the fingertips. `collision_pieces` maps link ids to their convex piece count."""
     errors = validate_structure(links, joints) + _urdf_errors(
         robot_name, links, joints, bodies_by_link
     )
+    if gripper is not None and any(l.name == "tcp" for l in links):
+        errors.append("A link is named 'tcp'; that name is the gripper's tool point. Rename the link.")
     if errors:
         raise ValueError(
             "Cannot export URDF -- structural validation failed: " + "; ".join(errors)
         )
+    if gripper is not None:
+        joints = inward_joints(gripper, joints, bodies_by_link)
 
     robot = ET.Element("robot", {"name": robot_name})
     links_by_id = {link.id: link for link in links}
     frames = _link_frames(links, joints)
 
     for link in links:
-        _add_link_element(robot, robot_name, link, frames[link.id])
+        _add_link_element(robot, robot_name, link, frames[link.id], (collision_pieces or {}).get(link.id, 0))
     names = _joint_names(joints, links_by_id)
     for joint in joints:
         _add_joint_element(robot, joint, names[joint.id], links_by_id, frames, (efforts or {}).get(joint.id, 100.0))
+    if gripper is not None:
+        _add_gripper(robot, gripper, joints, names, links_by_id, frames, bodies_by_link)
 
     return minidom.parseString(ET.tostring(robot, encoding="unicode")).toprettyxml(indent="  ")
+
+
+def _add_gripper(robot, gripper: Gripper, joints, names, links_by_id, frames, bodies_by_link) -> None:
+    """Follower <mimic> of the leader, and the fixed `tcp` link on the gripper base: z along the
+    approach axis, x along the leader's closing direction."""
+    leader, follower = checked(gripper, joints)
+    for el in robot.iter("joint"):
+        if el.get("name") == names[follower.id]:
+            ET.SubElement(el, "mimic", {"joint": names[leader.id], "multiplier": "1", "offset": "0"})
+    verts = lambda link_id: [v for b in bodies_by_link.get(link_id, []) for v in b.vertices]
+    xyz, z = tcp_point(verts(leader.parent_link_id), verts(leader.child_link_id), verts(follower.child_link_id),
+                       gripper.tcp_offset_m)
+    z = np.asarray(z)
+    x = np.asarray(leader.axis, float) - (np.asarray(leader.axis, float) @ z) * z
+    x /= np.linalg.norm(x)
+    T = np.eye(4)
+    T[:3, :3] = np.column_stack([x, np.cross(z, x), z])
+    T[:3, 3] = xyz
+    ET.SubElement(robot, "link", {"name": "tcp"})
+    j = ET.SubElement(robot, "joint", {"name": "tcp_joint", "type": "fixed"})
+    ET.SubElement(j, "parent", {"link": links_by_id[leader.parent_link_id].name})
+    ET.SubElement(j, "child", {"link": "tcp"})
+    o_xyz, o_rpy = _xyz_rpy(np.linalg.inv(frames[leader.parent_link_id]) @ T)
+    ET.SubElement(j, "origin", {"xyz": o_xyz, "rpy": o_rpy})
 
 
 def package_xml(robot_name: str) -> str:
@@ -261,20 +300,32 @@ def link_mass_properties(link: Link, bodies: list[Body]) -> Link:
     return _with_mass_properties(link, used[link.id])
 
 
-def _prepared(robot_name, links, joints, bodies_by_link):
-    """Validated links (with mass properties), used bodies and per-link STL bytes."""
+def _prepared(robot_name, links, joints, bodies_by_link, gripper: Gripper | None = None):
+    """Validated links (with mass properties), used bodies, per-link STL bytes, and the convex
+    collision piece count per gripper link (`<link>_c<i>.stl` meshes)."""
     bodies_by_link = _used_bodies(links, bodies_by_link)
     errors = _part_status_errors(links, bodies_by_link)
     if errors:
         raise ValueError("Cannot export URDF -- " + "; ".join(errors))
     links = [_with_mass_properties(l, bodies_by_link.get(l.id, [])) for l in links]
-    meshes = {}
+    meshes, pieces = {}, {}
+    gripper_links = set()
+    if gripper is not None:
+        leader, follower = checked(gripper, joints)
+        gripper_links = {leader.parent_link_id, leader.child_link_id, follower.child_link_id}
     for link in links:
         parts = [trimesh.Trimesh(vertices=b.vertices, faces=b.triangles, process=False)
                  for b in bodies_by_link.get(link.id, []) if b.vertices]
-        if parts:
-            meshes[f"{link.name}.stl"] = trimesh.util.concatenate(parts).export(file_type="stl")
-    return links, bodies_by_link, meshes
+        if not parts:
+            continue
+        whole = trimesh.util.concatenate(parts)
+        meshes[f"{link.name}.stl"] = whole.export(file_type="stl")
+        if link.id in gripper_links:
+            convex = convex_pieces(whole.vertices, whole.faces)
+            for i, (v, f) in enumerate(convex):
+                meshes[f"{link.name}_c{i}.stl"] = trimesh.Trimesh(v, f, process=False).export(file_type="stl")
+            pieces[link.id] = len(convex)
+    return links, bodies_by_link, meshes, pieces
 
 
 def _suggested_from(urdf: str, links, joints, meshes) -> dict[str, float]:
@@ -286,7 +337,7 @@ def _suggested_from(urdf: str, links, joints, meshes) -> dict[str, float]:
 
 
 def suggest_efforts(robot_name, links, joints, bodies_by_link) -> dict[str, float]:
-    links, bodies_by_link, meshes = _prepared(robot_name, links, joints, bodies_by_link)
+    links, bodies_by_link, meshes, _ = _prepared(robot_name, links, joints, bodies_by_link)
     return _suggested_from(export_urdf(robot_name, links, joints, bodies_by_link), links, joints, meshes)
 
 
@@ -295,20 +346,31 @@ def export_package(
     links: list[Link],
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
+    gripper: Gripper | None = None,
 ) -> bytes:
     """The ROS description package zip. A robot MuJoCo can't load still exports: its efforts fall back
-    to 100 (or max_effort) and the zip has no mjcf/; the physics check reports why."""
-    links, bodies_by_link, meshes = _prepared(robot_name, links, joints, bodies_by_link)
-    urdf = export_urdf(robot_name, links, joints, bodies_by_link)  # structural errors raise here
+    to 100 (or max_effort) and the zip has no mjcf/; the physics check reports why. With `gripper`
+    the fingers' effort is their grip force (max_effort or 40 N) and the follower has no motor."""
+    links, bodies_by_link, meshes, pieces = _prepared(robot_name, links, joints, bodies_by_link, gripper)
+    kw = {"gripper": gripper, "collision_pieces": pieces}
+    urdf = export_urdf(robot_name, links, joints, bodies_by_link, **kw)  # structural errors raise here
     try:
         sug = _suggested_from(urdf, links, joints, meshes)
     except (ValueError, mujoco.FatalError):
         sug = {}
-    efforts = {j.id: j.max_effort or sug.get(j.id, 100.0) for j in joints}
-    urdf = export_urdf(robot_name, links, joints, bodies_by_link, efforts)
+    fingers = {gripper.leader_joint_id, gripper.follower_joint_id} if gripper else set()
+    efforts = {j.id: j.max_effort or (DEFAULT_GRIP_FORCE if j.id in fingers else sug.get(j.id, 100.0)) for j in joints}
+    urdf = export_urdf(robot_name, links, joints, bodies_by_link, efforts, **kw)
     names = _joint_names(joints, {l.id: l for l in links})
+    motors = {names[j.id]: efforts[j.id] for j in joints if not (gripper and j.id == gripper.follower_joint_id)}
+    grip = None
+    if gripper is not None:
+        leader, follower = checked(gripper, joints)
+        by_id = {l.id: l for l in links}
+        grip = {"links": [by_id[i].name for i in (leader.parent_link_id, leader.child_link_id, follower.child_link_id)],
+                "follower": names[follower.id]}
     try:
-        mjcf = build_mjcf(urdf, meshes, {names[j.id]: efforts[j.id] for j in joints})  # fixed joints get no motor
+        mjcf = build_mjcf(urdf, meshes, motors, grip)  # fixed joints get no motor
     except (ValueError, mujoco.FatalError):
         mjcf = None
     buf = io.BytesIO()

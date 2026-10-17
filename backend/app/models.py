@@ -109,3 +109,11 @@ class Joint(_Model):
                 and self.limit_lower > self.limit_upper):
             raise ValueError("limit_lower must be <= limit_upper")
         return self
+
+
+class Gripper(_Model):
+    """Two sliding finger joints; the follower mirrors the leader. tcp_offset_m pushes the tool point
+    further out along the gripper axis."""
+    leader_joint_id: str
+    follower_joint_id: str
+    tcp_offset_m: float = 0.0

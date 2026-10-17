@@ -60,10 +60,10 @@ def current() -> dict | None:
     return _current
 
 
-def start(robot_name: str, links, joints, bodies_by_link) -> dict:
+def start(robot_name: str, links, joints, bodies_by_link, gripper=None) -> dict:
     """Check fast, then export the workspace and (re)start the container in a background thread."""
     global _prep, _thread
-    data = export_package(robot_name, links, joints, bodies_by_link)  # ValueError -> caller
+    data = export_package(robot_name, links, joints, bodies_by_link, gripper=gripper)  # ValueError -> caller
     _docker("info")
     with _lock:
         if _thread is not None and _thread.is_alive():
