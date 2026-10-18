@@ -1,0 +1,9 @@
+# The workcell: objects in every run (Simulate > Workcell edits this file).
+# box size = full x y z, cylinder size = (radius, height); metres, base frame; fixed = bolted down.
+- name: table
+  shape: mesh
+  size: [0.6, 0.4, 0.3]
+  xyz: [0.5, 0.25, 0.15]
+  fixed: true
+  file: table.stl
+  pieces: 7

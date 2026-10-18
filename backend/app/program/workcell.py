@@ -101,7 +101,7 @@ def import_fixture(robot: str, filename: str, data: bytes, scale: float) -> dict
     whole = trimesh.util.concatenate(parts)
     lo, hi = whole.bounds
     whole.apply_translation(-(lo + hi) / 2)              # the object's frame: its bounding box's centre
-    size = [float(v) for v in hi - lo]
+    size = [round(float(v), 6) for v in hi - lo]   # STL coordinates are float32
     current = read(robot)
     taken = {o["name"] for o in current["objects"]}
     stem = re.sub(r"[^A-Za-z0-9_]", "_", Path(filename).stem) or "fixture"

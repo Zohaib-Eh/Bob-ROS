@@ -30,6 +30,8 @@ physics=(/check/physics/${ROBOT}_*.py)
 if [ ${#physics[@]} -gt 0 ]; then
   kill $LAUNCH 2>/dev/null || true; wait $LAUNCH 2>/dev/null || true
   export PYTHONPATH=/ws/src/${ROBOT}_program:$PYTHONPATH
+  # a robot's own workcell (workcell.yaml + meshes/), e.g. CAD fixtures imported by the app
+  if [ -d "/check/physics/${ROBOT}_workcell" ]; then cp -r "/check/physics/${ROBOT}_workcell/." "/ws/src/${ROBOT}_tasks/"; fi
   python3 -m sim_ctl hardware
   ros2 launch "${ROBOT}_moveit_config" demo.launch.py > /tmp/launch_physics.log 2>&1 &
   LAUNCH=$!
