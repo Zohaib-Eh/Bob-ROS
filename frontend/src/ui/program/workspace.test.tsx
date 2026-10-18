@@ -98,6 +98,20 @@ describe("Workspace", () => {
     expect(screen.queryByText("Saved")).toBeNull();
   });
 
+  it("the run's result stays on screen after the run ends (found driving the app)", async () => {
+    vi.spyOn(api, "runFile").mockResolvedValue({ ok: true, output: "box at (0.450, 0.551, 0.415)\nRESULT: ok" });
+    const props = { preview: <div />, conversation: null, changed: new Set<string>(), onRan: vi.fn(), onRunning: vi.fn() };
+    vi.spyOn(api, "listFiles").mockResolvedValue(files);
+    vi.spyOn(api, "readFile").mockImplementation(async (path) => ({ path, content: `# ${path}`, editable: true }));
+    const { rerender } = render(<Workspace {...props} running={false} />);
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+    await act(async () => { rerender(<Workspace {...props} running={true} />); });
+    await act(async () => { rerender(<Workspace {...props} running={false} />); });   // the file is re-read after a run
+    expect(screen.getByText("Run ok")).toBeTruthy();
+  });
+
   it("shows the error when a run is refused", async () => {
     vi.spyOn(api, "runFile").mockRejectedValue(new Error("A task is already running."));
     ui();

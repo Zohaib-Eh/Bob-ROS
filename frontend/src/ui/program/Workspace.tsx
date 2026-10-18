@@ -19,12 +19,13 @@ export default function Workspace({ preview, conversation, running, changed, onR
 
   // re-list when a task starts/finishes (it may have written files); listing is read-only so safe while running
   useEffect(() => { if (tab === "code") void api.listFiles().then(setFiles).catch((e) => setNote(e.message)); }, [tab, running, conversation]);
-  useEffect(() => { if (!running && file && !dirty) void openFile(file.path); }, [running]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // after a run, re-read the file (the run may have changed it) but keep the run's result on screen
+  useEffect(() => { if (!running && file && !dirty) void openFile(file.path, true); }, [running]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const opens = useRef(0);
-  async function openFile(path: string) {
+  async function openFile(path: string, keepNote = false) {
     const n = ++opens.current;
-    try { const f = await api.readFile(path); if (n === opens.current) { setFile(f); setText(f.content); setNote(null); } }
+    try { const f = await api.readFile(path); if (n === opens.current) { setFile(f); setText(f.content); if (!keepNote) setNote(null); } }
     catch (e) { if (n === opens.current) setNote((e as Error).message); }
   }
   function requestOpen(path: string) {
