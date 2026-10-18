@@ -3,9 +3,10 @@ import type { WorkcellObject } from "../api/program";
 export type NewKind = "box" | "cylinder" | "table";
 export type Reach = [number, number][] | null;   // see api Workcell.reach
 
-const height = (o: WorkcellObject) => (o.shape === "box" ? o.size[2] : o.size[1]);
+// a CAD fixture (mesh) is used by its bounding box, like a box
+const height = (o: WorkcellObject) => (o.shape === "cylinder" ? o.size[1] : o.size[2]);
 /** Footprint half-widths on the floor (ignoring turns: a box turned on the floor may overhang a little). */
-const half = (o: WorkcellObject): [number, number] => (o.shape === "box" ? [o.size[0] / 2, o.size[1] / 2] : [o.size[0], o.size[0]]);
+const half = (o: WorkcellObject): [number, number] => (o.shape === "cylinder" ? [o.size[0], o.size[0]] : [o.size[0] / 2, o.size[1] / 2]);
 
 /** How far out (from the base's axis) the arm gets at height z; 0 above or below anything it reaches; null if unknown. */
 export function reachAt(reach: Reach, z: number): number | null {

@@ -27,6 +27,12 @@ describe("workcell objects", () => {
     expect(onTable.xyz.slice(0, 2)).toEqual([0.55, 0.05]);
   });
 
+  it("an imported CAD table is used by its bounding box: a box settles on its top", () => {
+    const cad: WorkcellObject = { ...table, shape: "mesh", file: "table.stl", pieces: 4 };
+    const box: WorkcellObject = { ...newObject("box", [], reach), xyz: [0.5, 0, 0.9] };
+    expect(settle(box, [cad]).xyz[2]).toBeCloseTo(0.3 + box.size[2] / 2, 9);
+  });
+
   it("flags objects the arm can't reach at their top, where a gripper comes in", () => {
     expect(reachAt(reach, 0.3)).toBe(0.9);
     expect(reachAt(reach, 2.0)).toBe(0);                                 // above anything the arm gets to

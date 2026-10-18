@@ -56,8 +56,21 @@ export async function runConversation(id: string, task: string, onEvent: (e: Pro
 }
 /** One object of <robot>_tasks/workcell.yaml (base frame, metres; box size = full x y z, cylinder = radius, height). */
 export interface WorkcellObject {
-  name: string; shape: "box" | "cylinder"; size: number[]; xyz: [number, number, number]; rpy: [number, number, number];
+  name: string; shape: "box" | "cylinder" | "mesh"; size: number[]; xyz: [number, number, number]; rpy: [number, number, number];
   fixed: boolean; mass: number | null; friction: number | null;
+  file?: string; pieces?: number;   // a CAD fixture (shape mesh): its <name>.stl and convex piece count; size = bounding box
+}
+export interface FixtureMesh { vertices: [number, number, number][]; triangles: [number, number, number][] }
+/** A CAD file (STEP, IGES, STL, OBJ...) as a bolted-down fixture; scale applies to unitless files (STL: mm = 0.001). */
+export async function importFixture(robot: string, file: File, scale: number): Promise<Workcell> {
+  const form = new FormData();
+  form.append("robot", robot);
+  form.append("scale", String(scale));
+  form.append("file", file);
+  return (await send("/program/workcell/fixture", { method: "POST", body: form })).json();
+}
+export async function getFixtureMesh(robot: string, file: string): Promise<FixtureMesh> {
+  return (await send(`/program/workcell/mesh${q(robot)}&file=${encodeURIComponent(file)}`, { method: "GET" })).json();
 }
 /** reach: [height, how far out the tool point gets there] per 10 cm band, bottom up; null until ROS has set the robot up. */
 export interface Workcell { objects: WorkcellObject[]; error: string | null; reach: [number, number][] | null }

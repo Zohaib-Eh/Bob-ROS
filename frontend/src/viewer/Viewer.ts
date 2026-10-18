@@ -9,7 +9,8 @@ import type { SceneObject } from "../ros/liveRobot";
 
 /** What the workcell editor shows in 3D (see setWorkcell). */
 export interface WorkcellView {
-  objects: { name: string; shape: "box" | "cylinder"; size: number[]; xyz: Vec3; rpy: Vec3; fixed: boolean; warn: boolean }[];
+  objects: { name: string; shape: "box" | "cylinder" | "mesh"; size: number[]; xyz: Vec3; rpy: Vec3; fixed: boolean; warn: boolean;
+    mesh?: { vertices: Vec3[]; triangles: [number, number, number][] } }[];   // a CAD fixture's shape, once loaded
   selected: string | null;
   reach: number | null;     // how far out the arm gets at height ringZ: drawn as a ring there
   ringZ: number;
@@ -250,7 +251,13 @@ export class Viewer {
       this.objects.remove(c); c.geometry.dispose(); (c.material as Material).dispose();
     }
     for (const o of objs) {
-      const geo = o.shape === "box" ? new BoxGeometry(o.dims[0], o.dims[1], o.dims[2])
+      let geo: BufferGeometry;
+      if (o.shape === "mesh" && o.mesh) {   // a CAD fixture
+        geo = new BufferGeometry();
+        geo.setAttribute("position", new BufferAttribute(new Float32Array(o.mesh.vertices.flat()), 3));
+        geo.setIndex(o.mesh.triangles.flat());
+        geo.computeVertexNormals();
+      } else geo = o.shape === "box" ? new BoxGeometry(o.dims[0], o.dims[1], o.dims[2])
         : new CylinderGeometry(o.dims[1], o.dims[1], o.dims[0], 32).rotateX(Math.PI / 2); // ROS cylinders stand on z
       const mesh = new Mesh(geo, new MeshStandardMaterial({ color: o.attached ? 0xf59e0b : 0x60a5fa }));
       mesh.matrixAutoUpdate = false;
@@ -268,8 +275,14 @@ export class Viewer {
     for (const c of [...this.wcGroup.children]) { this.wcGroup.remove(c); disposeTree(c); }
     this.objects.visible = !w;
     for (const o of w?.objects ?? []) {
-      const geo = o.shape === "box" ? new BoxGeometry(o.size[0], o.size[1], o.size[2])
-        : new CylinderGeometry(o.size[0], o.size[0], o.size[1], 32).rotateX(Math.PI / 2);   // standing on z
+      let geo: BufferGeometry;
+      if (o.shape === "mesh" && o.mesh) {
+        geo = new BufferGeometry();
+        geo.setAttribute("position", new BufferAttribute(new Float32Array(o.mesh.vertices.flat()), 3));
+        geo.setIndex(o.mesh.triangles.flat());
+        geo.computeVertexNormals();
+      } else if (o.shape === "cylinder") geo = new CylinderGeometry(o.size[0], o.size[0], o.size[1], 32).rotateX(Math.PI / 2);   // standing on z
+      else geo = new BoxGeometry(o.size[0], o.size[1], o.size[2]);   // a box, or a fixture's bounding box until its mesh loads
       const color = o.warn ? 0xef4444 : o.name === w!.selected ? 0xf59e0b : o.fixed ? 0x9ca3af : 0x60a5fa;
       const mesh = new Mesh(geo, new MeshStandardMaterial({ color }));
       mesh.position.set(o.xyz[0], o.xyz[1], o.xyz[2]);

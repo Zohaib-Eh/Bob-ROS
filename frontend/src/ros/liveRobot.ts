@@ -6,7 +6,10 @@ export interface TfTransform {
   child_frame_id: string;
   transform: { translation: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number; w: number } };
 }
-export interface SceneObject { id: string; shape: "box" | "cylinder"; dims: number[]; matrix: Matrix4; attached: boolean }
+export interface SceneObject {
+  id: string; shape: "box" | "cylinder" | "mesh"; dims: number[]; matrix: Matrix4; attached: boolean;
+  mesh?: { vertices: [number, number, number][]; triangles: [number, number, number][] };   // a CAD fixture
+}
 /** GetPlanningScene components: ROBOT_STATE_ATTACHED_OBJECTS (4) | WORLD_OBJECT_GEOMETRY (16). */
 export const SCENE_COMPONENTS = 20;
 
@@ -69,12 +72,18 @@ export function bodyPoses(links: Link[], tree: FrameTree, home: Map<string, Matr
 
 function objectsOf(o: any, frameM: Matrix4, attached: boolean): SceneObject[] {
   const base = frameM.clone().multiply(o.pose ? poseMatrix(o.pose) : new Matrix4());
-  return (o.primitives ?? []).flatMap((p: any, i: number) => {
+  const meshes = (o.meshes ?? []).map((m: any, i: number) => {
+    const local = o.mesh_poses?.[i] ? poseMatrix(o.mesh_poses[i]) : new Matrix4();
+    return { id: o.id, shape: "mesh" as const, dims: [], matrix: base.clone().multiply(local), attached,
+      mesh: { vertices: (m.vertices ?? []).map((v: any) => [v.x, v.y, v.z]),
+        triangles: (m.triangles ?? []).map((t: any) => [...t.vertex_indices]) } };
+  });
+  return [...meshes, ...(o.primitives ?? []).flatMap((p: any, i: number) => {
     const shape = p.type === 1 ? "box" : p.type === 3 ? "cylinder" : null;
     if (!shape) return [];
     const local = o.primitive_poses?.[i] ? poseMatrix(o.primitive_poses[i]) : new Matrix4();
     return [{ id: o.id, shape, dims: [...p.dimensions], matrix: base.clone().multiply(local), attached }];
-  });
+  })];
 }
 
 export function sceneObjects(scene: any, tree: FrameTree, base: string): SceneObject[] {

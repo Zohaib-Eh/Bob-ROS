@@ -1,7 +1,7 @@
-import { Box, Check, Cylinder, Pencil, Table, Trash2 } from "lucide-react";
+import { Box, Check, Cylinder, FileUp, Pencil, Table, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import * as api from "../../api/program";
-import type { WorkcellObject } from "../../api/program";
+import type { FixtureMesh, WorkcellObject } from "../../api/program";
 import { newObject, outOfReach, reachAt, settle, top, type NewKind, type Reach } from "../../model/workcell";
 import type { Viewer } from "../../viewer/Viewer";
 
@@ -17,6 +17,8 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const dirty = useRef(false);
+  const [meshes, setMeshes] = useState<Record<string, FixtureMesh>>({});
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -38,15 +40,34 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
   const edit = (name: string, f: (o: WorkcellObject) => WorkcellObject) =>
     change(objects.map((o) => (o.name === name ? f(o) : o)));
 
+  useEffect(() => {   // fetch each CAD fixture's shape once, to draw it
+    if (!editing) return;
+    for (const f of new Set(objects.flatMap((o) => (o.shape === "mesh" && o.file && !meshes[o.file] ? [o.file] : [])))) {
+      void api.getFixtureMesh(robot, f).then((m) => setMeshes((ms) => ({ ...ms, [f]: m }))).catch(() => {});
+    }
+  }, [editing, objects, robot]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function importCad(file: File | undefined) {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const w = await api.importFixture(robot, file, 0.001);   // STEP/IGES carry their units; STL/OBJ in mm
+      setObjects(w.objects); setReach(w.reach); setError(w.error);
+      setSelected(w.objects.at(-1)?.name ?? null);
+    } catch (e) { setError((e as Error).message); }
+    finally { setImporting(false); }
+  }
+
   useEffect(() => {   // the 3D view: objects, the selection, the reach; drag to move
     if (!viewer) return;
     const ringZ = (() => { const s = objects.find((o) => o.name === selected); return s ? top(s) : 0.3; })();
     viewer.setWorkcell(editing ? {
-      objects: objects.map((o) => ({ ...o, warn: outOfReach(o, reach) })), selected, reach: reachAt(reach, ringZ), ringZ,
+      objects: objects.map((o) => ({ ...o, warn: outOfReach(o, reach), mesh: o.file ? meshes[o.file] : undefined })),
+      selected, reach: reachAt(reach, ringZ), ringZ,
       onPick: setSelected,
       onDrag: (name, x, y) => change(objects.map((o) => (o.name === name ? settle({ ...o, xyz: [x, y, o.xyz[2]] }, objects) : o))),
     } : null);
-  }, [viewer, editing, objects, selected, reach]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewer, editing, objects, selected, reach, meshes]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => viewer?.setWorkcell(null), [viewer]);
 
   const add = (kind: NewKind) => { const o = newObject(kind, objects, reach); change([...objects, o]); setSelected(o.name); };
@@ -71,26 +92,33 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
           <button className="btn" onClick={() => add("box")}><Box size={14} />Box</button>
           <button className="btn" onClick={() => add("cylinder")}><Cylinder size={14} />Cylinder</button>
           <button className="btn" onClick={() => add("table")}><Table size={14} />Table</button>
+          <label className={`btn${importing ? " disabled" : ""}`} title="A table, conveyor or fixture from a STEP, IGES, STL or OBJ file (STL/OBJ in mm), bolted down">
+            <FileUp size={14} />{importing ? "Importing…" : "CAD fixture…"}
+            <input type="file" hidden aria-label="Import CAD fixture" accept=".step,.stp,.iges,.igs,.brep,.stl,.obj"
+              disabled={importing} onChange={(e) => { void importCad(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
         </div>
         <ul className="plain">
           {objects.map((o) => (
             <li key={o.name}><button className={`btn btn-ghost${o.name === selected ? " active" : ""}`} onClick={() => setSelected(o.name)}>
-              {o.name} · {o.fixed ? "bolted down" : `${o.mass ?? "?"} kg`}</button></li>
+              {o.name} · {o.shape === "mesh" ? "CAD fixture" : o.fixed ? "bolted down" : `${o.mass ?? "?"} kg`}</button></li>
           ))}
         </ul>
         {sel && <div className="sub-card">
           <label className="field-row small"><span>Name</span>
             <input aria-label="Name" value={sel.name} onChange={(e) => { const n = e.target.value; edit(sel.name, (o) => ({ ...o, name: n })); setSelected(n); }} /></label>
-          {sel.shape === "box"
+          {sel.shape === "mesh"
+            ? <p className="muted small">{sel.size.map(mm).join(" × ")} mm (from the CAD file)</p>
+            : sel.shape === "box"
             ? ["x", "y", "z"].map((a, i) => <span key={a}>{num(`Size ${a} (mm)`, mm(sel.size[i]), (v) => edit(sel.name, (o) => ({ ...o, size: o.size.map((s, k) => (k === i ? v / 1000 : s)) })))}</span>)
             : <>{num("Radius (mm)", mm(sel.size[0]), (v) => edit(sel.name, (o) => ({ ...o, size: [v / 1000, o.size[1]] })))}
                 {num("Height (mm)", mm(sel.size[1]), (v) => edit(sel.name, (o) => ({ ...o, size: [o.size[0], v / 1000] })))}</>}
           {["x", "y", "z"].map((a, i) => <span key={a}>{num(`Position ${a} (mm)`, mm(sel.xyz[i]), (v) => edit(sel.name, (o) => ({ ...o, xyz: o.xyz.map((s, k) => (k === i ? v / 1000 : s)) as WorkcellObject["xyz"] })))}</span>)}
           {num("Turn (°)", Math.round((sel.rpy[2] * 180) / Math.PI), (v) => edit(sel.name, (o) => ({ ...o, rpy: [o.rpy[0], o.rpy[1], (v * Math.PI) / 180] })))}
-          <label className="field-row small"><input type="checkbox" aria-label="Bolted down" checked={sel.fixed}
+          {sel.shape !== "mesh" && <label className="field-row small"><input type="checkbox" aria-label="Bolted down" checked={sel.fixed}
             onChange={(e) => edit(sel.name, (o) => (e.target.checked ? { ...o, fixed: true, mass: null }
               : { ...o, fixed: false, mass: +(DENSITY * (o.shape === "box" ? o.size[0] * o.size[1] * o.size[2] : Math.PI * o.size[0] ** 2 * o.size[1])).toPrecision(2) }))} />
-            <span>Bolted down</span></label>
+            <span>Bolted down</span></label>}
           {!sel.fixed && num("Mass (kg)", sel.mass ?? 0, (v) => edit(sel.name, (o) => ({ ...o, mass: v })), 0.05)}
           <button className="btn" onClick={() => { change(objects.filter((o) => o.name !== sel.name)); setSelected(null); }}><Trash2 size={14} />Delete</button>
         </div>}

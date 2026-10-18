@@ -43,6 +43,21 @@ describe("WorkcellCard", () => {
     expect(t.mass).toBeGreaterThan(0);   // a loose object needs a mass
   });
 
+  it("Import CAD fixture uploads the file and shows it as a bolted-down fixture", async () => {
+    await ui([]);
+    const cad: WorkcellObject = { ...table, name: "conveyor", shape: "mesh", file: "conveyor.stl", pieces: 5, size: [1.2, 0.4, 0.8] };
+    const imp = vi.spyOn(api, "importFixture").mockResolvedValue({ objects: [cad], error: null, reach: null });
+    vi.spyOn(api, "getFixtureMesh").mockResolvedValue({ vertices: [], triangles: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Edit workcell" }));
+    const file = new File(["solid"], "conveyor.step");
+    await act(async () => { fireEvent.change(screen.getByLabelText("Import CAD fixture"), { target: { files: [file] } }); });
+    expect(imp).toHaveBeenCalledWith("bot", file, 0.001);
+    fireEvent.click(screen.getByRole("button", { name: /^conveyor/ }));
+    expect(screen.getByRole("button", { name: /^conveyor · CAD fixture/ })).toBeTruthy();
+    expect(screen.getByText("1200 × 400 × 800 mm (from the CAD file)")).toBeTruthy();
+    expect(screen.queryByLabelText("Bolted down")).toBeNull();   // fixtures are always bolted down
+  });
+
   it("a refused save says why", async () => {
     await ui();
     vi.spyOn(api, "putWorkcell").mockRejectedValue(new Error("workcell: 'table': size must be 3 numbers > 0"));

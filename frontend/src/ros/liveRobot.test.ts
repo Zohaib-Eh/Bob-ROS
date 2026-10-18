@@ -61,4 +61,16 @@ describe("liveRobot", () => {
     expect(at(objs[1].matrix, [0, 0, 0])).toEqual([1.5, 0, 0]);
     expect(objs[1].dims).toEqual([0.4, 0.05]);
   });
+
+  it("shows a CAD fixture as its mesh during a run", () => {   // MoveIt holds fixtures as meshes, not primitives
+    const tree = new FrameTree();
+    const pose = (x: number) => ({ position: { x, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } });
+    const scene = { world: { collision_objects: [{ id: "table", header: { frame_id: "base" }, pose: pose(1),
+      meshes: [{ vertices: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }], triangles: [{ vertex_indices: [0, 1, 2] }] }],
+      mesh_poses: [pose(0)] }] } };
+    const [o] = sceneObjects(scene, tree, "base");
+    expect([o.id, o.shape]).toEqual(["table", "mesh"]);
+    expect(o.mesh).toEqual({ vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], triangles: [[0, 1, 2]] });
+    expect(at(o.matrix, [0, 0, 0])).toEqual([1, 0, 0]);
+  });
 });
