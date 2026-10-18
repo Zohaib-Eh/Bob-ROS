@@ -11,7 +11,8 @@ import type { SceneObject } from "../ros/liveRobot";
 export interface WorkcellView {
   objects: { name: string; shape: "box" | "cylinder"; size: number[]; xyz: Vec3; rpy: Vec3; fixed: boolean; warn: boolean }[];
   selected: string | null;
-  reach: number | null;
+  reach: number | null;     // how far out the arm gets at height ringZ: drawn as a ring there
+  ringZ: number;
   onPick(name: string | null): void;
   onDrag(name: string, x: number, y: number): void;
 }
@@ -278,7 +279,7 @@ export class Viewer {
     }
     if (w?.reach) {
       const pts = Array.from({ length: 96 }, (_, i) => new Vector3(
-        w.reach! * Math.cos((i / 96) * 2 * Math.PI), w.reach! * Math.sin((i / 96) * 2 * Math.PI), 0.001));
+        w.reach! * Math.cos((i / 96) * 2 * Math.PI), w.reach! * Math.sin((i / 96) * 2 * Math.PI), w.ringZ + 0.001));
       this.wcGroup.add(new LineLoop(new BufferGeometry().setFromPoints(pts), new LineBasicMaterial({ color: 0x22c55e })));
     }
     this.requestRender();

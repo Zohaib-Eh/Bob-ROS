@@ -7,9 +7,9 @@ import WorkcellCard from "./WorkcellCard";
 const table: WorkcellObject = { name: "table", shape: "box", size: [0.6, 0.4, 0.3], xyz: [0.5, 0, 0.15], rpy: [0, 0, 0], fixed: true, mass: null, friction: null };
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
-async function ui(objects: WorkcellObject[] = [table], reach: number | null = 1.0) {
+async function ui(objects: WorkcellObject[] = [table], reach: [number, number][] | null = [[0.25, 1.0], [0.35, 1.0]]) {
   vi.useFakeTimers();
-  vi.spyOn(api, "getWorkcell").mockResolvedValue({ objects, error: null, reach_m: reach });
+  vi.spyOn(api, "getWorkcell").mockResolvedValue({ objects, error: null, reach });
   const put = vi.spyOn(api, "putWorkcell").mockImplementation(async (_r, objs) => objs);
   render(<WorkcellCard robot="bot" viewer={null} />);
   await act(async () => { await vi.advanceTimersByTimeAsync(10); });
@@ -54,7 +54,7 @@ describe("WorkcellCard", () => {
   });
 
   it("warns about objects the arm can't reach", async () => {
-    await ui([{ ...table, xyz: [1.6, 0, 0.15] }], 0.9);
-    expect(screen.getByText(/table is out of the arm's reach \(0\.90 m\)/)).toBeTruthy();
+    await ui([{ ...table, xyz: [1.6, 0, 0.15] }], [[0.25, 0.9], [0.35, 0.9]]);
+    expect(screen.getByText(/table is out of the arm's reach: it gets 0\.90 m out at that height/)).toBeTruthy();
   });
 });

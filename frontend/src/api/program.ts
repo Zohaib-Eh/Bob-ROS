@@ -59,7 +59,8 @@ export interface WorkcellObject {
   name: string; shape: "box" | "cylinder"; size: number[]; xyz: [number, number, number]; rpy: [number, number, number];
   fixed: boolean; mass: number | null; friction: number | null;
 }
-export interface Workcell { objects: WorkcellObject[]; error: string | null; reach_m: number | null }
+/** reach: [height, how far out the tool point gets there] per 10 cm band, bottom up; null until ROS has set the robot up. */
+export interface Workcell { objects: WorkcellObject[]; error: string | null; reach: [number, number][] | null }
 export async function getWorkcell(robot: string): Promise<Workcell> {
   return (await send(`/program/workcell${q(robot)}`, { method: "GET" })).json();
 }

@@ -58,7 +58,9 @@ def test_reach_and_brief_come_from_the_workspace_when_there_is_one(ws, tmp_path)
     from tests.ros_helpers import two_joint_zip
     (tmp_path / "zips").mkdir()
     robot = workspace_from_zip(two_joint_zip(tmp_path / "zips"), ws / "bot", samples=50)
-    assert client.get("/program/workcell", params={"robot": robot}).json()["reach_m"] > 0
+    prof = client.get("/program/workcell", params={"robot": robot}).json()["reach"]
+    assert prof and all(r > 0 for _, r in prof)
+    assert [z for z, _ in prof] == sorted(z for z, _ in prof)    # one radius per height band, bottom up
     client.put("/program/workcell", json={"robot": robot, "objects": [BOX]})
     brief = (ws / "bot" / "src" / f"{robot}_program" / "brief.md").read_text(encoding="utf-8")
     assert "- table: box 0.6 × 0.4 × 0.02 m at (0.5, 0, 0.3), fixed" in brief   # the chat sees the new cell

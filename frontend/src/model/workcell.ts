@@ -1,17 +1,26 @@
 import type { WorkcellObject } from "../api/program";
 
 export type NewKind = "box" | "cylinder" | "table";
+export type Reach = [number, number][] | null;   // see api Workcell.reach
 
 const height = (o: WorkcellObject) => (o.shape === "box" ? o.size[2] : o.size[1]);
 /** Footprint half-widths on the floor (ignoring turns: a box turned on the floor may overhang a little). */
 const half = (o: WorkcellObject): [number, number] => (o.shape === "box" ? [o.size[0] / 2, o.size[1] / 2] : [o.size[0], o.size[0]]);
 
-/** A new object to place: a unique name, inside the reach, standing on the floor. */
-export function newObject(kind: NewKind, existing: WorkcellObject[], reach: number | null): WorkcellObject {
+/** How far out (from the base's axis) the arm gets at height z; 0 above or below anything it reaches; null if unknown. */
+export function reachAt(reach: Reach, z: number): number | null {
+  if (!reach) return null;
+  return reach.find(([zc]) => Math.abs(zc - z) <= 0.05 + 1e-9)?.[1] ?? 0;
+}
+
+export const top = (o: WorkcellObject) => o.xyz[2] + height(o) / 2;
+
+/** A new object to place: a unique name, well inside the reach at its top, standing on the floor. */
+export function newObject(kind: NewKind, existing: WorkcellObject[], reach: Reach): WorkcellObject {
   const taken = new Set(existing.map((o) => o.name));
   let n = 1;
   while (taken.has(`${kind}_${n}`)) n++;
-  const x = Math.max(0.2, 0.5 * (reach ?? 1));
+  const x = Math.max(0.2, 0.6 * (reachAt(reach, kind === "table" ? 0.3 : 0.05) || 1));
   const base = { name: `${kind}_${n}`, rpy: [0, 0, 0] as [number, number, number], friction: null };
   if (kind === "table") return { ...base, shape: "box", size: [0.6, 0.4, 0.3], xyz: [x, 0, 0.15], fixed: true, mass: null };
   if (kind === "cylinder") return { ...base, shape: "cylinder", size: [0.02, 0.06], xyz: [x, 0.1 * n, 0.03], fixed: false, mass: 0.1 };
@@ -32,6 +41,8 @@ export function settle(o: WorkcellObject, all: WorkcellObject[]): WorkcellObject
   return { ...o, xyz: [x, y, floor + height(o) / 2] };
 }
 
-/** True when the object's middle is further from the robot's base than the arm reaches. */
-export const outOfReach = (o: WorkcellObject, reach: number | null) =>
-  reach !== null && Math.hypot(o.xyz[0], o.xyz[1], o.xyz[2]) > reach;
+/** True when the arm can't get out to the object at its top (where a gripper comes in from above). */
+export function outOfReach(o: WorkcellObject, reach: Reach): boolean {
+  const r = reachAt(reach, top(o));
+  return r !== null && Math.hypot(o.xyz[0], o.xyz[1]) > r;
+}

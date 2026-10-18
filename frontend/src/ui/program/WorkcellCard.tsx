@@ -2,7 +2,7 @@ import { Box, Check, Cylinder, Pencil, Table, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import * as api from "../../api/program";
 import type { WorkcellObject } from "../../api/program";
-import { newObject, outOfReach, settle, type NewKind } from "../../model/workcell";
+import { newObject, outOfReach, reachAt, settle, top, type NewKind, type Reach } from "../../model/workcell";
 import type { Viewer } from "../../viewer/Viewer";
 
 const SAVE_DELAY_MS = 800;
@@ -12,7 +12,7 @@ const DENSITY = 500;   // kg/m³ for a loose object's default mass (a wood-like 
 /** The robot's workcell (<robot>_tasks/workcell.yaml: objects in every run), placed by dragging in the 3D view. */
 export default function WorkcellCard({ robot, viewer }: { robot: string; viewer: Viewer | null }) {
   const [objects, setObjects] = useState<WorkcellObject[]>([]);
-  const [reach, setReach] = useState<number | null>(null);
+  const [reach, setReach] = useState<Reach>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -20,7 +20,7 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
 
   useEffect(() => {
     let live = true;
-    void api.getWorkcell(robot).then((w) => { if (!live) return; setObjects(w.objects); setReach(w.reach_m); setError(w.error); })
+    void api.getWorkcell(robot).then((w) => { if (!live) return; setObjects(w.objects); setReach(w.reach); setError(w.error); })
       .catch((e) => { if (live) setError((e as Error).message); });
     return () => { live = false; };
   }, [robot]);
@@ -40,8 +40,9 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
 
   useEffect(() => {   // the 3D view: objects, the selection, the reach; drag to move
     if (!viewer) return;
+    const ringZ = (() => { const s = objects.find((o) => o.name === selected); return s ? top(s) : 0.3; })();
     viewer.setWorkcell(editing ? {
-      objects: objects.map((o) => ({ ...o, warn: outOfReach(o, reach) })), selected, reach,
+      objects: objects.map((o) => ({ ...o, warn: outOfReach(o, reach) })), selected, reach: reachAt(reach, ringZ), ringZ,
       onPick: setSelected,
       onDrag: (name, x, y) => change(objects.map((o) => (o.name === name ? settle({ ...o, xyz: [x, y, o.xyz[2]] }, objects) : o))),
     } : null);
@@ -94,7 +95,7 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
           <button className="btn" onClick={() => { change(objects.filter((o) => o.name !== sel.name)); setSelected(null); }}><Trash2 size={14} />Delete</button>
         </div>}
       </>}
-      {far.map((o) => <p key={o.name} className="warn small">{o.name} is out of the arm's reach ({reach!.toFixed(2)} m).</p>)}
+      {far.map((o) => <p key={o.name} className="warn small">{o.name} is out of the arm's reach: it gets {(reachAt(reach, top(o)) ?? 0).toFixed(2)} m out at that height.</p>)}
       {error && <p className="warn small" role="alert">{error}</p>}
     </div>
   );
