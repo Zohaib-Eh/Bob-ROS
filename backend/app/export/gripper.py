@@ -46,10 +46,21 @@ def tcp_point(base_vertices, finger_a_vertices, finger_b_vertices, offset_m: flo
     return tuple(mid + axis * reach), tuple(axis)
 
 
-def jaw_gap(leader_vertices, follower_vertices, closing) -> float:
-    """Narrowest gap between the fingers along the leader's (inward) closing direction, as modelled."""
-    c = _unit(np.asarray(closing, float))
-    return float((np.asarray(follower_vertices, float) @ c).min() - (np.asarray(leader_vertices, float) @ c).max())
+TIP_BAND = 0.015   # m back from the fingertips: where objects are gripped
+
+
+def jaw_gap(leader_mesh, follower_mesh, closing, approach, tip) -> float:
+    """Gap between the jaw tips along the leader's (inward) closing direction, as modelled: the
+    narrowest point within TIP_BAND of the fingertips. Not anywhere on the fingers: real jaws (e.g.
+    an air gripper's) can touch on slides hidden in the gripper body while the tips are 30 mm apart.
+    Meshes are (vertices, triangles); they are densified so big flat faces count, not just corners."""
+    from trimesh.remesh import subdivide_to_size
+    c, a, tip = _unit(np.asarray(closing, float)), _unit(np.asarray(approach, float)), np.asarray(tip, float)
+
+    def band(mesh):
+        pts = subdivide_to_size(np.asarray(mesh[0], float), np.asarray(mesh[1], int), 0.002)[0]
+        return pts[(pts - tip) @ a > -TIP_BAND] @ c
+    return float(band(follower_mesh).min() - band(leader_mesh).max())
 
 
 def convex_pieces(vertices, triangles, max_pieces: int = 8) -> list[tuple[list, list]]:

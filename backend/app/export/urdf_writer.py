@@ -211,8 +211,13 @@ def _add_gripper(robot, gripper: Gripper, joints, names, links_by_id, frames, bo
     ET.SubElement(j, "child", {"link": "tcp"})
     o_xyz, o_rpy = _xyz_rpy(np.linalg.inv(frames[leader.parent_link_id]) @ T)
     ET.SubElement(j, "origin", {"xyz": o_xyz, "rpy": o_rpy})
+    def mesh(link_id):
+        parts = [trimesh.Trimesh(b.vertices, b.triangles, process=False) for b in bodies_by_link.get(link_id, []) if b.vertices]
+        whole = trimesh.util.concatenate(parts)
+        return whole.vertices, whole.faces
+    tip = np.asarray(xyz) - z * gripper.tcp_offset_m          # the fingertips (tcp_offset pushes past them)
+    gap = jaw_gap(mesh(leader.child_link_id), mesh(follower.child_link_id), leader.axis, z, tip)
     # an extension tag (like <gazebo>; URDF parsers skip it): the jaw gap at q = 0, which travel alone can't give
-    gap = jaw_gap(verts(leader.child_link_id), verts(follower.child_link_id), leader.axis)
     ET.SubElement(robot, "gripper", {"jaw_gap": f"{gap:.6f}"})
 
 
