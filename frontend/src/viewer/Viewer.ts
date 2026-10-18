@@ -1,11 +1,20 @@
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, CylinderGeometry, DirectionalLight, EdgesGeometry, GridHelper, Group,
-  HemisphereLight, LineBasicMaterial, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D,
-  PerspectiveCamera, Raycaster, Scene, Sphere, Vector2, Vector3, WebGLRenderer,
+  HemisphereLight, LineBasicMaterial, LineLoop, LineSegments, Material, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial,
+  Object3D, PerspectiveCamera, Plane, Raycaster, Scene, Sphere, Vector2, Vector3, WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Body, Joint, Vec3 } from "../api/types";
 import type { SceneObject } from "../ros/liveRobot";
+
+/** What the workcell editor shows in 3D (see setWorkcell). */
+export interface WorkcellView {
+  objects: { name: string; shape: "box" | "cylinder"; size: number[]; xyz: Vec3; rpy: Vec3; fixed: boolean; warn: boolean }[];
+  selected: string | null;
+  reach: number | null;
+  onPick(name: string | null): void;
+  onDrag(name: string, x: number, y: number): void;
+}
 import { bodyArrays, isClick } from "./meshData";
 import {
   angleAroundAxis, buildGlyph, buildLooseLine, buildSnap, closestParamOnAxis, disposeTree, rayPlaneHit, unwrapStep,
@@ -48,6 +57,9 @@ export class Viewer {
   private preview: { ids: string[]; m: Matrix4 | null } = { ids: [], m: null };
   private ignored = new Set<string>();
   private down: { x: number; y: number } | null = null;
+  private wc: WorkcellView | null = null;                 // the workcell editor, while it is on
+  private wcGroup = new Group();
+  private wcDrag: { name: string; plane: Plane; offset: Vector3 } | null = null;
   private pendingHover: PointerEvent | null = null;
   private overlay = new Group();
   private glyphs: JointGlyph[] = [];
@@ -247,6 +259,33 @@ export class Viewer {
     this.requestRender();
   }
 
+  /** The workcell editor's objects (base frame = this view's world) and the arm's reach on the floor; null = off.
+   *  While it is on, ROS's live copies of the same objects are hidden, so nothing shows twice. */
+  setWorkcell(w: WorkcellView | null) {
+    this.wc = w;
+    if (!this.wcGroup.parent) this.scene.add(this.wcGroup);
+    for (const c of [...this.wcGroup.children]) { this.wcGroup.remove(c); disposeTree(c); }
+    this.objects.visible = !w;
+    for (const o of w?.objects ?? []) {
+      const geo = o.shape === "box" ? new BoxGeometry(o.size[0], o.size[1], o.size[2])
+        : new CylinderGeometry(o.size[0], o.size[0], o.size[1], 32).rotateX(Math.PI / 2);   // standing on z
+      const color = o.warn ? 0xef4444 : o.name === w!.selected ? 0xf59e0b : o.fixed ? 0x9ca3af : 0x60a5fa;
+      const mesh = new Mesh(geo, new MeshStandardMaterial({ color }));
+      mesh.position.set(o.xyz[0], o.xyz[1], o.xyz[2]);
+      mesh.rotation.set(o.rpy[0], o.rpy[1], o.rpy[2], "ZYX");   // URDF roll-pitch-yaw
+      mesh.userData.workcell = o.name;
+      this.wcGroup.add(mesh);
+    }
+    if (w?.reach) {
+      const pts = Array.from({ length: 96 }, (_, i) => new Vector3(
+        w.reach! * Math.cos((i / 96) * 2 * Math.PI), w.reach! * Math.sin((i / 96) * 2 * Math.PI), 0.001));
+      this.wcGroup.add(new LineLoop(new BufferGeometry().setFromPoints(pts), new LineBasicMaterial({ color: 0x22c55e })));
+    }
+    this.requestRender();
+  }
+
+  private wcMesh(name: string) { return this.wcGroup.children.find((c) => c.userData.workcell === name); }
+
   setApproximate(bodyIds: string[]) { this.approximate = bodyIds; this.applyApproximate(); }
 
   private applyApproximate() {
@@ -378,6 +417,18 @@ export class Viewer {
 
   private onDown = (e: PointerEvent) => {
     this.down = { x: e.clientX, y: e.clientY };
+    if (this.wc) {   // press on a workcell object: select it and slide it along the floor
+      const hit = this.ray(e).intersectObjects(this.wcGroup.children.filter((c) => c.userData.workcell), false)[0];
+      if (hit) {
+        const name = hit.object.userData.workcell as string;
+        const plane = new Plane(new Vector3(0, 0, 1), -hit.object.position.z);
+        const at = this.ray(e).ray.intersectPlane(plane, new Vector3());
+        this.wcDrag = { name, plane, offset: at ? hit.object.position.clone().sub(at) : new Vector3() };
+        this.controls.enabled = false;
+        this.wc.onPick(name);
+        return;
+      }
+    }
     const glyph = this.glyphs.find((g) => g.state === "active");
     if (this.limitCb && glyph) {
       const handles: Object3D[] = [];
@@ -397,6 +448,12 @@ export class Viewer {
   };
 
   private onMove = (e: PointerEvent) => {
+    if (this.wcDrag) {   // moved in the view only; the editor gets the spot on release
+      const at = this.ray(e).ray.intersectPlane(this.wcDrag.plane, new Vector3());
+      const m = this.wcMesh(this.wcDrag.name);
+      if (at && m) { m.position.x = at.x + this.wcDrag.offset.x; m.position.y = at.y + this.wcDrag.offset.y; this.requestRender(); }
+      return;
+    }
     if (this.dragging) { this.drag(e); return; }
     if (this.driving && this.drive) {
       const p = this.jointParam(e, this.drive.joint);
@@ -414,6 +471,14 @@ export class Viewer {
   private onUp = (e: PointerEvent) => {
     const down = this.down;
     this.down = null;
+    if (this.wcDrag) {
+      const m = this.wcMesh(this.wcDrag.name);
+      if (m) this.wc?.onDrag(this.wcDrag.name, m.position.x, m.position.y);
+      this.wcDrag = null;
+      this.controls.enabled = true;
+      return;
+    }
+    if (this.wc && down && isClick(down, { x: e.clientX, y: e.clientY })) this.wc.onPick(null);
     if (this.dragging || this.driving) { this.dragging = null; this.driving = null; this.controls.enabled = true; return; }
     if (!down || !isClick(down, { x: e.clientX, y: e.clientY })) return;
     this.pickCb(this.hitBody(this.ray(e)), e.shiftKey);

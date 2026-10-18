@@ -9,6 +9,7 @@ import Chat from "./Chat";
 import PhysicsCard from "./PhysicsCard";
 import ConversationList from "./ConversationList";
 import Workspace from "./Workspace";
+import WorkcellCard from "./WorkcellCard";
 import StartupPanel, { stageText } from "./StartupPanel";
 import { useRosSession } from "./useRosSession";
 import { fmtElapsed, useElapsed } from "../useElapsed";
@@ -211,6 +212,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
           onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
         <section className="chat-column" data-testid="chat-slot">
           <PhysicsCard ctx={ctx} />
+          <WorkcellCard robot={robot} viewer={ctx.viewer} />
           <Chat messages={active?.messages ?? []} live={live && active?.id === live.id ? live.msg : null} running={active?.id === runningId}
             disabled={!!waiting} waiting={waiting} onSend={(t) => void send(t)} onRunAgain={(p) => void runAgain(p)} />
         </section>

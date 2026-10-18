@@ -54,6 +54,18 @@ export async function runConversation(id: string, task: string, onEvent: (e: Pro
   signal?: AbortSignal): Promise<void> {
   await streamEvents(`/program/conversations/${id}/run`, { task }, onEvent, signal);
 }
+/** One object of <robot>_tasks/workcell.yaml (base frame, metres; box size = full x y z, cylinder = radius, height). */
+export interface WorkcellObject {
+  name: string; shape: "box" | "cylinder"; size: number[]; xyz: [number, number, number]; rpy: [number, number, number];
+  fixed: boolean; mass: number | null; friction: number | null;
+}
+export interface Workcell { objects: WorkcellObject[]; error: string | null; reach_m: number | null }
+export async function getWorkcell(robot: string): Promise<Workcell> {
+  return (await send(`/program/workcell${q(robot)}`, { method: "GET" })).json();
+}
+export async function putWorkcell(robot: string, objects: WorkcellObject[]): Promise<WorkcellObject[]> {
+  return (await (await send("/program/workcell", put({ robot, objects }))).json()).objects;
+}
 export async function listFiles(): Promise<FileEntry[]> {
   return (await send("/program/files", { method: "GET" })).json();
 }

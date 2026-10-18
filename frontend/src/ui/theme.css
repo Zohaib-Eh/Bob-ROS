@@ -232,3 +232,7 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .physics-card.ok { border-color: var(--success); }
 .physics-card.bad { border-color: var(--danger); }
 .physics-card .row { gap: 8px; align-items: center; }
+
+/* workcell editor (Simulate) */
+ul.plain { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.sub-card { border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
