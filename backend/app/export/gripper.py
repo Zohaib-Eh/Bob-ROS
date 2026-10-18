@@ -23,12 +23,23 @@ def inward_axes(leader_axis, follower_axis, leader_centroid, follower_centroid):
     return tuple(-la if lflip else la), tuple(-fa if fflip else fa), lflip, fflip
 
 
-def tcp_point(base_vertices, finger_a_vertices, finger_b_vertices, offset_m: float):
+def tcp_point(base_vertices, finger_a_vertices, finger_b_vertices, offset_m: float, closing=None, wrist=None):
     """Tool point: midway between the fingers, pushed out to their far end along the gripper axis
-    (base centroid -> fingers' midpoint), plus offset_m. Returns (xyz, approach_axis)."""
+    (base centroid -> fingers' midpoint, square to the `closing` direction), plus offset_m. A `wrist`
+    roll axis within 30 deg of that is used instead: when the gripper plate is merged into the arm's
+    last link, that link's centroid is off the axis. Returns (xyz, approach_axis)."""
     a, b = np.asarray(finger_a_vertices, float), np.asarray(finger_b_vertices, float)
     mid = (a.mean(axis=0) + b.mean(axis=0)) / 2
-    axis = _unit(mid - np.asarray(base_vertices, float).mean(axis=0))
+    axis = mid - np.asarray(base_vertices, float).mean(axis=0)
+    if closing is not None:
+        c = _unit(np.asarray(closing, float))
+        axis = axis - (axis @ c) * c
+    axis = _unit(axis)
+    if wrist is not None:
+        w = _unit(np.asarray(wrist, float))
+        w = w if w @ axis > 0 else -w
+        if w @ axis > np.cos(np.radians(30)):
+            axis = w
     reach = float(((np.vstack([a, b]) - mid) @ axis).max()) + offset_m
     return tuple(mid + axis * reach), tuple(axis)
 

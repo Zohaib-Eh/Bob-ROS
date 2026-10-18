@@ -53,7 +53,8 @@ def _exclude_touching_at_home(root, model: mujoco.MjModel) -> None:
 def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | None, grip: dict | None = None) -> str:
     """MJCF text for our URDF. `meshes` maps "<link>.stl" to bytes; `efforts` maps URDF joint names to
     motor strength (None = no motors). Meshes are referenced from ../meshes, next to urdf/.
-    `grip` = {"links": [base, finger, finger], "follower": joint}: the finger motor reaches its full
+    `grip` = {"links": [base, finger, finger], "fingers": [leader, follower], "follower": follower}
+    (link and joint names): the finger motor reaches its full
     grip force GRIP_ERROR short of its target (a gripper squeezes with its set force, it isn't a soft
     spring), the gripper's geoms get GRIP_FRICTION, and the follower's mimic equality is made stiff."""
     fd, path = tempfile.mkstemp(suffix=".xml")
@@ -85,7 +86,7 @@ def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | 
             if name in efforts and jid >= 0:
                 e = float(efforts[name])
                 inertia = float(model.dof_M0[model.jnt_dofadr[jid]])
-                finger = grip is not None and model.body(model.jnt_bodyid[jid]).name in grip["links"]
+                finger = grip is not None and name in grip["fingers"]   # not by link: the base may be the arm's last link
                 kp = e / GRIP_ERROR if finger else min(e / HOLD_ERROR, STIFF * inertia / TIMESTEP ** 2)
                 if finger:   # a geared finger drive's reflected inertia: what keeps this stiff motor stable
                     finger_armature = max(0.0, kp * TIMESTEP ** 2 / STIFF - inertia)

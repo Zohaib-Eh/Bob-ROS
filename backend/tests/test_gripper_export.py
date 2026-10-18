@@ -89,3 +89,30 @@ def test_export_route_rejects_a_bad_gripper():
             "gripper": {"leader_joint_id": "j6", "follower_joint_id": "finger_r", "tcp_offset_m": 0}}
     r = TestClient(app).post("/export", json=body)
     assert r.status_code == 422 and "two sliding joints" in r.json()["detail"]
+
+
+def _merged_base():
+    """The test gripper with its plate merged into l6 (bolted parts are one link), and l6 carrying an
+    off-axis lump, so l6's centroid is not on the wrist axis."""
+    links, joints, bodies, g = six_axis_with_gripper()
+    bodies["l6"] = bodies["l6"] + bodies.pop("gbase") + [_boxes_body("lump", [((0.72, -0.02, 1.0), (0.76, 0.02, 1.08))])]
+    links = [l for l in links if l.id != "gbase"]
+    joints = [j.model_copy(update={"parent_link_id": "l6"}) if j.parent_link_id == "gbase" else j
+              for j in joints if j.id != "gfix"]
+    return links, joints, bodies, g
+
+
+def test_a_gripper_bolted_into_the_last_arm_link_leaves_the_wrist_an_arm_joint():
+    z = zipfile.ZipFile(io.BytesIO(export_package("sixm", *_merged_base())))
+    mjcf = ET.fromstring(z.read("sixm/mjcf/sixm.xml"))
+    motors = {m.get("joint"): float(m.get("kp")) for m in mjcf.iter("position")}
+    armature = {j.get("name"): float(j.get("armature", 0)) for j in mjcf.iter("joint")}
+    assert motors["gfl_joint"] == pytest.approx(40.0 / 0.002)
+    e6 = next(float(m.get("forcerange").split()[1]) for m in mjcf.iter("position") if m.get("joint") == "l6_joint")
+    assert motors["l6_joint"] <= e6 / 0.01 + 1e-9                # the wrist keeps the arm's servo rule (HOLD_ERROR)
+    assert armature.get("l6_joint", 0.0) == 0.0
+    urdf = ET.fromstring(z.read("sixm/urdf/sixm.urdf"))
+    tcp = next(j for j in urdf.iter("joint") if j.get("name") == "tcp_joint")
+    rpy = [float(x) for x in tcp.find("origin").get("rpy").split()]
+    approach = trimesh.transformations.euler_matrix(*rpy, axes="sxyz")[:3, 2]
+    assert approach == pytest.approx((1.0, 0.0, 0.0), abs=1e-6)   # along the wrist axis, not tilted by the lump

@@ -180,6 +180,15 @@ def export_urdf(
     return minidom.parseString(ET.tostring(robot, encoding="unicode")).toprettyxml(indent="  ")
 
 
+def _wrist_axis(link_id, joints):
+    """Axis of the first moving joint above link_id (through fixed joints), if it turns; else None."""
+    by_child = {j.child_link_id: j for j in joints}
+    j = by_child.get(link_id)
+    while j is not None and j.type == "fixed":
+        j = by_child.get(j.parent_link_id)
+    return j.axis if j is not None and j.type in ("revolute", "continuous") else None
+
+
 def _add_gripper(robot, gripper: Gripper, joints, names, links_by_id, frames, bodies_by_link) -> None:
     """Follower <mimic> of the leader, and the fixed `tcp` link on the gripper base: z along the
     approach axis, x along the leader's closing direction."""
@@ -189,7 +198,7 @@ def _add_gripper(robot, gripper: Gripper, joints, names, links_by_id, frames, bo
             ET.SubElement(el, "mimic", {"joint": names[leader.id], "multiplier": "1", "offset": "0"})
     verts = lambda link_id: [v for b in bodies_by_link.get(link_id, []) for v in b.vertices]
     xyz, z = tcp_point(verts(leader.parent_link_id), verts(leader.child_link_id), verts(follower.child_link_id),
-                       gripper.tcp_offset_m)
+                       gripper.tcp_offset_m, leader.axis, _wrist_axis(leader.parent_link_id, joints))
     z = np.asarray(z)
     x = np.asarray(leader.axis, float) - (np.asarray(leader.axis, float) @ z) * z
     x /= np.linalg.norm(x)
@@ -368,7 +377,7 @@ def export_package(
         leader, follower = checked(gripper, joints)
         by_id = {l.id: l for l in links}
         grip = {"links": [by_id[i].name for i in (leader.parent_link_id, leader.child_link_id, follower.child_link_id)],
-                "follower": names[follower.id]}
+                "fingers": [names[leader.id], names[follower.id]], "follower": names[follower.id]}
     try:
         mjcf = build_mjcf(urdf, meshes, motors, grip)  # fixed joints get no motor
     except (ValueError, mujoco.FatalError):
