@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
 
-from app.program import agent, conversations, files, session
+from app.program import agent, conversations, files, session, workcell
 from app.ros.moveit_config import ROS_NAME
 from app.routes.export_routes import ExportRequest
 
@@ -271,3 +271,24 @@ def run_file(req: RunFile) -> dict:
         conv["messages"].append({"role": "run", "path": req.path, **result})
         conversations.save(src, conv)
     return result
+
+
+class WorkcellBody(BaseModel):
+    robot: str
+    objects: list
+
+
+@router.get("/workcell")
+def get_workcell(robot: str) -> dict:
+    try:
+        return workcell.read(robot)
+    except workcell.BadRobot as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.put("/workcell")
+def put_workcell(req: WorkcellBody) -> dict:
+    try:
+        return {"objects": workcell.write(req.robot, req.objects)}
+    except ValueError as exc:   # BadRobot, or SceneError with the reason in plain words
+        raise HTTPException(422, str(exc))
