@@ -43,6 +43,8 @@ def read(robot: str) -> dict:
 def write(robot: str, objects: list) -> list[dict]:
     """Validate (ValueError with the reason, nothing written), write, and refresh the program brief."""
     scene = _scene_module()
+    # null means "not set" (read() returns fixed objects with mass: None), not "mass: nothing"
+    objects = [{k: v for k, v in o.items() if v is not None} if isinstance(o, dict) else o for o in objects]
     try:
         objs = scene.validate(objects, "workcell")
     except scene.SceneError as exc:

@@ -40,6 +40,14 @@ def test_a_bad_object_is_refused_in_plain_words_and_nothing_is_written(ws):
     assert not (ws / "bot" / "src" / "bot_tasks" / "workcell.yaml").exists()
 
 
+def test_what_get_returns_can_be_put_back(ws):   # found in the browser: fixed objects come back with mass: null
+    client.put("/program/workcell", json={"robot": "bot", "objects": [BOX, PART]})
+    objs = client.get("/program/workcell", params={"robot": "bot"}).json()["objects"]
+    assert objs[0]["mass"] is None
+    r = client.put("/program/workcell", json={"robot": "bot", "objects": objs})
+    assert r.status_code == 200, r.json()
+
+
 def test_robot_names_are_checked_before_they_become_paths(ws):
     assert client.get("/program/workcell", params={"robot": "../etc"}).status_code == 422
     assert client.put("/program/workcell", json={"robot": "..", "objects": []}).status_code == 422
