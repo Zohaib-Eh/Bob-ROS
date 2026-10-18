@@ -1,6 +1,12 @@
 # Run Replay — Design
 
-> **Status: deferred (2026-10-14).** Not built. Run again buttons (re-running the program live) cover replay for now; see commit ababc6a.
+> **Status: built 2026-10-18** (deferred on 2026-10-14). It differs from the text below in four ways, all because physics now exists:
+> - **MuJoCo poses.** Each 20 Hz frame also carries MuJoCo's loose-object poses (`poses`). Replay draws loose objects there, including held ones, so slips and falls replay as they happened.
+> - **Fewer scene samples.** A scene sample is kept only when the scene's structure changes: objects, their shapes, or what is held. Poses don't count, because MoveIt's scene changes on every move. A run went from 65 samples (~1.5 MB) to 3 (~370 KB).
+> - **Traces by robot name.** Traces are served as `GET /program/traces/<name>?robot=` from the workspace on disk, so replays work with the session stopped.
+> - **Replay from the Code tab.** Code-tab runs, which have no chat, get a Replay button next to "Run ok".
+>
+> The container check verifies every physics run's trace.
 
 Date: 2026-10-14. Branch: prompt-to-program. Builds on the Program workspace (`2026-10-13-program-workspace-design.md`).
 
