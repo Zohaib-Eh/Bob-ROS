@@ -372,7 +372,13 @@ class Robot:
                 raise GripError(f"'{name}' is {wide:.2f} m wide; the gripper opens to {g.opening:.2f} m.")
         self._gripper_cmd(g.upper)
         if _PHYSICS and grip_logic.outcome(self.gripper_width(), g.width(g.upper)) == "empty":
-            where = f" ('{name}' is really at {_fmt(self.pose(name)[0])})" if name is not None else ""
+            if name is None:
+                where = ""
+            elif name in self._sim_poses:
+                where = f" ('{name}' is really at {_fmt(self.pose(name)[0])})"
+            else:
+                where = f" (the simulator has not reported where '{name}' is)"
+            where += f" [fingers {self._joints.get(g.leader, float('nan')):.4f} / {self._joints.get(g.follower, float('nan')):.4f} m]"
             raise GripError(f"The gripper closed on nothing: no object between the fingers at {_fmt(self.tool_pose()[0])}."
                             + where)
         if name is None:
