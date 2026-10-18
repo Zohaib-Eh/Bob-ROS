@@ -53,6 +53,7 @@ export class Viewer {
   private glyphs: JointGlyph[] = [];
   private loose: [Vec3, Vec3][] = [];
   private snap: { origin: Vec3; axis: Vec3 } | null = null;
+  private picks: { origin: Vec3; axis: Vec3 }[] = [];   // faces picked in the Mount card
   private approximate: string[] = [];
   private limitCb: LimitCb | null = null;
   private dragging: { which: "lower" | "upper"; joint: Joint } | null = null;
@@ -75,6 +76,7 @@ export class Viewer {
     this.camera.position.set(2, -2, 1.5);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.addEventListener("change", this.requestRender);
+    this.controls.zoomToCursor = true;   // scroll zooms into what is under the mouse, e.g. a small added part
     const el = this.renderer.domElement;
     el.addEventListener("pointerdown", this.onDown);
     el.addEventListener("pointermove", this.onMove);
@@ -266,6 +268,7 @@ export class Viewer {
   setJointGlyphs(g: JointGlyph[]) { this.glyphs = g; this.rebuildOverlay(); }
   setLooseLines(l: [Vec3, Vec3][]) { this.loose = l; this.rebuildOverlay(); }
   setSnap(s: { origin: Vec3; axis: Vec3 } | null) { this.snap = s; this.rebuildOverlay(); }
+  setPicks(p: { origin: Vec3; axis: Vec3 }[]) { this.picks = p; this.rebuildOverlay(); }
   onLimitDrag(cb: LimitCb | null) { this.limitCb = cb; }
 
   onDrive(d: DriveSpec | null) {
@@ -292,6 +295,7 @@ export class Viewer {
     for (const g of this.glyphs) this.overlay.add(buildGlyph(g, size));
     for (const [a, b] of this.loose) this.overlay.add(buildLooseLine(a, b, size));
     if (this.snap) this.overlay.add(buildSnap(this.snap, size));
+    for (const p of this.picks) this.overlay.add(buildSnap(p, size));
     this.overlay.traverse((c) => {
       c.renderOrder = 10;
       const mat = (c as Mesh).material as Material | undefined;

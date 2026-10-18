@@ -102,11 +102,14 @@ describe("MountCard", () => {
     expect((screen.getByRole("button", { name: /Undo/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("a curved face is refused with the flat-face message", () => {
+  it("each pick says what it got, and a curved pick is refused by name", () => {   // found driving the app
     ui();
     pickFace("mount-from", "plate", 1);
     pickFace("mount-to", "flange", 0);
+    expect(screen.getByRole("button", { name: /plate · curved face/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /flange · flat face/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Mount" }));
-    expect(screen.getByRole("alert").textContent).toBe("Pick a flat face (the gripper's mounting plate and the flange).");
+    expect(screen.getByRole("alert").textContent)
+      .toBe("The face picked on plate is curved. Pick a flat face: the gripper's mounting plate and the flange.");
   });
 });

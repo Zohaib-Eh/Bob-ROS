@@ -15,7 +15,7 @@ const faceOf = (ctx: Ctx, p: PickedFace | null): Face | null => (p ? ctx.model.b
 
 /** Put a part from a second CAD file flush on a face of the robot (e.g. a gripper on the flange). */
 export default function MountCard({ ctx }: { ctx: Ctx }) {
-  const { model, dispatch, pick, setPick, pickedFace, setPickedFace } = ctx;
+  const { model, dispatch, pick, setPick, pickedFace, setPickedFace, viewer } = ctx;
   const sources = sourcesOf(model.bodies);
   const newest = sources[sources.length - 1] ?? "";
   const [source, setSource] = useState(newest);
@@ -37,6 +37,13 @@ export default function MountCard({ ctx }: { ctx: Ctx }) {
     setError(null);
   }, [pickedFace, setPickedFace]);
 
+  useEffect(() => {   // show the picked faces in 3D: a flat one gets an arrow along its normal
+    const shown = [faceOf(ctx, from), faceOf(ctx, to)].filter((f): f is Face => !!f?.normal)
+      .map((f) => ({ origin: f.center, axis: f.normal! }));
+    viewer?.setPicks(shown);
+    return () => viewer?.setPicks([]);
+  }, [from, to, model.bodies, viewer]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   if (sources.length < 2) return null;
   const applied = model.mounts?.[source] ?? null;   // in the model, so Edit > Undo keeps the card in step
   const turn = applied?.turn ?? 0;
@@ -50,6 +57,9 @@ export default function MountCard({ ctx }: { ctx: Ctx }) {
     const f = faceOf(ctx, from), t = faceOf(ctx, to);
     if (!f || !t) return setError("Pick a face on this part and a face on the robot first.");
     if (!inSource(from!.bodyId) || inSource(to!.bodyId)) return setError("Pick the first face on this part and the second on the robot.");
+    const curved = [[f, from!], [t, to!]].find(([face]) => (face as Face).kind !== "plane");
+    if (curved) return setError(`The face picked on ${model.bodies[(curved[1] as PickedFace).bodyId]?.name} is curved. `
+      + "Pick a flat face: the gripper's mounting plate and the flange.");
     try {
       const M = mountMatrix(f, t, 0);
       dispatch({ type: "transformSource", source, matrix: M, mount: { M, from: f, to: t, turn: 0 } });
@@ -71,7 +81,8 @@ export default function MountCard({ ctx }: { ctx: Ctx }) {
   };
   const pickBtn = (mode: PickedFace["mode"], chosen: PickedFace | null, text: string) => (
     <button className={`btn pick${pick === mode ? " active" : ""}`} onClick={() => setPick(pick === mode ? "select" : mode)}>
-      <Crosshair size={13} />{pick === mode ? "Click a face in the 3D view…" : chosen ? `${model.bodies[chosen.bodyId]?.name} face` : text}
+      <Crosshair size={13} />{pick === mode ? "Click a face in the 3D view…" : chosen
+        ? `${model.bodies[chosen.bodyId]?.name} · ${faceOf(ctx, chosen)?.kind === "plane" ? "flat" : "curved"} face` : text}
     </button>
   );
 
