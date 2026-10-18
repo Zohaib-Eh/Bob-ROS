@@ -64,3 +64,30 @@ def test_reach_and_brief_come_from_the_workspace_when_there_is_one(ws, tmp_path)
     client.put("/program/workcell", json={"robot": robot, "objects": [BOX]})
     brief = (ws / "bot" / "src" / f"{robot}_program" / "brief.md").read_text(encoding="utf-8")
     assert "- table: box 0.6 × 0.4 × 0.02 m at (0.5, 0, 0.3), fixed" in brief   # the chat sees the new cell
+
+
+def test_a_saved_workcell_loads_into_another_robot_with_its_fixture_meshes(ws):
+    import io
+    folder = workcell.meshes("bot")
+    folder.mkdir(parents=True)
+    for f in ("rack.stl", "rack_c0.stl", "rack_c1.stl"):
+        (folder / f).write_bytes(b"solid " + f.encode())
+    rack = {"name": "rack", "shape": "mesh", "file": "rack.stl", "pieces": 2, "size": [0.3, 0.3, 0.2],
+            "xyz": [0.6, 0.0, 0.1], "fixed": True}
+    assert client.put("/program/workcell", json={"robot": "bot", "objects": [BOX, rack]}).status_code == 200
+    saved = client.get("/program/workcell/bundle", params={"robot": "bot"})
+    assert saved.status_code == 200
+    assert sorted(zipfile.ZipFile(io.BytesIO(saved.content)).namelist()) == [
+        "meshes/rack.stl", "meshes/rack_c0.stl", "meshes/rack_c1.stl", "workcell.yaml"]
+    # the yaml alone, on a robot without those meshes: refused, nothing written
+    yaml_only = zipfile.ZipFile(io.BytesIO(saved.content)).read("workcell.yaml")
+    r = client.post("/program/workcell/bundle", params={"robot": "other"}, files={"file": ("workcell.yaml", yaml_only)})
+    assert r.status_code == 422 and "rack_c1.stl" in r.json()["detail"]
+    assert not workcell.path("other").exists()
+    r = client.post("/program/workcell/bundle", params={"robot": "other"}, files={"file": ("cell.zip", saved.content)})
+    assert r.status_code == 200, r.text
+    assert [o["name"] for o in r.json()["objects"]] == ["table", "rack"]
+    assert (workcell.meshes("other") / "rack_c1.stl").read_bytes() == b"solid rack_c1.stl"
+    bad = client.post("/program/workcell/bundle", params={"robot": "other"}, files={"file": ("w.yaml", b"- {name: x}")})
+    assert bad.status_code == 422
+    assert [o["name"] for o in workcell.read("other")["objects"]] == ["table", "rack"]   # a bad load changes nothing

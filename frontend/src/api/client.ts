@@ -83,6 +83,18 @@ export async function importFile(file: File, scale: number,
   return result;
 }
 
+export interface UrdfImport {
+  robot_name: string | null; bodies: Body[]; links: Link[]; joints: Joint[]; root_link_id: string;
+  gripper: GripperSel | null; warnings: PartWarning[];
+}
+
+/** File > Import URDF: a .urdf, or a .zip with the URDF and its meshes, as a finished robot (no CAD faces). */
+export async function importUrdf(file: File): Promise<UrdfImport> {
+  const form = new FormData();
+  form.append("file", file);
+  return (await send("/import/urdf", { method: "POST", body: form })).json();
+}
+
 export async function replacePart(
   file: File, bodyId: string, name: string, bbox: { min: Vec3; max: Vec3 } | null, scale: number,
 ): Promise<Body> {

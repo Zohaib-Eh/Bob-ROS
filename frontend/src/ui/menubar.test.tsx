@@ -34,6 +34,26 @@ describe("MenuBar", () => {
     expect(state().sources).toEqual(["robot.step", "gripper.step"]);
   });
 
+  it("File ▸ Import URDF replaces the robot with the file's links, joints, gripper and name", async () => {
+    const link = (id: string) => ({ id, name: id, body_ids: [`${id}_part`], density_kg_m3: 1240, mass_override_kg: 2, accept_approximate_mass: true });
+    const joint = { id: "j1", parent_link_id: "base", child_link_id: "arm", type: "revolute" as const, origin_xyz: [0, 0, 1] as [number, number, number],
+      origin_rpy: [0, 0, 0] as [number, number, number], axis: [0, 0, 1] as [number, number, number], limit_lower: -1, limit_upper: 1, source: "confirmed" as const };
+    const spy = vi.spyOn(client, "importUrdf").mockResolvedValue({
+      robot_name: "ur5", bodies: [boxBody("base_part", [0, 0, 0], [1, 1, 1]), boxBody("arm_part", [0, 0, 1], [1, 1, 2])],
+      links: [link("base"), link("arm")], joints: [joint], root_link_id: "base", gripper: null,
+      warnings: [{ code: "no_faces", message: "no CAD faces", fixes: [] }] });
+    bar(imported([boxBody("old", [0, 0, 0], [1, 1, 1])]));
+    vi.spyOn(window, "confirm").mockReturnValue(true);              // it replaces the robot being built
+    open("File");
+    const file = new File(["x"], "ur5.zip");
+    await act(async () => { fireEvent.change(screen.getByTestId("urdf-input"), { target: { files: [file] } }); });
+    expect(spy).toHaveBeenCalledWith(file);
+    const s = state();
+    expect(s.links.map((l: { id: string }) => l.id)).toEqual(["base", "arm"]);
+    expect(s.joints).toHaveLength(1);
+    expect([s.rootLinkId, s.robotName, s.step, s.sources]).toEqual(["base", "ur5", "connect", ["ur5.zip"]]);
+  });
+
   it("Edit ▸ Undo undoes, and is disabled with nothing to undo", () => {
     bar(imported([boxBody("x", [0, 0, 0], [1, 1, 1])]));
     const before = state().links.length;

@@ -2,7 +2,7 @@ import json
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
@@ -320,4 +320,22 @@ def put_workcell(req: WorkcellBody) -> dict:
     try:
         return {"objects": workcell.write(req.robot, req.objects)}
     except ValueError as exc:   # BadRobot, or SceneError with the reason in plain words
+        raise HTTPException(422, str(exc))
+
+
+@router.get("/workcell/bundle")
+def get_workcell_bundle(robot: str) -> Response:
+    try:
+        data = workcell.bundle(robot)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{robot}_workcell.zip"'})
+
+
+@router.post("/workcell/bundle")
+def post_workcell_bundle(robot: str, file: UploadFile) -> dict:
+    try:
+        return workcell.load_bundle(robot, file.filename or "", file.file.read())
+    except ValueError as exc:
         raise HTTPException(422, str(exc))

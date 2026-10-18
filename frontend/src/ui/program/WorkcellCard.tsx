@@ -1,9 +1,10 @@
-import { Box, Check, Cylinder, FileUp, Pencil, Table, Trash2 } from "lucide-react";
+import { Box, Check, Cylinder, Download, FileUp, FolderOpen, Pencil, Table, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import * as api from "../../api/program";
 import type { FixtureMesh, WorkcellObject } from "../../api/program";
 import { newObject, outOfReach, reachAt, settle, top, type NewKind, type Reach } from "../../model/workcell";
 import type { Viewer } from "../../viewer/Viewer";
+import { downloadBlob } from "../download";
 
 const SAVE_DELAY_MS = 800;
 const mm = (m: number) => Math.round(m * 1000);
@@ -58,6 +59,23 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
     finally { setImporting(false); }
   }
 
+  async function saveBundle() {
+    try {
+      if (dirty.current) { dirty.current = false; await api.putWorkcell(robot, objects); }   // the latest edit, in the file
+      downloadBlob(await api.getWorkcellBundle(robot), `${robot}_workcell.zip`);
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  async function loadBundle(file: File | undefined) {
+    if (!file || (objects.length && !window.confirm(`Replace the ${objects.length} object(s) in this workcell with ${file.name}?`))) return;
+    try {
+      const w = await api.loadWorkcellBundle(robot, file);
+      dirty.current = false;
+      setMeshes({});   // the same fixture name may now be a different shape
+      setObjects(w.objects); setReach(w.reach ?? reach); setError(w.error); setSelected(null);
+    } catch (e) { setError((e as Error).message); }
+  }
+
   useEffect(() => {   // the 3D view: objects, the selection, the reach; drag to move
     if (!viewer) return;
     const ringZ = (() => { const s = objects.find((o) => o.name === selected); return s ? top(s) : 0.3; })();
@@ -96,6 +114,15 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
             <FileUp size={14} />{importing ? "Importing…" : "CAD fixture…"}
             <input type="file" hidden aria-label="Import CAD fixture" accept=".step,.stp,.iges,.igs,.brep,.stl,.obj"
               disabled={importing} onChange={(e) => { void importCad(e.target.files?.[0]); e.target.value = ""; }} />
+          </label>
+        </div>
+        <div className="row small">
+          <button className="btn" title="Download this workcell (workcell.yaml and its CAD fixtures) as a zip" onClick={() => void saveBundle()}>
+            <Download size={14} />Save…</button>
+          <label className="btn" title="Replace this workcell with a zip from Save, or a workcell.yaml">
+            <FolderOpen size={14} />Load…
+            <input type="file" hidden aria-label="Load workcell" accept=".zip,.yaml,.yml"
+              onChange={(e) => { void loadBundle(e.target.files?.[0]); e.target.value = ""; }} />
           </label>
         </div>
         <ul className="plain">

@@ -1,9 +1,11 @@
 """The workcell editor's side of <robot>_tasks/workcell.yaml: read and write it as objects, by robot name, with
 or without ROS running (the workspace stays on disk). Validation is the runs' own (templates/scene.py)."""
 import functools
+import io
 import math
 import re
 import tempfile
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -170,3 +172,67 @@ def _reach_of(urdf_path: str, _mtime: float, samples: int = 4000) -> list[list[f
         k = int(math.floor(z / BAND))
         best[k] = max(best.get(k, 0.0), math.hypot(x, y))
     return [[round((k + 0.5) * BAND, 3), round(r, 3)] for k, r in sorted(best.items())]
+
+
+MAX_BUNDLE = 1 << 30   # bytes unzipped: an upload is untrusted
+
+
+def _mesh_files(o: dict) -> list[str]:
+    """A fixture's files in the meshes folder: its shape and its convex pieces."""
+    stem = Path(o["file"]).stem
+    return [o["file"], *(f"{stem}_c{i}.stl" for i in range(o["pieces"]))]
+
+
+def bundle(robot: str) -> bytes:
+    """Workcell > Save: workcell.yaml and the fixtures' meshes in one zip, for another robot or computer."""
+    current = read(robot)
+    if current["error"]:
+        raise ValueError(current["error"])
+    p = path(robot)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("workcell.yaml", p.read_text(encoding="utf-8") if p.exists() else HEADER + "[]\n")
+        for o in current["objects"]:
+            if o["shape"] == "mesh":
+                for f in _mesh_files(o):
+                    if (meshes(robot) / f).exists():
+                        z.write(meshes(robot) / f, f"meshes/{f}")
+    return buf.getvalue()
+
+
+def load_bundle(robot: str, filename: str, data: bytes) -> dict:
+    """Workcell > Load: a workcell.yaml, or a zip from Save (yaml + meshes), in place of the current workcell.
+    ValueError with the reason, and nothing changed, if it doesn't check out."""
+    scene = _scene_module()
+    found: dict[str, bytes] = {}
+    if filename.lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                if sum(i.file_size for i in z.infolist()) > MAX_BUNDLE:
+                    raise ValueError(f"{filename} unpacks to over {MAX_BUNDLE >> 20} MB")
+                names = [n for n in z.namelist() if Path(n).name == "workcell.yaml"]
+                if not names:
+                    raise ValueError(f"{filename} has no workcell.yaml")
+                text = z.read(names[0]).decode("utf-8")
+                found = {Path(n).name: z.read(n) for n in z.namelist() if scene.STL_NAME.match(Path(n).name)}
+        except zipfile.BadZipFile:
+            raise ValueError(f"{filename} is not a zip file") from None
+    elif filename.lower().endswith((".yaml", ".yml")):
+        text = data.decode("utf-8")
+    else:
+        raise ValueError("Load a workcell.yaml, or a .zip saved from Workcell > Save")
+    try:
+        objs = scene.validate(scene.load_workcell(text), Path(filename).name)
+    except scene.SceneError as exc:
+        raise ValueError(str(exc)) from None
+    need = [f for o in objs if o["shape"] == "mesh" for f in _mesh_files(o)]
+    missing = [f for f in need if f not in found and not (meshes(robot) / f).exists()]
+    if missing:
+        raise ValueError(f"missing fixture meshes: {', '.join(missing)} (load the zip from Workcell > Save, not just the yaml)")
+    folder = meshes(robot)
+    folder.mkdir(parents=True, exist_ok=True)
+    for f in need:
+        if f in found:
+            (folder / f).write_bytes(found[f])
+    write(robot, objs)
+    return read(robot)

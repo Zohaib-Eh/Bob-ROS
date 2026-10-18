@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { exportRobot, importFile, type ImportProgress } from "../api/client";
+import { exportRobot, importFile, importUrdf, type ImportProgress } from "../api/client";
 import { simulateBlocked } from "../model/checklist";
 import { browserStore } from "../model/autosave";
 import { buildExportRequest } from "../model/exportRequest";
 import { loadProject, saveProject } from "../model/project";
-import { emptyModel } from "../model/types";
+import { emptyModel, NAME_RE } from "../model/types";
 import type { Ctx } from "./ctx";
 import { downloadBlob } from "./download";
 import { fmtElapsed, useElapsed } from "./useElapsed";
@@ -31,6 +31,7 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
   const [view, setView] = useState(loadView);
   const importRef = useRef<HTMLInputElement>(null);
   const openRef = useRef<HTMLInputElement>(null);
+  const urdfRef = useRef<HTMLInputElement>(null);
   const blocked = simulateBlocked(model, robotName);
 
   useEffect(() => { viewer?.setGrid(view.grid); viewer?.setEdges(view.edges); }, [viewer, view]);
@@ -60,6 +61,20 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
       setBusy(false);
       setImp(null);
     }
+  };
+  const onUrdf = async (file: File) => {
+    if (model.links.length && !window.confirm("Import this robot in place of the current one? Unsaved changes are lost.")) return;
+    setBusy(true);
+    try {
+      const r = await importUrdf(file);
+      dispatch({ type: "load", model: { ...emptyModel(), bodies: Object.fromEntries(r.bodies.map((b) => [b.id, { ...b, source: file.name }])),
+        links: r.links, joints: r.joints, rootLinkId: r.root_link_id, gripper: r.gripper, fileWarnings: r.warnings } });
+      if (r.robot_name && NAME_RE.test(r.robot_name)) ctx.setRobotName(r.robot_name);
+      ctx.setAutoGrouped(true);   // links come from the file
+      goTo("connect");            // its joints, to review
+    } catch (e) {
+      notify(`Import of ${file.name} failed: ${(e as Error).message}`);
+    } finally { setBusy(false); }
   };
   const onOpen = async (file: File) => {
     try {
@@ -102,6 +117,8 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
           {item("Open project…", () => openRef.current?.click(), sim, why)}
           {item("Save project", () => downloadBlob(new Blob([saveProject(model)], { type: "application/json" }), "project.json"))}
           {item("Import CAD…", () => importRef.current?.click(), sim || busy, why)}
+          {item("Import URDF / robot zip…", () => urdfRef.current?.click(), sim || busy,
+            sim ? why : "A URDF, or a zip with the URDF and its meshes (e.g. an export from here). It replaces the current robot.")}
           {item("Add part from CAD…", () => importRef.current?.click(), sim || busy || !Object.keys(model.bodies).length,
             sim ? why : "Adds another file's parts to this robot, e.g. a gripper")}
           {item("Export URDF + MuJoCo (.zip)", () => void onExport(), !!blocked, blocked ?? undefined)}
@@ -125,6 +142,8 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
       <input ref={importRef} data-testid="import-input" type="file" hidden disabled={busy}
         accept=".step,.stp,.iges,.igs,.brep,.stl,.obj"
         onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onImport(f); }} />
+      <input ref={urdfRef} data-testid="urdf-input" type="file" hidden disabled={busy} accept=".urdf,.zip"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onUrdf(f); }} />
       <input ref={openRef} data-testid="open-input" type="file" hidden accept=".json"
         onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void onOpen(f); }} />
       <span className="workbench" role="group" aria-label="Workbench">

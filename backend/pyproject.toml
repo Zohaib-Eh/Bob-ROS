@@ -14,6 +14,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "mujoco>=3.2",
     "coacd>=1.0",
+    "pycollada>=0.8",  # .dae meshes in imported URDFs
 ]
 
 [project.optional-dependencies]

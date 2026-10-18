@@ -2,6 +2,7 @@ import json
 import math
 import multiprocessing
 import queue
+import zipfile
 
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -61,3 +62,18 @@ def import_file(file: UploadFile, scale: float = 0.001) -> StreamingResponse:
     proc.start()
 
     return StreamingResponse(_stream(proc, events, file.filename), media_type="text/event-stream")
+
+
+@router.post("/import/urdf")
+def import_urdf_file(file: UploadFile) -> dict:
+    """File > Import URDF: a .urdf, or a .zip with the URDF and its meshes, as a finished robot."""
+    from app.importers.urdf_importer import import_urdf
+    name = file.filename or ""
+    if not name.lower().endswith((".urdf", ".zip")):
+        raise HTTPException(400, "Import a .urdf file, or a .zip holding the URDF and its meshes")
+    try:
+        r = import_urdf(name, file.file.read())
+    except (ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(422, f"{name}: {exc}")
+    return {**r, "bodies": [b.model_dump() for b in r["bodies"]], "links": [l.model_dump() for l in r["links"]],
+            "joints": [j.model_dump() for j in r["joints"]], "warnings": [w.model_dump() for w in r["warnings"]]}

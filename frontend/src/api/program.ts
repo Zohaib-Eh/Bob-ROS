@@ -69,6 +69,16 @@ export async function importFixture(robot: string, file: File, scale: number): P
   form.append("file", file);
   return (await send("/program/workcell/fixture", { method: "POST", body: form })).json();
 }
+/** Workcell > Save: workcell.yaml plus its fixtures' meshes, zipped. */
+export async function getWorkcellBundle(robot: string): Promise<Blob> {
+  return (await send(`/program/workcell/bundle${q(robot)}`, { method: "GET" })).blob();
+}
+/** Workcell > Load: a zip from Save, or a workcell.yaml, in place of the current cell. */
+export async function loadWorkcellBundle(robot: string, file: File): Promise<Workcell> {
+  const form = new FormData();
+  form.append("file", file);
+  return (await send(`/program/workcell/bundle${q(robot)}`, { method: "POST", body: form })).json();
+}
 export async function getFixtureMesh(robot: string, file: string): Promise<FixtureMesh> {
   return (await send(`/program/workcell/mesh${q(robot)}&file=${encodeURIComponent(file)}`, { method: "GET" })).json();
 }
