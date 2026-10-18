@@ -17,17 +17,17 @@ def trace_name(program: str, now: float) -> str:
     return f"runs/{Path(program).stem}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(now))}.json"
 
 
-_MOTION = {"pose", "primitive_poses", "mesh_poses", "plane_poses", "stamp"}
-
-
-def _structure(x):
-    """The scene without poses or time stamps: what objects there are, their shapes, which are held. A scene
-    that only moved isn't kept again (MuJoCo's poses show motion at 20 Hz; a fixture mesh is large)."""
-    if isinstance(x, dict):
-        return {k: _structure(v) for k, v in x.items() if k not in _MOTION}
-    if isinstance(x, (list, tuple)):
-        return [_structure(v) for v in x]
-    return x
+def _structure(scene: dict):
+    """What replay draws from a scene, without poses: each world object's id and shape, and which objects are
+    held by which link. A scene that only moved isn't kept again (MuJoCo's poses show motion at 20 Hz, and
+    the rest of MoveIt's answer, e.g. the joint state, changes all the time)."""
+    def shape(o):
+        return ([list(p.get("dimensions", [])) for p in o.get("primitives", [])],
+                [len(m.get("triangles", [])) for m in o.get("meshes", [])])
+    world = (scene.get("world") or {}).get("collision_objects", [])
+    held = (scene.get("robot_state") or {}).get("attached_collision_objects", [])
+    return {"world": sorted([o.get("id"), shape(o)] for o in world),
+            "held": sorted([a.get("link_name"), (a.get("object") or {}).get("id"), shape(a.get("object") or {})] for a in held)}
 
 
 def _row(t) -> list:
