@@ -63,6 +63,45 @@ describe("MountCard", () => {
     expect(after).not.toEqual(before);
   });
 
+  it("a file added while the card is showing becomes the part to mount", () => {   // Add part from CAD in Build
+    render(<Harness start={historyReducer(initialHistory(), { type: "import", source: "robot.step", warnings: [], bodies: [flange] })}
+      ui={(c) => { ctx = c; return <MountCard ctx={c} />; }} />);
+    act(() => ctx.dispatch({ type: "import", source: "gripper.step", warnings: [], bodies: [plate()] }));
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("gripper.step");
+    pickFace("mount-from", "plate", 0);
+    pickFace("mount-to", "flange", 0);
+    fireEvent.click(screen.getByRole("button", { name: "Mount" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(Math.min(...ctx.model.bodies.plate.vertices.map((v) => v[0]))).toBeCloseTo(6, 9);
+  });
+
+  it("a project saved before sources existed can still have a part mounted on it", () => {
+    const old = historyReducer(initialHistory(), { type: "import", warnings: [], bodies: [flange] });   // no source
+    render(<Harness start={old} ui={(c) => { ctx = c; return <MountCard ctx={c} />; }} />);
+    act(() => ctx.dispatch({ type: "import", source: "gripper.step", warnings: [], bodies: [plate()] }));
+    pickFace("mount-from", "plate", 0);
+    pickFace("mount-to", "flange", 0);
+    fireEvent.click(screen.getByRole("button", { name: "Mount" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(Math.min(...ctx.model.bodies.plate.vertices.map((v) => v[0]))).toBeCloseTo(6, 9);
+    expect(ctx.model.bodies.flange.vertices).toEqual(flange.vertices);
+  });
+
+  it("Edit > Undo and the card stay in step: one undo per Turn, and Undo after Ctrl+Z does nothing odd", () => {
+    ui();
+    pickFace("mount-from", "plate", 0);
+    pickFace("mount-to", "flange", 0);
+    fireEvent.click(screen.getByRole("button", { name: "Mount" }));
+    const mounted = ctx.model.bodies.plate.vertices;
+    fireEvent.click(screen.getByRole("button", { name: "Turn +15°" }));
+    act(() => ctx.dispatch({ type: "undo" }));          // one Ctrl+Z undoes the turn, not half of it
+    ctx.model.bodies.plate.vertices.forEach((v, i) => v.forEach((x, k) => expect(x).toBeCloseTo(mounted[i][k], 9)));
+    expect((screen.getByLabelText("Turn angle (degrees)") as HTMLInputElement).value).toBe("0");
+    act(() => ctx.dispatch({ type: "undo" }));          // undoes the mount
+    ctx.model.bodies.plate.vertices.forEach((v, i) => v.forEach((x, k) => expect(x).toBeCloseTo(plate().vertices[i][k], 9)));
+    expect((screen.getByRole("button", { name: /Undo/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("a curved face is refused with the flat-face message", () => {
     ui();
     pickFace("mount-from", "plate", 1);

@@ -1,14 +1,14 @@
 import type { Body, Joint, Link, PartWarning } from "../api/types";
 import { baseGuess } from "./geometry";
-import { transformBody, type Mat4 } from "./mount";
+import { sourceOf, transformBody, type Mat4 } from "./mount";
 import { membership } from "./pairs";
-import { DEFAULT_DENSITY, emptyModel, type GripperSel, type ModelState, type Suggestion } from "./types";
+import { DEFAULT_DENSITY, emptyModel, type GripperSel, type ModelState, type Mount, type Suggestion } from "./types";
 
 export type LinkProps = Partial<Pick<Link, "density_kg_m3" | "mass_override_kg" | "accept_approximate_mass">>;
 
 export type Action =
   | { type: "import"; bodies: Body[]; warnings: PartWarning[]; source?: string }
-  | { type: "transformSource"; source: string; matrix: Mat4 }
+  | { type: "transformSource"; source: string; matrix: Mat4; mount?: Mount | null }
   | { type: "setGripper"; gripper: GripperSel | null }
   | { type: "merge"; linkIds: string[] }
   | { type: "mergeSmall"; pairs: { linkId: string; neighbourId: string }[] }
@@ -119,8 +119,14 @@ function reduce(s: ModelState, a: Action): ModelState {
       return { ...s, gripper: a.gripper };
     case "transformSource": {
       const bodies = { ...s.bodies };
-      for (const b of Object.values(s.bodies)) if (b.source === a.source) bodies[b.id] = transformBody(b, a.matrix);
-      return { ...s, bodies };
+      for (const b of Object.values(s.bodies)) if (sourceOf(b) === a.source) bodies[b.id] = transformBody(b, a.matrix);
+      // suggestions hold world-space origins/axes: drop the moved links' ones so they are detected again
+      const moved = new Set(s.links.filter((l) => l.body_ids.some((id) => s.bodies[id] && sourceOf(s.bodies[id]) === a.source)).map((l) => l.id));
+      const suggestions = Object.fromEntries(Object.entries(s.suggestions)
+        .filter(([, g]) => !moved.has(g.linkA) && !moved.has(g.linkB)));
+      const mounts = { ...s.mounts };
+      if (a.mount) mounts[a.source] = a.mount; else if (a.mount === null) delete mounts[a.source];
+      return { ...s, bodies, suggestions, mounts };
     }
     case "merge": {
       const [target, ...others] = [...new Set(a.linkIds)];

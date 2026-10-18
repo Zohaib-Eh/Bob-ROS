@@ -70,6 +70,22 @@ describe("DetectionRunner", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("drops a result computed on bodies that changed while it ran (a mount) and runs it again", async () => {
+    const detect = vi.fn((_a, _b, _la, _lb, signal: AbortSignal) => new Promise<DetectResponse>((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      setTimeout(() => resolve(NONE), 20);
+    }));
+    const results: PendingPair[] = [];
+    const r = new DetectionRunner(detect, { onResult: (p) => results.push(p), onProgress: vi.fn(), onError: vi.fn() });
+    const before = [boxBody("a", [0, 0, 0], [1, 1, 1])], after = [boxBody("a", [5, 0, 0], [6, 1, 1])];
+    r.update([pair("x")], () => before);
+    await tick();
+    r.update([pair("x")], () => after);   // same pair, same membership, moved geometry
+    await vi.waitFor(() => expect(results).toHaveLength(1));
+    expect(detect).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls[1][0]).toBe(after);
+  });
+
   it("cancel pauses; resume continues; errors pause with a message", async () => {
     const detect = vi.fn().mockRejectedValueOnce(new Error("backend down")).mockResolvedValue(NONE);
     const results: string[] = [];

@@ -4,6 +4,7 @@ import { loadProject, saveProject, PROJECT_FORMAT, PROJECT_VERSION } from "./pro
 import { modelReducer } from "./reducer";
 import { boxBody } from "./testBodies";
 import { emptyModel } from "./types";
+import { pairsToDetect } from "./detection";
 import type { Face, Vec3 } from "../api/types";
 
 const plane = (center: Vec3, normal: Vec3): Face => ({
@@ -39,6 +40,21 @@ describe("sources and transformSource", () => {
     m.bodies.plate.vertices.forEach((v, i) => v.forEach((x, k) =>
       expect(x).toBeCloseTo(before.bodies.plate.vertices[i][k], 9)));
     expect(m.links[0].name).toBe("flange_link");
+  });
+
+  it("transformSource_drops_suggestions_of_moved_links_so_they_are_detected_again", () => {
+    let m = modelReducer(robot(), { type: "import", source: "gripper.step", warnings: [],
+      bodies: [boxBody("plate", [0, 0, 0], [1, 1, 1]), boxBody("finger", [1, 0, 0], [2, 1, 1])] });
+    const id = (b: string) => m.links.find((l) => l.body_ids.includes(b))!.id;
+    const [pending] = pairsToDetect(m);
+    m = modelReducer(m, { type: "setSuggestion", suggestion: { ...pending, status: "review",
+      result: { joint: null, reason: "no_contact_faces", evidence: null } } });
+    expect(pairsToDetect(m)).toHaveLength(0);
+    const M = mountMatrix(plane([0.5, 0.5, 1], [0, 0, 1]), plane([6, 0.5, 0.5], [1, 0, 0]), 0);
+    m = modelReducer(m, { type: "transformSource", source: m.bodies.finger.source!, matrix: M });
+    expect(m.suggestions[pending.key]).toBeUndefined();
+    expect(pairsToDetect(m).map((p) => p.key)).toContain(pending.key);
+    expect(id("finger")).toBeTruthy();
   });
 
   it("old_project_without_source_loads_unchanged", () => {   // Review Focus 2

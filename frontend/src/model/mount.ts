@@ -44,6 +44,13 @@ export function mountMatrix(moving: Face, target: Face, turnDeg: number): Mat4 {
   return [R[0], R[1], R[2], t[0], R[3], R[4], R[5], t[1], R[6], R[7], R[8], t[2], 0, 0, 0, 1];
 }
 
+/** A·B: B first, then A. */
+export const compose = (A: Mat4, B: Mat4): Mat4 =>
+  [0, 1, 2, 3].flatMap((r) => [0, 1, 2, 3].map((c) => [0, 1, 2, 3].reduce((x, k) => x + A[4 * r + k] * B[4 * k + c], 0)));
+
+/** The file a body came from; bodies from before sources existed share "". */
+export const sourceOf = (b: Body) => b.source ?? "";
+
 export function invert(M: Mat4): Mat4 {
   const Rt = [M[0], M[4], M[8], M[1], M[5], M[9], M[2], M[6], M[10]];
   const t = rot3(Rt, [M[3], M[7], M[11]]);

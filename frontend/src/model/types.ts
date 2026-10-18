@@ -1,4 +1,5 @@
-import type { Body, DetectResponse, GripperSel, Joint, Link, PartWarning } from "../api/types";
+import type { Body, DetectResponse, Face, GripperSel, Joint, Link, PartWarning } from "../api/types";
+import type { Mat4 } from "./mount";
 
 export interface Suggestion {
   key: string;
@@ -18,12 +19,18 @@ export interface ModelState {
   joints: Joint[];
   suggestions: Record<string, Suggestion>;
   gripper: GripperSel | null;
+  /** The last mount per source (Mount card), kept in the model so Edit > Undo restores it too. */
+  mounts: Record<string, Mount>;
 }
+
+/** M moved the part from `from` flush onto `to`, turned `turn` degrees. */
+export interface Mount { M: Mat4; from: Face; to: Face; turn: number }
 
 export type { GripperSel };
 
 export const emptyModel = (): ModelState => ({
   bodies: {}, fileWarnings: [], links: [], ignored: [], rootLinkId: null, joints: [], suggestions: {}, gripper: null,
+  mounts: {},
 });
 
 export const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;

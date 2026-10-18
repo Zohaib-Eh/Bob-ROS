@@ -24,7 +24,7 @@ const same = (a: PendingPair, b: PendingPair) => a.key === b.key && a.membership
 
 export class DetectionRunner {
   private pending: PendingPair[] = [];
-  private current: { pair: PendingPair; ctrl: AbortController } | null = null;
+  private current: { pair: PendingPair; ctrl: AbortController; sent: Body[][] } | null = null;
   private bodiesOf: (linkId: string) => Body[] = () => [];
   private paused = false;
   private done = 0;
@@ -33,11 +33,13 @@ export class DetectionRunner {
 
   update(pairs: PendingPair[], bodiesOf: (linkId: string) => Body[]) {
     this.bodiesOf = bodiesOf;
-    this.pending = pairs.filter((p) => !(this.current && same(p, this.current.pair)));
-    if (this.current && !pairs.some((p) => same(p, this.current!.pair))) {
-      this.current.ctrl.abort();
+    const cur = this.current;
+    // superseded: the pair is gone, its membership changed, or its bodies moved (a mount) while it ran
+    if (cur && !(pairs.some((p) => same(p, cur.pair)) && this.unchanged(cur.pair, cur.sent))) {
+      cur.ctrl.abort();
       this.current = null;
     }
+    this.pending = pairs.filter((p) => !(this.current && same(p, this.current.pair)));
     if (!this.pending.length && !this.current) this.done = 0;
     this.report();
     void this.kick();
@@ -59,6 +61,13 @@ export class DetectionRunner {
     void this.kick();
   }
 
+  private unchanged(p: PendingPair, sent: Body[][]) {
+    return [p.linkA, p.linkB].every((id, i) => {
+      const now = this.bodiesOf(id);
+      return now.length === sent[i].length && now.every((b, k) => b === sent[i][k]);
+    });
+  }
+
   private report() {
     const running = this.current !== null;
     this.handlers.onProgress({
@@ -69,11 +78,12 @@ export class DetectionRunner {
     if (this.paused || this.current || !this.pending.length) return;
     const pair = this.pending.shift()!;
     const ctrl = new AbortController();
-    this.current = { pair, ctrl };
+    const sent = [this.bodiesOf(pair.linkA), this.bodiesOf(pair.linkB)];
+    this.current = { pair, ctrl, sent };
     this.report();
     let result: DetectResponse;
     try {
-      result = await this.detect(this.bodiesOf(pair.linkA), this.bodiesOf(pair.linkB), pair.linkA, pair.linkB, ctrl.signal);
+      result = await this.detect(sent[0], sent[1], pair.linkA, pair.linkB, ctrl.signal);
     } catch (e) {
       if (ctrl.signal.aborted) return;
       if (this.current?.ctrl === ctrl) this.current = null;
