@@ -2,6 +2,8 @@
 or without ROS running (the workspace stays on disk). Validation is the runs' own (templates/scene.py)."""
 import functools
 import math
+import re
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -65,6 +67,8 @@ def write(robot: str, objects: list) -> list[dict]:
             c["mass"] = o["mass"]
         if o["friction"] is not None:
             c["friction"] = o["friction"]
+        if o["shape"] == "mesh":
+            c["file"], c["pieces"] = o["file"], o["pieces"]
         clean.append(c)
     text = HEADER + (yaml.safe_dump(clean, sort_keys=False, default_flow_style=None) if clean else "[]\n")
     p = path(robot)
@@ -74,6 +78,51 @@ def write(robot: str, objects: list) -> list[dict]:
     tmp.replace(p)
     _refresh_brief(robot, text)
     return objs
+
+
+def meshes(robot: str) -> Path:
+    return path(robot).parent / "meshes"
+
+
+def import_fixture(robot: str, filename: str, data: bytes, scale: float) -> dict:
+    """A CAD file (a table, a conveyor) as one bolted-down object: its shape and convex pieces saved in the
+    workcell's meshes folder, centred on its bounding box, set on the floor in front of the robot."""
+    import trimesh
+    from app.export.gripper import convex_pieces
+    from app.importers.pipeline import import_path
+    suffix = Path(filename).suffix.lower()
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / f"fixture{suffix}"
+        f.write_bytes(data)
+        bodies, _, _ = import_path(str(f), suffix, scale)
+    parts = [trimesh.Trimesh(b.vertices, b.triangles, process=False) for b in bodies if b.status != "failed" and b.vertices]
+    if not parts:
+        raise ValueError(f"{filename} has no usable shape")
+    whole = trimesh.util.concatenate(parts)
+    lo, hi = whole.bounds
+    whole.apply_translation(-(lo + hi) / 2)              # the object's frame: its bounding box's centre
+    size = [float(v) for v in hi - lo]
+    current = read(robot)
+    taken = {o["name"] for o in current["objects"]}
+    stem = re.sub(r"[^A-Za-z0-9_]", "_", Path(filename).stem) or "fixture"
+    stem = stem if stem[0].isalpha() else f"fixture_{stem}"
+    name, n = stem, 1
+    while name in taken:
+        n += 1
+        name = f"{stem}_{n}"
+    folder = meshes(robot)
+    folder.mkdir(parents=True, exist_ok=True)
+    whole.export(folder / f"{name}.stl", file_type="stl")
+    pieces = convex_pieces(whole.vertices, whole.faces, max_pieces=16)
+    for i, (v, t) in enumerate(pieces):
+        trimesh.Trimesh(v, t, process=False).export(folder / f"{name}_c{i}.stl", file_type="stl")
+    reach = current["reach"]
+    out = next((r for z, r in reach if abs(z - size[2]) <= BAND / 2), None) if reach else None
+    x = 0.6 * out if out else 0.8
+    obj = {"name": name, "shape": "mesh", "file": f"{name}.stl", "pieces": len(pieces), "size": size,
+           "xyz": [x, 0.0, size[2] / 2], "fixed": True}
+    write(robot, current["objects"] + [obj])
+    return read(robot)
 
 
 def _urdf(robot: str) -> Path:

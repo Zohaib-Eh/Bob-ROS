@@ -2,7 +2,7 @@ import json
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
@@ -283,6 +283,14 @@ def get_workcell(robot: str) -> dict:
     try:
         return workcell.read(robot)
     except workcell.BadRobot as exc:
+        raise HTTPException(422, str(exc))
+
+
+@router.post("/workcell/fixture")
+def import_fixture(file: UploadFile, robot: str = Form(...), scale: float = Form(0.001)) -> dict:
+    try:
+        return workcell.import_fixture(robot, file.filename or "fixture.stl", file.file.read(), scale)
+    except ValueError as exc:
         raise HTTPException(422, str(exc))
 
 

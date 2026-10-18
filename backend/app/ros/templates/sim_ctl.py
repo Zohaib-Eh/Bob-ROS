@@ -24,14 +24,23 @@ class SimError(Exception):
     pass
 
 
+def _fixture_dir(ws_src: Path, robot: str) -> Path:
+    return ws_src / f"{robot}_tasks" / "meshes"
+
+
+def _with_paths(objs: list[dict], ws_src: Path, robot: str) -> list[dict]:
+    """CAD fixtures carry their mesh's full path in meta.json: robot.py loads it into MoveIt."""
+    return [{**o, "path": str(_fixture_dir(ws_src, robot) / o["file"])} if o["shape"] == "mesh" else o for o in objs]
+
+
 def plan(ws_src: Path, robot: str, tool: str, program_source):
     """(scene.xml text, meta) for the workcell plus the program's SCENE; raises SceneError."""
     robot_mjcf = (ws_src / robot / "mjcf" / f"{robot}.xml").read_text()
     wc_path = ws_src / f"{robot}_tasks" / "workcell.yaml"
     workcell = scene.validate(scene.load_workcell(wc_path.read_text() if wc_path.exists() else None), "workcell.yaml")
     program = scene.validate(scene.read_scene(program_source), "SCENE") if program_source else []
-    objs = scene.merge(workcell, program)
-    xml = scene.build_scene_xml(robot_mjcf, objs, tool, str(ws_src / robot / "meshes"))
+    objs = _with_paths(scene.merge(workcell, program), ws_src, robot)
+    xml = scene.build_scene_xml(robot_mjcf, objs, tool, str(ws_src / robot / "meshes"), str(_fixture_dir(ws_src, robot)))
     robot_bodies = {b.get("name") for b in ET.fromstring(robot_mjcf).iter("body")} | {"world"}
     scene.check_start(xml, None, robot_bodies)
     return xml, scene.meta(robot_mjcf, objs)
@@ -42,7 +51,7 @@ def objects_meta(ws_src: Path, robot: str, program_source) -> dict:
     wc_path = ws_src / f"{robot}_tasks" / "workcell.yaml"
     workcell = scene.validate(scene.load_workcell(wc_path.read_text() if wc_path.exists() else None), "workcell.yaml")
     program = scene.validate(scene.read_scene(program_source), "SCENE") if program_source else []
-    objs = scene.merge(workcell, program)
+    objs = _with_paths(scene.merge(workcell, program), ws_src, robot)
     return {"efforts": {}, "masses": {o["name"]: o["mass"] for o in objs if not o["fixed"]},
             "fixed": [o["name"] for o in objs if o["fixed"]], "objects": objs}
 

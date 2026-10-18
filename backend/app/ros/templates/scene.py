@@ -4,11 +4,13 @@ import ast
 import math
 import re
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import numpy as np
 import yaml
 
-FIELDS = {"name", "shape", "size", "xyz", "rpy", "fixed", "mass", "friction"}
+FIELDS = {"name", "shape", "size", "xyz", "rpy", "fixed", "mass", "friction", "file", "pieces"}
+STL_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\.stl$")
 DENSITY = 700.0  # kg/m³ (wood) when an object has no mass
 NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
@@ -38,8 +40,10 @@ def _one(o, where: str) -> dict:
         if k not in FIELDS:
             raise SceneError(f"{where}: '{name}': unknown field '{k}'")
     shape = o.get("shape")
-    if shape not in ("box", "cylinder"):
-        raise SceneError(f"{where}: '{name}': shape must be box or cylinder")
+    if shape not in ("box", "cylinder", "mesh"):
+        raise SceneError(f"{where}: '{name}': shape must be box, cylinder or mesh")
+    if shape == "mesh":
+        return _mesh(o, where, name)
     n = 3 if shape == "box" else 2
     if not _numbers(o.get("size"), n, positive=True):
         raise SceneError(f"{where}: '{name}': size must be {n} numbers > 0"
@@ -70,6 +74,42 @@ def _one(o, where: str) -> dict:
     return {"name": name, "shape": shape, "size": size, "xyz": [float(x) for x in o["xyz"]],
             "rpy": [float(x) for x in rpy], "fixed": fixed, "mass": mass,
             "friction": None if fr is None else float(fr)}
+
+
+def _mesh(o, where: str, name: str) -> dict:
+    """A CAD fixture (Simulate > Workcell > Import): file = <name>.stl in <robot>_tasks/meshes (the exact shape,
+    for MoveIt and the view), pieces = <name>_c0.stl... (convex parts, for MuJoCo); size = its bounding box."""
+    if not (isinstance(o.get("file"), str) and STL_NAME.match(o["file"])):
+        raise SceneError(f"{where}: '{name}': file must be a .stl name in the workcell's meshes folder")
+    if not (isinstance(o.get("pieces"), int) and not isinstance(o["pieces"], bool) and o["pieces"] >= 1):
+        raise SceneError(f"{where}: '{name}': pieces must be a whole number >= 1")
+    if not _numbers(o.get("size"), 3, positive=True):
+        raise SceneError(f"{where}: '{name}': size must be 3 numbers > 0 (its bounding box)")
+    if not _numbers(o.get("xyz"), 3):
+        raise SceneError(f"{where}: '{name}': xyz must be 3 numbers")
+    rpy = o.get("rpy", [0, 0, 0])
+    if not _numbers(rpy, 3):
+        raise SceneError(f"{where}: '{name}': rpy must be 3 numbers")
+    if o.get("fixed") is not True or o.get("mass") is not None:
+        raise SceneError(f"{where}: '{name}': CAD fixtures are bolted down (fixed: true, no mass)")
+    fr = o.get("friction")
+    if fr is not None and not (_number(fr) and fr > 0):
+        raise SceneError(f"{where}: '{name}': friction must be > 0")
+    return {"name": name, "shape": "mesh", "size": [float(x) for x in o["size"]], "xyz": [float(x) for x in o["xyz"]],
+            "rpy": [float(x) for x in rpy], "fixed": True, "mass": None, "friction": None if fr is None else float(fr),
+            "file": o["file"], "pieces": o["pieces"]}
+
+
+def read_stl(path: str):
+    """(vertices, triangles) of a binary STL, as the export and the fixture import write them."""
+    import struct
+    data = Path(path).read_bytes()
+    n = struct.unpack_from("<I", data, 80)[0]
+    vertices = []
+    for i in range(n):
+        vals = struct.unpack_from("<12f", data, 84 + 50 * i)
+        vertices += [vals[3:6], vals[6:9], vals[9:12]]
+    return vertices, [(3 * i, 3 * i + 1, 3 * i + 2) for i in range(n)]
 
 
 def validate(objs, where: str) -> list[dict]:
@@ -147,9 +187,11 @@ def _fmt(v) -> str:
     return " ".join(repr(float(x)) for x in v)
 
 
-def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str) -> str:
+def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str, fixture_dir: str | None = None) -> str:
     """The robot MJCF plus a floor and the objects. Movable objects get a free joint named after
-    them and an inactive weld 'glue_<name>' to the tool; fixed objects get neither."""
+    them and an inactive weld 'glue_<name>' to the tool; fixed objects get neither. CAD fixtures are
+    their convex pieces from fixture_dir (MuJoCo collides with a mesh's hull, which would fill a table's
+    underside or a bin)."""
     root = ET.fromstring(robot_mjcf)
     taken = {e.get("name") for tag in ("body", "joint") for e in root.iter(tag)} | {"world"}
     for o in objs:  # an object is a body and a free joint of the same name
@@ -166,6 +208,20 @@ def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str) 
     eq = None
     for o in objs:
         body = ET.SubElement(world, "body", {"name": o["name"], "pos": _fmt(o["xyz"]), "quat": _fmt(_quat(o["rpy"]))})
+        if o["shape"] == "mesh":
+            if fixture_dir is None:
+                raise SceneError(f"'{o['name']}' is a CAD fixture, but the workcell's meshes folder is unknown")
+            asset = root.find("asset")
+            if asset is None:
+                asset = ET.SubElement(root, "asset")
+            for i in range(o["pieces"]):
+                mesh = f"wc_{o['name']}_c{i}"
+                ET.SubElement(asset, "mesh", {"name": mesh, "file": str(Path(fixture_dir) / f"{Path(o['file']).stem}_c{i}.stl")})
+                g = {"type": "mesh", "mesh": mesh}
+                if o["friction"] is not None:
+                    g["friction"] = f"{o['friction']!r} 0.005 0.0001"
+                ET.SubElement(body, "geom", g)
+            continue
         if not o["fixed"]:
             ET.SubElement(body, "freejoint", {"name": o["name"]})
         half = [s / 2 for s in o["size"]] if o["shape"] == "box" else [o["size"][0], o["size"][1] / 2]

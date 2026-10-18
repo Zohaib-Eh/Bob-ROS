@@ -29,6 +29,20 @@ def test_plan_merges_workcell_and_program_scene(src):
     assert [o["name"] for o in info["objects"]] == ["table", "part_a"]
 
 
+def test_plan_brings_a_cad_fixture_in_as_its_pieces_and_tells_moveit_where_its_mesh_is(src):
+    import trimesh
+    meshes = src / "bot_tasks" / "meshes"
+    meshes.mkdir()
+    for f in ("table.stl", "table_c0.stl"):
+        trimesh.creation.box([0.6, 0.4, 0.3]).export(meshes / f, file_type="stl")
+    (src / "bot_tasks" / "workcell.yaml").write_text(
+        "- {name: table, shape: mesh, file: table.stl, pieces: 1, size: [0.6, 0.4, 0.3], xyz: [2, 2, 0.15], fixed: true}\n")
+    xml, info = sim_ctl.plan(src, "bot", "hand", None)
+    assert 'type="mesh" mesh="wc_table_c0"' in xml
+    assert info["objects"][0]["path"] == str(meshes / "table.stl") and info["fixed"] == ["table"]
+    assert sim_ctl.objects_meta(src, "bot", None)["objects"][0]["path"] == str(meshes / "table.stl")
+
+
 def test_plan_without_workcell_or_scene_is_robot_only(src):
     xml, info = sim_ctl.plan(src, "bot", "hand", None)
     assert "glue_" not in xml and info["masses"] == {} and info["objects"] == []

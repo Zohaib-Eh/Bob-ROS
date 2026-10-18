@@ -183,6 +183,7 @@ def _workcell_lines(text: str | None) -> list[str]:
     for o in objs:
         s = o["size"]
         shape = (f"box {s[0]:g} × {s[1]:g} × {s[2]:g} m" if o["shape"] == "box"
+                 else f"CAD fixture, {s[0]:g} × {s[1]:g} × {s[2]:g} m bounding box," if o["shape"] == "mesh"
                  else f"cylinder radius {s[0]:g} m, height {s[1]:g} m")
         where = ", ".join(f"{v:g}" for v in o["xyz"])
         out.append(f"- {o['name']}: {shape} at ({where}), " + ("fixed" if o["fixed"] else f"{o['mass']:.3g} kg"))

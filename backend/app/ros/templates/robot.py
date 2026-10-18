@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Point, Pose
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (AttachedCollisionObject, CollisionObject, Constraints, JointConstraint,
                              MoveItErrorCodes, OrientationConstraint, PlanningScene,
@@ -17,10 +17,11 @@ from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath, GetPlanningSce
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
-from shape_msgs.msg import SolidPrimitive
+from shape_msgs.msg import Mesh, MeshTriangle, SolidPrimitive
 from std_msgs.msg import String
 
 import grip_logic
+import scene
 import sim_errors
 
 ROBOT = "__ROBOT__"
@@ -430,6 +431,14 @@ class Robot:
             co.id = o["name"]
             co.header.frame_id = self.chain.base
             co.pose = _pose(o["xyz"], o["rpy"])
+            co.operation = CollisionObject.ADD
+            if o["shape"] == "mesh":   # a CAD fixture: MoveIt plans around its exact shape, not a hull
+                v, t = scene.read_stl(o["path"])
+                co.meshes = [Mesh(vertices=[Point(x=float(a), y=float(b), z=float(c)) for a, b, c in v],
+                                  triangles=[MeshTriangle(vertex_indices=list(tri)) for tri in t])]
+                co.mesh_poses = [_pose((0, 0, 0), (0, 0, 0))]
+                adds.append(co)
+                continue
             box = o["shape"] == "box"
             dims = o["size"] if box else (o["size"][1], o["size"][0])   # cylinder: (height, radius)
             co.primitives = [SolidPrimitive(type=SolidPrimitive.BOX if box else SolidPrimitive.CYLINDER,

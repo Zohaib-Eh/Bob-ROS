@@ -267,3 +267,9 @@ def test_a_blocked_straight_line_names_what_would_touch(ws):
     lib = (ws / "bot_program" / "robot.py").read_text(encoding="utf-8")
     line = lib[lib.index("    def move_line(self, xyz, rpy=None):"):]
     assert "self._blocker(" in line and "/check_state_validity" in lib and "would touch" in lib
+
+
+def test_cad_fixtures_go_into_moveit_as_their_exact_mesh(ws):
+    lib = (ws / "bot_program" / "robot.py").read_text(encoding="utf-8")
+    load = lib[lib.index("    def _load_run_objects(self):"):lib.index("    def _physics_check(")]
+    assert "scene.read_stl(o[\"path\"])" in load and "co.meshes" in load

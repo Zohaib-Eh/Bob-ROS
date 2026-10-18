@@ -26,7 +26,7 @@ def test_cylinder_volume_uses_radius_and_height():
 
 @pytest.mark.parametrize("bad, words", [
     (box(colour="red"), "unknown field 'colour'"),
-    (box(shape="sphere"), "shape must be box or cylinder"),
+    (box(shape="sphere"), "shape must be box, cylinder or mesh"),
     (box(size=[0.05, 0, 0.05]), "size must be 3 numbers > 0"),
     (box(mass=0), "mass must be > 0"),
     (box(fixed=True, mass=1.0), "fixed objects have no mass"),
