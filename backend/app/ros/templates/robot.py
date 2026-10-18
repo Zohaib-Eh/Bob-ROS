@@ -355,6 +355,24 @@ class Robot:
             _, attached = self._scene()
             if name in attached:
                 self._diff(attached=[self._attached(name, CollisionObject.REMOVE)])
+            if _PHYSICS:
+                self._sync_from_sim(name)
+
+    def _sync_from_sim(self, name):
+        """MoveIt's copy of a just-released object to where MuJoCo has it. The carried copy sat
+        exactly on the tool, the real object a few mm lower in the grip; left there, it overlaps the
+        open fingers and blocks the next move (scene_sync would only catch up later)."""
+        self._sim_poses.pop(name, None)
+        end = time.time() + 1.0
+        while name not in self._sim_poses and time.time() < end:
+            rclpy.spin_once(_node(), timeout_sec=0.05)
+        if name not in self._sim_poses:
+            return
+        M = self._sim_poses[name]
+        co = CollisionObject(id=name, operation=CollisionObject.MOVE)
+        co.header.frame_id = self.chain.base
+        co.pose = _pose(M[:3, 3], _rpy(M[:3, :3]))
+        self._diff(world=[co])
 
     def grip(self, name=None):
         """Close the gripper on the object between the fingers; it is then carried with the tool."""

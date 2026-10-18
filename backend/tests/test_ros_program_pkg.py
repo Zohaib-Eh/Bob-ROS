@@ -242,3 +242,9 @@ def test_closed_on_nothing_says_where_the_object_really_is(wsg):
     lib = (wsg / "sixg_program" / "robot.py").read_text(encoding="utf-8")
     grip = lib[lib.index("    def grip(self, name=None):"):lib.index("    def _slip_check(self):")]
     assert "is really at" in grip
+
+
+def test_release_puts_moveits_copy_where_mujoco_has_the_object(wsg):
+    lib = (wsg / "sixg_program" / "robot.py").read_text(encoding="utf-8")
+    release = lib[lib.index("    def release(self):"):lib.index("    def grip(self, name=None):")]
+    assert "self._sync_from_sim(name)" in release   # else the carried copy overlaps the open fingers
