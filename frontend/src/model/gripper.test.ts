@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Joint } from "../api/types";
 import { buildExportRequest } from "./exportRequest";
-import { gripSummary, gripperIssues, gripperWarnings, jawGap, tcpPoint } from "./gripper";
+import { gripSummary, gripperIssues, gripperWarnings, jawGap, jawTwinAxis, tcpPoint } from "./gripper";
 import { modelReducer } from "./reducer";
 import { boxBody } from "./testBodies";
 import { emptyModel, type ModelState } from "./types";
@@ -120,5 +120,18 @@ describe("what the gripper can hold, and warnings that say why", () => {
     const [hookL, hookR] = mirror("hook", [0.021, -0.01, -0.06], [0.025, 0.01, -0.052]);
     const w = gripperWarnings(fingers([upL, hookL], [upR, hookR], [0, 0.025]), G).join(" ");
     expect(w).toContain("The fingertips reach in further than the gripping faces (tips 42 mm apart, faces 50 mm)");
+  });
+});
+
+describe("jawTwinAxis", () => {
+  it("a jaw with a same-size twin slides toward it", () => {
+    const m = model();
+    const t = jawTwinAxis(m, "L_fl", "L_base")!;
+    expect(t.twin).toBe("L_fr");
+    t.axis.forEach((v, i) => expect(v).toBeCloseTo([1, 0, 0][i], 9));   // fl at -x, fr at +x
+  });
+
+  it("a part without a twin gets nothing", () => {
+    expect(jawTwinAxis(model(), "L_base", "L_fl")).toBeNull();
   });
 });

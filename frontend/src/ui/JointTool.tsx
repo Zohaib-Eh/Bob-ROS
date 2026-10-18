@@ -4,6 +4,7 @@ import type { Vec3 } from "../api/types";
 import {
   draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, isDefaultLimits, parseEffort, setMotion, type JointDraft, type Motion,
 } from "../model/jointDraft";
+import { jawTwinAxis } from "../model/gripper";
 import { isMountedPair } from "../model/mount";
 import { NAME_RE } from "../model/types";
 import { jointMotion, previewRange } from "../viewer/preview";
@@ -151,6 +152,7 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
   const [driveLo, driveHi] = driveRange(model, d);
   const blocker = sweep.state === "done" && side ? sweep.result.blocked_by[side] : null;
   const mounted = !!d.fixed && !!d.moving && isMountedPair(model, d.fixed, d.moving);
+  const twin = slider && d.moving ? jawTwinAxis(model, d.moving, d.fixed) : null;
   const label = `${fmtJointValue(drive, slider)}${side ? ` · beyond ${side} limit${blocker ? ` (hits ${linkName(blocker)})` : ""}` : ""}`;
   const labelAt = pj && drive !== 0 ? viewer?.screenPoint(pj.origin_xyz) : null;
 
@@ -269,6 +271,9 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
           onClick={() => setAnimating((a) => !a)}>{animating ? <Pause size={14} /> : <Play size={14} />}Animate</button>
         <button className="btn" data-testid="flip" disabled={!d.axis}
           onClick={() => set({ axis: d.axis!.map((x) => -x) as Vec3 })}><ArrowLeftRight size={14} />Flip</button>
+        {twin && <button className="btn" data-testid="slide-toward-twin" title="Parallel gripper jaws slide toward each other"
+          onClick={() => set({ axis: twin.axis, origin: d.origin ?? twin.at })}>
+          <MoveHorizontal size={14} />Slide toward {linkName(twin.twin)}</button>}
       </div>
       {problem && <div className="muted small" data-testid="problem">{problem}</div>}
       <div className="row">

@@ -70,6 +70,9 @@ describe("drive helpers", () => {
     expect(sweepSummary(r, false, name)).toBe("Stops at -93° (hits upper_arm) and +129° (no contact).");
     expect(sweepSummary({ ...r, free: true }, false, name)).toMatch(/^Spins freely/);
     expect(sweepSummary({ ...r, at_rest_overlap: ["L1", "L2"] }, false, name)).toMatch(/overlap where they sit.*upper_arm, base/);
+    // a gripper jaw in its slot touches the body at every step (AirTAC HFK40, found driving the app)
+    const jaw = { ...r, lower: 0, upper: 0, blocked_by: { lower: "L2", upper: "L2" } };
+    expect(sweepSummary(jaw, true, name)).toMatch(/^It touches base at every step.*type its travel/);
   });
   it("unwrapStep takes the short way round", () => {
     expect(unwrapStep(3.1, -3.1)).toBeCloseTo(2 * Math.PI - 6.2);

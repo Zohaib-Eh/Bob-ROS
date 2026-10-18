@@ -1,4 +1,5 @@
 import type { Joint, Vec3 } from "../api/types";
+import { linkBox, type Box } from "./geometry";
 import type { GripperSel, ModelState } from "./types";
 
 export const ONE_PART = "The fingers are one part; the gripper needs separate finger parts. Pick a different model or split it in your CAD tool.";
@@ -52,6 +53,24 @@ export function gripperIssues(m: ModelState, g: GripperSel): string[] {
   if ([leader, follower].some((j) => j.limit_lower == null || j.limit_upper == null)) out.push(NO_LIMITS);
   if (leader.parent_link_id !== follower.parent_link_id) out.push(TWO_PARENTS);
   return out;
+}
+
+/** For a gripper jaw: its twin (another part of the same size, not the fixed part) and the unit direction
+ *  from this jaw toward it, which is how parallel jaws slide. Detection guesses jaws badly (round pins and
+ *  holes), and a jaw in its slot can't be swept, so this is the reliable axis. */
+export function jawTwinAxis(m: ModelState, moving: string, fixed: string | null): { twin: string; axis: Vec3; at: Vec3 } | null {
+  const box = (id: string) => { const l = m.links.find((k) => k.id === id); return l ? linkBox(l, m.bodies) : null; };
+  const size = (b: Box) => [0, 1, 2].map((k) => b.max[k] - b.min[k]).sort((a, c) => a - c);
+  const centre = (b: Box): Vec3 => [0, 1, 2].map((k) => (b.min[k] + b.max[k]) / 2) as Vec3;
+  const me = box(moving);
+  if (!me) return null;
+  const twins = m.links.filter((l) => l.id !== moving && l.id !== fixed).map((l) => ({ id: l.id, b: box(l.id) }))
+    .filter((t): t is { id: string; b: Box } => !!t.b && size(t.b).every((v, k) => Math.abs(v - size(me)[k]) < 0.001))
+    .map((t) => ({ ...t, d: dist(centre(t.b), centre(me)) })).filter((t) => t.d > 1e-6 && t.d < 0.5)
+    .sort((a, b) => a.d - b.d);
+  if (!twins.length) return null;
+  const [a, b] = [centre(me), centre(twins[0].b)];
+  return { twin: twins[0].id, axis: unit([b[0] - a[0], b[1] - a[1], b[2] - a[2]]), at: a };
 }
 
 /** Approach axis (base centroid → fingers' midpoint) and the fingertips' far end along it. */

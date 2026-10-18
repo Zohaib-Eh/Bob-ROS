@@ -84,6 +84,11 @@ export function sweepSummary(r: SweepResult, slider: boolean, name: (id: string)
     return `These parts overlap where they sit, so limits can't be found: ${r.at_rest_overlap.map(name).join(", ")}.`;
   }
   if (r.free) return "Spins freely: no collision in a full turn.";
+  const at0 = (v: number | null) => v !== null && Math.abs(v) < 1e-4;
+  if (slider && at0(r.lower) && at0(r.upper) && r.blocked_by.lower && r.blocked_by.lower === r.blocked_by.upper) {
+    return `It touches ${name(r.blocked_by.lower)} at every step, so its travel can't be found by moving it: `
+      + "a part that slides in contact, like a gripper jaw in its slot, needs you to type its travel (the datasheet's stroke).";
+  }
   const side = (v: number | null, by: string | null) =>
     `${v === null ? "?" : fmtJointValue(v, slider)} (${by ? `hits ${name(by)}` : "no contact"})`;
   return `Stops at ${side(r.lower, r.blocked_by.lower)} and ${side(r.upper, r.blocked_by.upper)}.`;
