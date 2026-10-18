@@ -7,6 +7,8 @@ import { draftForPair, emptyDraft, snapAt, type JointDraft } from "./model/joint
 import { nextJoint } from "./model/nextJoint";
 import { partProblems } from "./model/problems";
 import Banner from "./ui/Banner";
+import RestoreBanner from "./ui/RestoreBanner";
+import { useAutosave } from "./ui/useAutosave";
 import Browser from "./ui/Browser";
 import { glyphsFor, tintsFor } from "./ui/colors";
 import type { Ctx, PickedFace, PickMode } from "./ui/ctx";
@@ -28,6 +30,7 @@ import type { Hit, Viewer } from "./viewer/Viewer";
 export default function App() {
   const [history, dispatch] = useReducer(historyReducer, undefined, initialHistory);
   const model = history.present;
+  const autosave = useAutosave(model, dispatch);
   const [step, goTo] = useState<StepId>("parts");
   const [selection, setSelection] = useState<Selection>(null);
   const [pick, setPick] = useState<PickMode>("select");
@@ -155,6 +158,7 @@ export default function App() {
       <MenuBar ctx={ctx} />
       <Stepper ctx={ctx} progress={progress} onCancel={() => runner.current!.cancel()} onResume={() => runner.current!.resume()} />
       <Banner message={banner} onClose={() => notify(null)} />
+      <RestoreBanner offer={autosave.offer} onRestore={autosave.restore} onDiscard={autosave.discard} />
       <div className="workspace">
         <aside className="panel left"><Browser ctx={ctx} /></aside>
         <main className={`viewport${pick !== "select" ? " picking" : ""}`}>

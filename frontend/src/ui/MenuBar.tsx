@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { exportRobot, importFile, type ImportProgress } from "../api/client";
 import { simulateBlocked } from "../model/checklist";
+import { browserStore } from "../model/autosave";
 import { buildExportRequest } from "../model/exportRequest";
 import { loadProject, saveProject } from "../model/project";
 import { emptyModel } from "../model/types";
@@ -78,6 +79,7 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
   const onNew = () => {
     if (model.links.length && !window.confirm("Start a new project? Unsaved changes are lost.")) return;
     dispatch({ type: "load", model: emptyModel() });
+    void browserStore.clear();   // a new project: the old unsaved work isn't offered back after a reload
     goTo("parts");
   };
 
