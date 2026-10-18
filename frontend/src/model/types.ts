@@ -23,8 +23,8 @@ export interface ModelState {
   mounts: Record<string, Mount>;
 }
 
-/** M moved the part from `from` flush onto `to`, turned `turn` degrees. */
-export interface Mount { M: Mat4; from: Face; to: Face; turn: number }
+/** M moved the part from `from` (on body fromBody) flush onto `to` (on body toBody), turned `turn` degrees. */
+export interface Mount { M: Mat4; from: Face; to: Face; turn: number; fromBody?: string; toBody?: string }
 
 export type { GripperSel };
 

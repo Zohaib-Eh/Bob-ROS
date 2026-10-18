@@ -62,7 +62,8 @@ export default function MountCard({ ctx }: { ctx: Ctx }) {
       + "Pick a flat face: the gripper's mounting plate and the flange.");
     try {
       const M = mountMatrix(f, t, 0);
-      dispatch({ type: "transformSource", source, matrix: M, mount: { M, from: f, to: t, turn: 0 } });
+      dispatch({ type: "transformSource", source, matrix: M,
+        mount: { M, from: f, to: t, turn: 0, fromBody: from!.bodyId, toBody: to!.bodyId } });
       setError(null);
     } catch (e) {
       setError((e as Error).message);

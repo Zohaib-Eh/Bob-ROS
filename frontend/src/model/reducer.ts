@@ -1,6 +1,6 @@
 import type { Body, Joint, Link, PartWarning } from "../api/types";
 import { baseGuess, bodyBox, type Box } from "./geometry";
-import { sourceOf, transformBody, type Mat4 } from "./mount";
+import { isMountedPair, sourceOf, transformBody, type Mat4 } from "./mount";
 import { membership } from "./pairs";
 import { DEFAULT_DENSITY, emptyModel, type GripperSel, type ModelState, type Mount, type Suggestion } from "./types";
 
@@ -245,7 +245,12 @@ function reduce(s: ModelState, a: Action): ModelState {
       const la = s.links.find((l) => l.id === a.suggestion.linkA);
       const lb = s.links.find((l) => l.id === a.suggestion.linkB);
       if (!la || !lb || membership(la, lb) !== a.suggestion.membership) return s;   // stale result
-      return { ...s, suggestions: { ...s.suggestions, [a.suggestion.key]: a.suggestion } };
+      const j = a.suggestion.result.joint;
+      const suggestion = j && isMountedPair(s, la.id, lb.id)   // bolted on with the Mount card
+        ? { ...a.suggestion, result: { ...a.suggestion.result,
+            joint: { ...j, type: "fixed" as const, axis: null, limit_lower: null, limit_upper: null } } }
+        : a.suggestion;
+      return { ...s, suggestions: { ...s.suggestions, [a.suggestion.key]: suggestion } };
     }
     case "acceptSuggestion": {
       const g = s.suggestions[a.key];

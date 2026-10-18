@@ -4,6 +4,7 @@ import type { Vec3 } from "../api/types";
 import {
   draftFromJoint, draftPreviewJoint, draftProblem, draftToJoint, isDefaultLimits, parseEffort, setMotion, type JointDraft, type Motion,
 } from "../model/jointDraft";
+import { isMountedPair } from "../model/mount";
 import { NAME_RE } from "../model/types";
 import { jointMotion, previewRange } from "../viewer/preview";
 import type { Ctx, PickMode } from "./ctx";
@@ -149,6 +150,7 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
   const canAnimate = !!d.axis && !!d.origin && (d.motion === "revolute" || d.motion === "slider");
   const [driveLo, driveHi] = driveRange(model, d);
   const blocker = sweep.state === "done" && side ? sweep.result.blocked_by[side] : null;
+  const mounted = !!d.fixed && !!d.moving && isMountedPair(model, d.fixed, d.moving);
   const label = `${fmtJointValue(drive, slider)}${side ? ` · beyond ${side} limit${blocker ? ` (hits ${linkName(blocker)})` : ""}` : ""}`;
   const labelAt = pj && drive !== 0 ? viewer?.screenPoint(pj.origin_xyz) : null;
 
@@ -160,7 +162,8 @@ export default function JointTool({ ctx }: { ctx: Ctx }) {
       {d.suggestionKey && (
         <div className="hint small" data-testid="suggested">
           ✨ Suggested from contact faces <Info term="suggested" />
-          {d.detected && <> · Detector thinks: <b>{d.detected}</b></>}
+          {mounted ? <> · Mounted with the Mount card: bolted on, so <b>fixed</b></>
+            : d.detected && <> · Detector thinks: <b>{d.detected}</b></>}
           {d.ambiguous && <> · ⚠ several matching features</>}
         </div>
       )}

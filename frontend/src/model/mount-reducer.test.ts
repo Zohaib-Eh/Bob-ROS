@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mountMatrix, invert, transformBody } from "./mount";
+import { isMountedPair, mountMatrix, invert, transformBody } from "./mount";
 import { loadProject, saveProject, PROJECT_FORMAT, PROJECT_VERSION } from "./project";
 import { modelReducer } from "./reducer";
 import { boxBody } from "./testBodies";
@@ -55,6 +55,22 @@ describe("sources and transformSource", () => {
     expect(m.suggestions[pending.key]).toBeUndefined();
     expect(pairsToDetect(m).map((p) => p.key)).toContain(pending.key);
     expect(id("finger")).toBeTruthy();
+  });
+
+  it("a mounted part's joint to the robot is suggested fixed, not planar", () => {   // found driving the app
+    const M = mountMatrix(plane([0.5, 0.5, 1], [0, 0, 1]), plane([6, 0.5, 0.5], [1, 0, 0]), 0);
+    let m = modelReducer(withGripper(), { type: "transformSource", source: "gripper.step", matrix: M,
+      mount: { M, from: plane([0.5, 0.5, 1], [0, 0, 1]), to: plane([6, 0.5, 0.5], [1, 0, 0]), turn: 0, fromBody: "plate", toBody: "flange" } });
+    const id = (b: string) => m.links.find((l) => l.body_ids.includes(b))!.id;
+    const [p] = pairsToDetect(m);
+    const planar = { id: "s", parent_link_id: id("flange"), child_link_id: id("plate"), type: "planar" as const,
+      origin_xyz: [6, 0.5, 0.5] as [number, number, number], origin_rpy: [0, 0, 0] as [number, number, number],
+      axis: [1, 0, 0] as [number, number, number], limit_lower: null, limit_upper: null, source: "suggested" as const };
+    m = modelReducer(m, { type: "setSuggestion", suggestion: { ...p, status: "review", result: { joint: planar, reason: null, evidence: null } } });
+    const j = m.suggestions[p.key].result.joint!;
+    expect(j.type).toBe("fixed");
+    expect(j.origin_xyz).toEqual([6, 0.5, 0.5]);
+    expect(isMountedPair(m, id("flange"), id("plate"))).toBe(true);
   });
 
   it("old_project_without_source_loads_unchanged", () => {   // Review Focus 2

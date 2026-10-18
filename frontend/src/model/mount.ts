@@ -1,4 +1,5 @@
 import type { Body, Face, Vec3 } from "../api/types";
+import type { ModelState } from "./types";
 
 /** 4x4 rigid transform, 16 numbers, row-major. */
 export type Mat4 = number[];
@@ -72,4 +73,13 @@ export function transformBody(b: Body, M: Mat4): Body {
       normal: f.normal && direction(M, f.normal), axis: f.axis && direction(M, f.axis),
     })),
   };
+}
+
+/** True when the Mount card bolted these two links together (one holds the mounted face, the other the
+ *  face it was put on): their joint is fixed, whatever the contact faces suggest (two flat faces: planar). */
+export function isMountedPair(m: ModelState, linkA: string, linkB: string): boolean {
+  const bodies = (id: string) => m.links.find((l) => l.id === id)?.body_ids ?? [];
+  const [a, b] = [bodies(linkA), bodies(linkB)];
+  return Object.values(m.mounts ?? {}).some((mt) => !!mt.fromBody && !!mt.toBody
+    && ((a.includes(mt.fromBody) && b.includes(mt.toBody)) || (b.includes(mt.fromBody) && a.includes(mt.toBody))));
 }
