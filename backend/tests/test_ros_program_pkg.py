@@ -233,3 +233,9 @@ def test_grip_on_mock_hardware_needs_the_object_within_reach(wsg):
     lib = (wsg / "sixg_program" / "robot.py").read_text(encoding="utf-8")
     grip = lib[lib.index("    def grip(self, name=None):"):lib.index("    def _slip_check(self):")]
     assert "self._gap(name) > ATTACH_REACH" in grip and "if not _PHYSICS" in grip
+
+
+def test_closed_on_nothing_says_where_the_object_really_is(wsg):
+    lib = (wsg / "sixg_program" / "robot.py").read_text(encoding="utf-8")
+    grip = lib[lib.index("    def grip(self, name=None):"):lib.index("    def _slip_check(self):")]
+    assert "is really at" in grip
