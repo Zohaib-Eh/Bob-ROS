@@ -1,7 +1,7 @@
 """Gripper acceptance on the irb1300 (the test gripper mounted on link6's flange, tests/irb1300_gripper.py):
 pick a 0.2 kg box off a post by squeezing it, carry it to a second post, release it, and check where it
-really landed (spec 2026-10-17-gripper §1). Nothing is glued. The test gripper's hooks (tips 42 mm apart)
-are lowered around the 30 mm box; the uprights squeeze it and the hooks end up under it."""
+really landed (spec 2026-10-17-gripper §1). Nothing is glued. The test gripper's flat pads (50 mm
+open) are lowered around the 30 mm box and squeeze it; only friction holds it."""
 from robot import Robot
 
 SCENE = [
@@ -14,12 +14,12 @@ r = Robot()
 down = r.tool_down(yaw=0.0)                  # jaws close along x, across two faces of the box
 r.release()
 r.move_to((0.55, 0.45, 0.52), down)
-r.move_line((0.55, 0.45, 0.39), down)        # hooks just under the box's bottom face (post top 0.4)
+r.move_line((0.55, 0.45, 0.395), down)       # fingertips 5 mm below the box's bottom face (post top 0.4)
 r.grip("box")
 assert r.gripper_width() > 0.02, r.gripper_width()
 r.move_line((0.55, 0.45, 0.52), down)
 r.move_to((0.45, 0.55, 0.52), down)
-r.move_line((0.45, 0.55, 0.392), down)
+r.move_line((0.45, 0.55, 0.397), down)       # box 2 mm above the post
 r.release()
 r.move_line((0.45, 0.55, 0.52), down)
 (x, y, z), _ = r.pose("box")

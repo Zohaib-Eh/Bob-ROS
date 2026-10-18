@@ -225,7 +225,7 @@ def test_robot_library_grips(wsg):
 def test_brief_describes_the_gripper_only_when_there_is_one(wsg, ws):   # Review Focus 5
     text = (wsg / "sixg_program" / "brief.md").read_text(encoding="utf-8")
     assert "Gripper:" in text and "r.grip(" in text and "r.release()" in text and "tool point" in text.lower()
-    assert "Opens to 42 mm" in text   # the hook tips' real gap, not 2 x travel (50)
+    assert "Opens to 50 mm" in text   # the pads' real gap at the open limit
     assert 'r.grip("box")' in text and 'r.attach("box")' not in text   # the example squeezes, it doesn't glue
     plain = (ws / "bot_program" / "brief.md").read_text(encoding="utf-8")
     assert "Gripper:" not in plain and "r.grip(" not in plain

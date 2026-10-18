@@ -1,7 +1,7 @@
 """Gripper acceptance (six-axis test arm + the two-finger test gripper): pick a 0.2 kg box off a post
 by squeezing it, carry it to a second post, release it, and check where it really landed. Nothing is
-glued. The test gripper's fingers end in inward hooks (tips 42 mm apart), so it is lowered around a
-30 mm box: the uprights squeeze it and the hooks end up under it, as with real hook fingers."""
+glued. The test gripper's flat pads (50 mm open) are lowered around the 30 mm box and squeeze it;
+only friction holds it."""
 from robot import Robot
 
 SCENE = [
@@ -14,12 +14,12 @@ r = Robot()
 down = r.tool_down(yaw=0.0)                  # jaws close along x, across two faces of the box
 r.release()
 r.move_to((0.5, 0.0, 0.32), down)
-r.move_line((0.5, 0.0, 0.19), down)          # fingertips (hooks) just under the box's bottom face
+r.move_line((0.5, 0.0, 0.195), down)         # fingertips 5 mm below the box's bottom face, beside the post
 r.grip("box")
 assert r.gripper_width() > 0.02, r.gripper_width()   # stopped on the 30 mm box, not fully closed
 r.move_line((0.5, 0.0, 0.32), down)
 r.move_to((0.5, 0.2, 0.32), down)
-r.move_line((0.5, 0.2, 0.192), down)
+r.move_line((0.5, 0.2, 0.197), down)         # box 2 mm above the post
 r.release()
 r.move_line((0.5, 0.2, 0.32), down)
 (x, y, z), _ = r.pose("box")

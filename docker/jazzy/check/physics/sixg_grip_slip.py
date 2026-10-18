@@ -1,6 +1,5 @@
 """Gripper acceptance: a 10 kg box (heavier than 2 fingers x 40 N x friction 1 can hold) slips out
-when lifted, and the program is told so in plain words. The hook tips squeeze the box at mid-height,
-so only friction holds it (no hook underneath)."""
+when lifted, and the program is told so in plain words. Only friction holds it."""
 from robot import GripError, Robot
 
 SCENE = [
@@ -12,7 +11,7 @@ r = Robot()
 down = r.tool_down(yaw=0.0)
 r.release()
 r.move_to((0.5, 0.0, 0.32), down)
-r.move_line((0.5, 0.0, 0.211), down)         # hooks (8 mm tall) level with the box's middle
+r.move_line((0.5, 0.0, 0.195), down)         # fingertips 5 mm below the box's bottom face
 r.grip("box")
 try:
     r.move_line((0.5, 0.0, 0.32), down)

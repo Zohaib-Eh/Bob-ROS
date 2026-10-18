@@ -17,9 +17,8 @@ WRIST = np.pi / 2   # j5 at 90°: the gripper points straight down and its finge
 
 def _scene(box_mass=None, box=0.04):
     """Exported sixg MJCF with the wrist turned so the gripper points down (plate at z 0.77, fingers
-    down to 0.70, hooks at 0.70..0.708, uprights' inner faces at x 0.575 / 0.625). Optionally a box
-    between the uprights above the hooks, on a pedestal thin enough to pass between the hooks, so
-    only the fingers can lift it."""
+    down to 0.70, pads' inner faces at x 0.575 / 0.625). Optionally a box between the pads, on a
+    thin pedestal, so only the fingers can lift it."""
     links, joints, bodies, g = six_axis_with_gripper()
     z = zipfile.ZipFile(io.BytesIO(export_package("sixg", links, joints, bodies, gripper=g)))
     meshes = {n.split("/")[-1]: z.read(n) for n in z.namelist() if "/meshes/" in n}
@@ -61,7 +60,7 @@ def test_follower_has_no_motor_and_mirrors_the_leader():
     m, d = _scene()
     names = {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, m.actuator_trnid[a][0]) for a in range(m.nu)}
     assert "gfl_joint" in names and "gfr_joint" not in names
-    _run(m, d, 1.0, {_act(m, "gfl_joint"): 0.01})   # hooks would meet at 0.021
+    _run(m, d, 1.0, {_act(m, "gfl_joint"): 0.01})   # pads would meet at 0.025
     assert _q(m, d, "gfl_joint") == pytest.approx(0.01, abs=1e-3)
     assert _q(m, d, "gfr_joint") == pytest.approx(_q(m, d, "gfl_joint"), abs=1e-3)
 
@@ -85,8 +84,8 @@ def test_fingers_stay_mirrored_while_squeezing_a_box():   # Task 1 finding: the 
 def test_fingers_dont_stall_on_a_hull_the_uprights_reach_the_box():
     m, d = _scene(box_mass=0.2)
     _run(m, d, 1.5, {_act(m, "gfl_joint"): 0.025})
-    # open gap 0.05, box 0.04: each finger travels ~0.005 before the uprights touch it (a hull over the
-    # hook corner would stop them earlier, at ~0.0 since the hooks are already within 0.042)
+    # open gap 0.05, box 0.04: each finger travels ~0.005 before its pad touches it (the convex pieces
+    # must not bulge past the flat pad)
     assert _q(m, d, "gfl_joint") == pytest.approx(0.005, abs=1.5e-3)
 
 
