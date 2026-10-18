@@ -1,18 +1,25 @@
-"""The physics check: hold home pose with the motors for a couple of seconds."""
+"""The physics check: hold home pose with the motors for a couple of seconds; a mobile base also stands still
+on the floor and drives straight."""
 import io
 import math
+import xml.etree.ElementTree as ET
 import zipfile
 
 import mujoco
 import numpy as np
 
-from app.sim.mjcf import build_mjcf, compile_mjcf
+from app.sim.mjcf import BASE_JOINTS, build_mjcf, compile_mjcf
 from app.sim.torque import required_efforts
 
 SAG_HINGE = math.radians(5)
 SAG_SLIDE = 0.005
 KICK_HINGE = 0.01   # rad: start offset from home, well under SAG_HINGE
 KICK_SLIDE = 0.0005  # m
+BASE_DRIFT = 0.005   # m a standing base may roll
+BASE_TILT = math.radians(1)
+DRIVE_SPEED, DRIVE_TIME = 0.2, 2.0   # m/s for s: the drive check
+DRIVE_HEADING = math.radians(3)
+_BASE = {n for n, _, _ in BASE_JOINTS}
 
 
 def _name(m, kind, i) -> str:
@@ -36,10 +43,44 @@ def _blow_up_link(m, d) -> str | None:
     return None
 
 
-def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict:
-    """Hold home pose (0, clamped into the limits) with the motors for `seconds` of simulated time."""
+def _with_floor(xml: str) -> str:
+    root = ET.fromstring(xml)
+    ET.SubElement(root.find("worldbody"), "geom", {"name": "floor", "type": "plane", "size": "0 0 1"})
+    return ET.tostring(root, encoding="unicode")
+
+
+def _q(m, d, name) -> float:
+    return float(d.qpos[m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, name)]])
+
+
+def _drive_check(m, d, mobile) -> dict | None:
+    """Wheels at DRIVE_SPEED for DRIVE_TIME: the base should go DRIVE_SPEED * DRIVE_TIME straight ahead."""
+    r = mobile["radius"]
+    for a in range(m.nu):
+        name = _name(m, mujoco.mjtObj.mjOBJ_JOINT, m.actuator_trnid[a][0])
+        if name in mobile["left"] + mobile["right"]:
+            d.ctrl[a] = DRIVE_SPEED / r
+    x0, y0, yaw0 = _q(m, d, "base_x"), _q(m, d, "base_y"), _q(m, d, "base_yaw")
+    for _ in range(int(round(DRIVE_TIME / m.opt.timestep))):
+        mujoco.mj_step(m, d)
+    moved = math.hypot(_q(m, d, "base_x") - x0, _q(m, d, "base_y") - y0)
+    turned = abs(_q(m, d, "base_yaw") - yaw0)
+    want = DRIVE_SPEED * DRIVE_TIME
+    if abs(moved - want) > 0.1 * want:
+        return {"ok": False, "kind": "drive", "moved": round(moved, 3),
+                "message": f"The base drove {moved:.2f} m of {want:.2f} m: the wheels slip or their motors are too weak "
+                           "(set a higher wheel strength), or something drags on the floor."}
+    if turned > DRIVE_HEADING:
+        return {"ok": False, "kind": "drive", "message": f"The base veers {math.degrees(turned):.0f}° in {want:.1f} m: "
+                                                         "the wheels differ in size or grip, or the weight sits to one side."}
+    return None
+
+
+def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0, mobile: dict | None = None) -> dict:
+    """Hold home pose (0, clamped into the limits) with the motors for `seconds` of simulated time.
+    mobile ({left, right, radius}): the robot stands on a floor, must not roll or tip, then drives straight."""
     try:
-        m = compile_mjcf(xml, meshes)
+        m = compile_mjcf(_with_floor(xml) if mobile else xml, meshes)
     except (ValueError, mujoco.FatalError) as exc:  # MuJoCo reports compile errors as ValueError
         return {"ok": False, "kind": "load", "message": f"Model won't load: {exc}"}
     d = mujoco.MjData(m)
@@ -55,7 +96,7 @@ def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict
     d.qpos[:] = home
     for j in range(m.njnt):
         kind = m.jnt_type[j]
-        if kind in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
+        if kind in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE) and _name(m, mujoco.mjtObj.mjOBJ_JOINT, j) not in _BASE:
             a = m.jnt_qposadr[j]
             kick = KICK_HINGE if kind == mujoco.mjtJoint.mjJNT_HINGE else KICK_SLIDE
             hi = m.jnt_range[j][1] if m.jnt_limited[j] else math.inf
@@ -72,11 +113,25 @@ def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict
         kind = m.jnt_type[j]
         if kind not in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
             continue
+        if mobile and _name(m, mujoco.mjtObj.mjOBJ_JOINT, j) in _BASE | set(mobile["left"] + mobile["right"]):
+            continue   # the base and its wheels are judged below, not as a sagging arm
         a = m.jnt_qposadr[j]
         dev = abs(float(d.qpos[a] - home[a]))
         limit = SAG_HINGE if kind == mujoco.mjtJoint.mjJNT_HINGE else SAG_SLIDE
         if dev > limit and (worst is None or dev / limit > worst[1] / worst[2]):
             worst = (j, dev, limit)
+    if worst is None and mobile:
+        drift = math.hypot(_q(m, d, "base_x"), _q(m, d, "base_y"))
+        tilt = max(abs(_q(m, d, "base_pitch")), abs(_q(m, d, "base_roll")))
+        if tilt > BASE_TILT:
+            return {"ok": False, "kind": "tip", "message": f"The base tips {math.degrees(tilt):.0f}° standing still: "
+                                                           "add a caster or move the weight between the wheels."}
+        if drift > BASE_DRIFT:
+            return {"ok": False, "kind": "roll", "message": f"The base rolls {drift * 1000:.0f} mm standing still."}
+        problem = _drive_check(m, d, mobile)
+        if problem:
+            return problem
+        return {"ok": True, "kind": "ok", "message": f"Holds pose. Drives straight ({DRIVE_SPEED * DRIVE_TIME:.2f} m in {DRIVE_TIME:g} s)."}
     if worst is None:
         return {"ok": True, "kind": "ok", "message": "Holds pose."}
     j, dev, _ = worst
@@ -91,11 +146,11 @@ def hold_check(xml: str, meshes: dict[str, bytes], seconds: float = 2.0) -> dict
             "message": f"{link} sags {amount}: needs ~{needed:.3g} {unit}, has {has:g}."}
 
 
-def physics_check(robot_name, links, joints, bodies_by_link, gripper=None) -> dict:
-    """Runs in a child process: export (which builds the MJCF), then hold."""
+def physics_check(robot_name, links, joints, bodies_by_link, gripper=None, mobile=None) -> dict:
+    """Runs in a child process: export (which builds the MJCF), then hold (and drive)."""
     from app.export.urdf_writer import export_package
     try:
-        data = export_package(robot_name, links, joints, bodies_by_link, gripper=gripper)
+        data = export_package(robot_name, links, joints, bodies_by_link, gripper=gripper, mobile=mobile)
     except ValueError as exc:
         return {"ok": False, "kind": "load", "message": str(exc)}
     z = zipfile.ZipFile(io.BytesIO(data))
@@ -107,4 +162,7 @@ def physics_check(robot_name, links, joints, bodies_by_link, gripper=None) -> di
         except (ValueError, mujoco.FatalError) as exc:
             return {"ok": False, "kind": "load", "message": f"Model won't load: {exc}"}
         return {"ok": False, "kind": "load", "message": "Model won't load."}
-    return hold_check(z.read(path).decode(), meshes)
+    tag = ET.fromstring(z.read(f"{robot_name}/urdf/{robot_name}.urdf")).find("mobile_base")
+    drive = None if tag is None else {"left": tag.get("left").split(), "right": tag.get("right").split(),
+                                      "radius": float(tag.get("wheel_radius"))}
+    return hold_check(z.read(path).decode(), meshes, mobile=drive)

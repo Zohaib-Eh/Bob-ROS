@@ -91,6 +91,41 @@ assert abs(x - 0.4) < 0.01 and abs(y + 0.3) < 0.01, f"box landed at {(x, y, z)}"
 r.home()
 ```"""
 
+MOBILE_DOC = """## Mobile base
+
+The robot drives on wheels. Coordinates are in the world frame `map`: the floor is z = 0, the base starts at
+the origin facing +x, and objects stay put while the base drives. Arm calls (move_to, tool_down, pose, ...)
+take and give world coordinates too, so plan each reach from where the base will be: drive close to an
+object first (within the reach given above, measured from the base origin), then reach.
+
+```python
+from robot import PathBlocked   # an object is in the way of the base's straight path
+r.base_pose()                    # (x, y, yaw) of the base in the world
+r.drive_to(x, y, yaw=None)       # turn, drive straight, turn; ends within 2 cm and 2 degrees. yaw None: face the way it drove
+r.drive(v, w, seconds)           # raw: v m/s forward, w rad/s left, no path check
+```
+
+drive_to checks the straight path against the objects and raises PathBlocked if one is in the way: go around
+it in legs (drive_to a point beside it first). Arm moves while the base drives aren't possible: drive, then reach.
+
+Example (drive to a table, pick a part, bring it back):
+
+```python
+from robot import Robot
+
+r = Robot()
+r.drive_to(1.0, 0.0, 0.0)                  # base now 1 m along x, facing +x
+(x, y, z), _ = r.pose("part")              # world coordinates, wherever the base is
+down = r.tool_down(yaw=0.0)
+r.release()
+r.move_to((x, y, z + 0.12), down)
+r.move_line((x, y, z), down)
+r.grip("part")
+r.move_line((x, y, z + 0.12), down)
+r.home()                                   # tuck the arm before driving
+r.drive_to(0.0, 0.0, 0.0)
+```"""
+
 EXAMPLE_HEAD = "\n\nExample (pick and place):"
 
 RULES = """## Rules
@@ -142,9 +177,13 @@ def bearing(chain: Chain) -> float:
 
 def brief(chain: Chain, robot: str, workcell_text: str | None = None) -> str:
     T = fk(chain, home(chain))
+    m = chain.mobile
     lines = [f"# Robot: {robot}", "",
-             f"You write Python programs that move the {robot} robot arm in a ROS 2 simulation.",
-             f"Base frame: {chain.base}. Tool link: {chain.tip}. Units: metres and radians.",
+             f"You write Python programs that move the {robot} robot arm"
+             + (f" on its {'differential-drive' if m.drive == 'diff' else 'skid-steer'} mobile base" if m else "")
+             + " in a ROS 2 simulation.",
+             (f"World frame: map (the floor, z = 0). Base frame: {chain.base}, starting at the world origin. "
+              if m else f"Base frame: {chain.base}. ") + f"Tool link: {chain.tip}. Units: metres and radians.",
              f"Approximate reach from the base origin: {reach(chain):.2f} m.",
              f"At home the tool link is at xyz ({T[0, 3]:.3f}, {T[1, 3]:.3f}, {T[2, 3]:.3f}).",
              f'"In front of the robot" means toward bearing {bearing(chain):.0f}° in the base x-y plane '
@@ -160,9 +199,15 @@ def brief(chain: Chain, robot: str, workcell_text: str | None = None) -> str:
     lines += ["", "Workcell (always present; see workcell.yaml):"] + _workcell_lines(workcell_text)
     if chain.gripper is not None:
         lines += [""] + _gripper_lines(chain.gripper, chain.tip)
+    if m is not None:
+        x0, y0, x1, y1 = m.footprint
+        lines += ["", f"Mobile base: {x1 - x0:.2f} × {y1 - y0:.2f} m outline, {m.height:.2f} m tall, "
+                      f"wheels {2 * m.radius * 1000:.0f} mm, {m.separation:.2f} m apart."]
     rules = RULES.replace("__MAX_RUNS__", str(MAX_RUNS)).replace("__ROBOT__", robot)
     # with a gripper, its own pick example replaces the glue one (attach 5 mm above the box)
     api = API_DOC if chain.gripper is None else API_DOC.split(EXAMPLE_HEAD)[0] + "\n\n" + GRIPPER_DOC
+    if m is not None:
+        api += "\n\n" + MOBILE_DOC
     return "\n".join(lines + ["", api, "", rules]) + "\n"
 
 
@@ -210,5 +255,6 @@ def program_files(chain: Chain, robot: str, source: str, workcell_text: str | No
         "robot.py": hash_note(source, robot) + _template("robot.py", robot, source),
         "runner.py": hash_note(source, robot) + _template("runner.py", robot, source),
         **{name: hash_note(source, robot) + _template(name, robot, source)
-           for name in ("scene.py", "sim_ctl.py", "sim_errors.py", "scene_sync.py", "grip_logic.py", "recorder.py")},
+           for name in ("scene.py", "sim_ctl.py", "sim_errors.py", "scene_sync.py", "grip_logic.py", "recorder.py",
+                        "drive_logic.py")},
     }

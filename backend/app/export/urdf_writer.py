@@ -239,7 +239,8 @@ def _add_mobile(robot, d: Drive, names) -> None:
         "drive": d.drive, "left": " ".join(names[j] for j in d.left), "right": " ".join(names[j] for j in d.right),
         "wheel_radius": f"{d.radius:.6f}", "wheel_separation": f"{d.separation:.6f}", "ground": f"{d.ground:.6f}",
         "casters": "; ".join(" ".join(f"{v:.6f}" for v in c) for c in d.casters),
-        "footprint": " ".join(f"{v:.6f}" for v in d.footprint)})
+        "footprint": " ".join(f"{v:.6f}" for v in d.footprint), "center": " ".join(f"{v:.6f}" for v in d.center),
+        "height": f"{d.height:.6f}"})
 
 
 def _wheel_effort(links: list[Link], n_wheels: int, radius: float) -> float:

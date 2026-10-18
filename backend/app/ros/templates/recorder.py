@@ -116,7 +116,7 @@ def begin(program: str, robot) -> "Recorder | _Off":
         from tf2_msgs.msg import TFMessage
         import robot as robot_lib
 
-        trace = Trace(robot_lib.ROBOT, program, robot.chain.base, time.monotonic())
+        trace = Trace(robot_lib.ROBOT, program, getattr(robot, "world", robot.chain.base), time.monotonic())   # map for a mobile base
         node = rclpy.create_node("cad_to_urdf_recorder")
         node.create_subscription(TFMessage, "/tf", lambda m: trace.tf(m.transforms), 50)
         node.create_subscription(TFMessage, "/tf_static", lambda m: trace.tf(m.transforms, static=True),

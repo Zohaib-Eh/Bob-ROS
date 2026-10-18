@@ -1,5 +1,6 @@
 """Task library for __ROBOT__: the functions LLM-written programs call. MoveIt plans every motion.
-Units: metres and radians, in the robot's base frame."""
+Units: metres and radians, in the world frame: a bolted-down robot's base frame, or for a mobile robot `map`
+(the floor; the base starts at its origin and drive_to moves it). The arm's own maths is in its base frame."""
 import importlib
 import json
 import math
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import rclpy
-from geometry_msgs.msg import Point, Pose
+from geometry_msgs.msg import Point, Pose, TwistStamped
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (AttachedCollisionObject, CollisionObject, Constraints, JointConstraint,
                              MoveItErrorCodes, OrientationConstraint, PlanningScene,
@@ -20,6 +21,7 @@ from sensor_msgs.msg import JointState
 from shape_msgs.msg import Mesh, MeshTriangle, SolidPrimitive
 from std_msgs.msg import String
 
+import drive_logic
 import grip_logic
 import scene
 import sim_errors
@@ -71,6 +73,10 @@ class GripError(RobotError):
 
 class MotionError(RobotError):
     """The simulated arm could not do what was planned (weak motor, heavy load, contact)."""
+
+
+class PathBlocked(RobotError):
+    """An object is in the way of the base's straight path."""
 
 
 def _matrix(xyz, rpy) -> np.ndarray:
@@ -155,6 +161,7 @@ class Robot:
         self._kin = _kin.load()
         self.chain = self._kin.chain
         self.joint_names = [j.name for j in self.chain.joints]
+        self.world = "map" if self.chain.mobile else self.chain.base   # objects and the program's coordinates
         self._move = ActionClient(n, MoveGroup, "/move_action")
         self._exec = ActionClient(n, ExecuteTrajectory, "/execute_trajectory")
         self._cartesian = n.create_client(GetCartesianPath, "/compute_cartesian_path")
@@ -177,6 +184,12 @@ class Robot:
             self._gripper = ActionClient(n, ParallelGripperCommand, "/gripper_controller/gripper_cmd")
             if not self._gripper.wait_for_server(timeout_sec=30):
                 raise PlanningFailed("The gripper controller is not running")
+        if self.chain.mobile is not None:
+            from tf2_ros import Buffer, TransformListener
+            self._tf = Buffer()
+            self._tf_listener = TransformListener(self._tf, n)
+            self._cmd_vel = n.create_publisher(TwistStamped, "/base_controller/cmd_vel", 10)
+            self._base_matrix()   # fails clearly if the base isn't localized
         if _PHYSICS:
             from mujoco_ros2_control_msgs.msg import FreeJointStateArray
             n.create_subscription(FreeJointStateArray, "/sim/free_joint_states", self._on_sim_poses, 10)
@@ -207,7 +220,7 @@ class Robot:
     def _add(self, name, shape, dims, xyz, rpy):
         co = CollisionObject()
         co.id = name
-        co.header.frame_id = self.chain.base
+        co.header.frame_id = self.world
         co.pose.orientation.w = 1.0
         co.primitives = [SolidPrimitive(type=shape, dimensions=[float(d) for d in dims])]
         co.primitive_poses = [_pose(xyz, rpy)]
@@ -260,7 +273,7 @@ class Robot:
         co = next(o for o in _wait(self._get.call_async(req), 10).scene.world.collision_objects if o.id == name)
         prim, pp = co.primitives[0], co.primitive_poses[0]
         P = _pose_matrix(co.pose) @ _pose_matrix(pp)
-        local = np.linalg.inv(P) @ np.append(self._kin.fk(self._current())[:3, 3], 1.0)
+        local = np.linalg.inv(P) @ np.append(self._tool_matrix()[:3, 3], 1.0)
         if prim.type == SolidPrimitive.BOX:
             out = np.maximum(np.abs(local[:3]) - np.asarray(prim.dimensions[:3]) / 2, 0)
         else:                                                          # cylinder: (height, radius)
@@ -296,7 +309,7 @@ class Robot:
         self._diff(attached=[self._attached(name, CollisionObject.REMOVE)])
 
     def pose(self, name):
-        """Where object `name` really is now: (xyz, rpy) in the base frame."""
+        """Where object `name` really is now: (xyz, rpy) in the world frame."""
         if name in self._sim_poses:   # MuJoCo's own pose (MoveIt's copy of a held object never slips)
             M = self._sim_poses[name]
             return tuple(float(v) for v in M[:3, 3]), _rpy(M[:3, :3])
@@ -311,8 +324,8 @@ class Robot:
             raise UnknownObject(f"No object '{name}' (objects: {', '.join(sorted(objs)) or 'none'})")
         o = objs[name]
         M = _pose_matrix(o.pose) @ _pose_matrix(o.primitive_poses[0])
-        if o.header.frame_id and o.header.frame_id != self.chain.base:  # attached: in the tool frame
-            M = self._kin.fk(self._current()) @ M
+        if o.header.frame_id and o.header.frame_id != self.world:  # attached: in the tool frame
+            M = self._tool_matrix() @ M
         return tuple(float(v) for v in M[:3, 3]), _rpy(M[:3, :3])
 
     def _on_sim_poses(self, m):
@@ -338,7 +351,33 @@ class Robot:
         return g.width(self._joints.get(g.leader, g.lower))
 
     def _tool_matrix(self):
-        return self._kin.fk(self._current())
+        """The tool frame in the world."""
+        return self._base_matrix() @ self._kin.fk(self._current())
+
+    def _base_matrix(self) -> np.ndarray:
+        """The base frame in the world: identity when bolted down; for a mobile base map -> base from TF."""
+        if self.chain.mobile is None:
+            return np.eye(4)
+        from rclpy.time import Time
+        end = time.time() + 10
+        while True:
+            try:
+                t = self._tf.lookup_transform("map", self.chain.base, Time()).transform
+                break
+            except Exception:
+                if time.time() > end:
+                    raise PlanningFailed(f"Where the base is is unknown (no map -> {self.chain.base} transform): "
+                                         "the base controller or the localization node is not running")
+                rclpy.spin_once(_node(), timeout_sec=0.05)
+        p = Pose()
+        p.position.x, p.position.y, p.position.z = t.translation.x, t.translation.y, t.translation.z
+        p.orientation = t.rotation
+        return _pose_matrix(p)
+
+    def _in_base(self, xyz, rpy=(0.0, 0.0, 0.0)) -> tuple:
+        """A world pose as the arm's maths needs it, in the base frame."""
+        M = np.linalg.inv(self._base_matrix()) @ _matrix(xyz, rpy)
+        return tuple(float(v) for v in M[:3, 3]), _rpy(M[:3, :3])
 
     def _object_matrix(self, name):
         if name in self._sim_poses:
@@ -372,7 +411,7 @@ class Robot:
             return
         M = self._sim_poses[name]
         co = CollisionObject(id=name, operation=CollisionObject.MOVE)
-        co.header.frame_id = self.chain.base
+        co.header.frame_id = self.world
         co.pose = _pose(M[:3, 3], _rpy(M[:3, :3]))
         self._diff(world=[co])
 
@@ -429,7 +468,7 @@ class Robot:
         for o in _meta()["objects"]:
             co = CollisionObject()
             co.id = o["name"]
-            co.header.frame_id = self.chain.base
+            co.header.frame_id = self.world
             co.pose = _pose(o["xyz"], o["rpy"])
             co.operation = CollisionObject.ADD
             if o["shape"] == "mesh":   # a CAD fixture: MoveIt plans around its exact shape, not a hull
@@ -519,12 +558,12 @@ class Robot:
         return np.array([self._joints[n] for n in self.joint_names])
 
     def tool_pose(self) -> tuple:
-        T = self._kin.fk(self._current())
+        T = self._tool_matrix()
         return tuple(float(v) for v in T[:3, 3]), _rpy(T[:3, :3])
 
     def solutions(self, xyz, rpy) -> list:
         try:
-            sols = self._kin.solve_all(_matrix(xyz, rpy), self._current())
+            sols = self._kin.solve_all(_matrix(*self._in_base(xyz, rpy)), self._current())
         except NotImplementedError:
             raise PlanningFailed("exact IK is not available for this robot; use move_to and let MoveIt solve it")
         return [[float(v) for v in q] for q in sols]
@@ -532,7 +571,7 @@ class Robot:
     # --- motion ------------------------------------------------------------------------------
     def _check_reach(self, xyz, rpy):
         try:
-            if not self._kin.solve_all(_matrix(xyz, rpy), self._current()):
+            if not self._kin.solve_all(_matrix(*self._in_base(xyz, rpy)), self._current()):
                 raise Unreachable(f"no joint solution puts the tool at {_fmt(xyz)} with orientation {_fmt(rpy)} "
                                   "(outside the reach or the joint limits)")
         except NotImplementedError:
@@ -541,7 +580,7 @@ class Robot:
     def _position_ik(self, xyz, tries: int = 8, seed=None) -> list:
         """Joint solutions that put the tool link at xyz with any orientation, computed on the model
         (damped least squares from `seed` (default: the current state) and random seeds); nearest to the seed first."""
-        target = np.asarray(xyz, float)
+        target = np.asarray(self._in_base(xyz)[0], float)
         lo = np.array([j.lower if j.lower is not None else -math.pi for j in self.chain.joints])
         hi = np.array([j.upper if j.upper is not None else math.pi for j in self.chain.joints])
         rng = np.random.default_rng(0)
@@ -582,13 +621,14 @@ class Robot:
 
     def tool_facing(self, direction, yaw=None) -> tuple:
         """rpy that points the tool (the flange, along the last joint's axis, away from the arm; with a
-        gripper, its tool point's z) toward `direction` in the base frame, turning the home orientation
+        gripper, its tool point's z) toward `direction` in the world, turning the home orientation
         as little as possible. yaw (radians): turn about that axis so the jaws close along
-        (cos yaw, sin yaw) in the base x-y plane."""
+        (cos yaw, sin yaw) in the world's x-y plane."""
         d = np.asarray(direction, float)
         if np.linalg.norm(d) < 1e-9:
             raise ValueError("tool_facing needs a non-zero direction")
-        d = d / np.linalg.norm(d)
+        W = self._base_matrix()[:3, :3]
+        d = W.T @ (d / np.linalg.norm(d))   # the arm's maths is in its base frame
         q = _home(self.chain)
         T = self._kin.fk(q)
         R = T[:3, :3]
@@ -609,7 +649,7 @@ class Robot:
         else:
             vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
             turn = np.eye(3) + vx + vx @ vx * (1 / (1 + c))
-        R = turn @ R
+        R = W @ turn @ R
         if yaw is not None:
             closing = self.chain.gripper.closing_axis_tcp if self.chain.gripper is not None else (1.0, 0.0, 0.0)
             R = grip_logic.yaw_rotation(R, np.asarray(closing, float), float(yaw))
@@ -677,14 +717,14 @@ class Robot:
         self._check_reach(xyz, rpy)
         target = _pose(xyz, rpy)
         pc = PositionConstraint()
-        pc.header.frame_id, pc.link_name, pc.weight = self.chain.base, self.chain.tip, 1.0
+        pc.header.frame_id, pc.link_name, pc.weight = self.world, self.chain.tip, 1.0
         pc.constraint_region.primitives = [SolidPrimitive(type=SolidPrimitive.SPHERE, dimensions=[1e-3])]
         centre = Pose()
         centre.position = target.position
         centre.orientation.w = 1.0
         pc.constraint_region.primitive_poses = [centre]
         oc = OrientationConstraint()
-        oc.header.frame_id, oc.link_name, oc.weight = self.chain.base, self.chain.tip, 1.0
+        oc.header.frame_id, oc.link_name, oc.weight = self.world, self.chain.tip, 1.0
         oc.orientation = target.orientation
         oc.absolute_x_axis_tolerance = oc.absolute_y_axis_tolerance = oc.absolute_z_axis_tolerance = 1e-3
         self._plan_execute(Constraints(position_constraints=[pc], orientation_constraints=[oc]),
@@ -759,7 +799,7 @@ class Robot:
             rpy = self.tool_pose()[1]                    # keep the current orientation along the line
         self._check_reach(xyz, rpy)
         req = GetCartesianPath.Request()
-        req.header.frame_id = self.chain.base
+        req.header.frame_id = self.world
         req.group_name = GROUP
         req.link_name = self.chain.tip
         req.waypoints = [_pose(xyz, rpy)]
@@ -784,4 +824,100 @@ class Robot:
         if out.error_code.val != MoveItErrorCodes.SUCCESS:
             raise self._error(out.error_code.val, f"straight line to {_fmt(xyz)}")
         self._settle()
+        self._slip_check()
+
+    # --- mobile base ---------------------------------------------------------------------------
+    def _need_base(self):
+        if self.chain.mobile is None:
+            raise RobotError("This robot is bolted down: it has no mobile base to drive")
+
+    def base_pose(self) -> tuple:
+        """(x, y, yaw) of the base in the world (map)."""
+        self._need_base()
+        B = self._base_matrix()
+        return float(B[0, 3]), float(B[1, 3]), math.atan2(B[1, 0], B[0, 0])
+
+    def _cmd(self, v: float, w: float):
+        m = TwistStamped()
+        m.header.stamp = _node().get_clock().now().to_msg()
+        m.header.frame_id = self.chain.base
+        m.twist.linear.x, m.twist.angular.z = float(v), float(w)
+        self._cmd_vel.publish(m)
+
+    def _stop(self):
+        end = time.time() + 0.5   # zero for a moment: the controller ramps down, the base settles
+        while time.time() < end:
+            self._cmd(0.0, 0.0)
+            rclpy.spin_once(_node(), timeout_sec=0.05)
+
+    def drive(self, v: float, w: float, seconds: float):
+        """Drive at v m/s forward and w rad/s (left positive) for `seconds`, then stop. No path check."""
+        self._need_base()
+        end = time.time() + float(seconds)
+        try:
+            while time.time() < end:
+                self._cmd(v, w)
+                rclpy.spin_once(_node(), timeout_sec=0.05)
+        finally:
+            self._stop()
+        self._slip_check()
+
+    def _footprints(self) -> list[dict]:
+        """Each world object's outline on the floor (centre, half sizes, yaw) and its bottom height."""
+        req = GetPlanningScene.Request()
+        req.components.components = PlanningSceneComponents.WORLD_OBJECT_GEOMETRY
+        out = []
+        for co in _wait(self._get.call_async(req), 10).scene.world.collision_objects:
+            P = _pose_matrix(co.pose)
+            pts = []
+            for prim, pp in zip(co.primitives, co.primitive_poses):
+                M = P @ _pose_matrix(pp)
+                if prim.type == SolidPrimitive.BOX:
+                    h = np.asarray(prim.dimensions[:3]) / 2
+                else:                                                  # cylinder: (height, radius)
+                    h = np.array([prim.dimensions[1], prim.dimensions[1], prim.dimensions[0] / 2])
+                pts += [(M @ [sx * h[0], sy * h[1], sz * h[2], 1.0])[:3] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+            for mesh, mp in zip(co.meshes, co.mesh_poses):
+                M = P @ _pose_matrix(mp)
+                pts += [(M @ [v.x, v.y, v.z, 1.0])[:3] for v in mesh.vertices]
+            if not pts:
+                continue
+            pts = np.array(pts)
+            lo, hi = pts.min(axis=0), pts.max(axis=0)   # ponytail: world-aligned outline; a turned box reads a little larger
+            out.append({"name": co.id, "xy": tuple((lo[:2] + hi[:2]) / 2), "half": tuple((hi[:2] - lo[:2]) / 2),
+                        "yaw": 0.0, "z0": float(lo[2])})
+        return out
+
+    def drive_to(self, x: float, y: float, yaw: float | None = None, speed: float = 0.3):
+        """Drive the base so its frame ends at (x, y) in the world, facing `yaw` (radians; None: the way it
+        drove): turn toward the goal, drive straight, turn. Raises PathBlocked when an object is in the way of
+        the straight path (drive to a point beside it first), MotionError when the base gets stuck."""
+        self._need_base()
+        m = self.chain.mobile
+        start = self.base_pose()
+        target, final = drive_logic.plan(start, (x, y), yaw, m.center)
+        radius = drive_logic.reach(m.footprint, m.center)
+        name = drive_logic.blocker(drive_logic.pivot(start, m.center), target, radius, self._footprints(), m.height)
+        if name:
+            raise PathBlocked(f"'{name}' is in the way of the base from {_fmt(start[:2])} to {_fmt((x, y))} "
+                              f"(it needs a {2 * radius:.2f} m wide clear path); drive to a point beside '{name}' first")
+        phase, history, t0 = "face", [], time.time()
+        try:
+            while phase != "done":
+                pose = self.base_pose()
+                v, w, nxt = drive_logic.command(phase, pose, target, final, m.center, speed)
+                if nxt != phase:
+                    history = []
+                phase = nxt
+                now = time.time()
+                history.append((now, drive_logic.remaining(phase, pose, target, final, m.center)))
+                if drive_logic.stuck(history, now):
+                    raise MotionError(f"The base is stuck at {_fmt(pose[:2])}: no progress for 2 s ({phase}). A wheel may be "
+                                      "blocked, it may be pushing against something, or the load is too heavy for the wheel motors")
+                if now - t0 > 120:
+                    raise MotionError(f"drive_to {_fmt((x, y))} did not finish in 120 s")
+                self._cmd(v, w)
+                rclpy.spin_once(_node(), timeout_sec=0.05)
+        finally:
+            self._stop()
         self._slip_check()

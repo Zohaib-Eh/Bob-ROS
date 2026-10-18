@@ -67,6 +67,31 @@ class GripperInfo:
 
 
 @dataclass
+class MobileInfo:
+    """A wheeled base (the URDF's <mobile_base> tag): wheel joint names per side and the drive's sizes, m."""
+    drive: str
+    left: list[str]
+    right: list[str]
+    radius: float
+    separation: float
+    ground: float                 # z of the floor in the base frame
+    footprint: tuple              # (xmin, ymin, xmax, ymax) of the base and wheels, base frame
+    casters: list = None
+    center: tuple = (0.0, 0.0)    # (x, y) it turns about in place (the axles' middle), base frame
+    height: float = 0.0           # m from the floor to the top of the base and wheels
+
+
+def _mobile_info(tag) -> "MobileInfo | None":
+    if tag is None:
+        return None
+    casters = [tuple(float(v) for v in c.split()) for c in (tag.get("casters") or "").split(";") if c.strip()]
+    return MobileInfo(tag.get("drive", "diff"), tag.get("left", "").split(), tag.get("right", "").split(),
+                      float(tag.get("wheel_radius")), float(tag.get("wheel_separation")), float(tag.get("ground", 0)),
+                      tuple(float(v) for v in tag.get("footprint", "0 0 0 0").split()), casters,
+                      tuple(float(v) for v in tag.get("center", "0 0").split()), float(tag.get("height", 0)))
+
+
+@dataclass
 class Chain:
     robot: str
     base: str
@@ -74,6 +99,7 @@ class Chain:
     joints: list[ChainJoint]
     links: dict[str, tuple[int, np.ndarray]]  # link -> (segment, pose in segment frame)
     gripper: GripperInfo | None = None
+    mobile: MobileInfo | None = None
 
 
 def parse_chain(urdf_text: str) -> Chain:
@@ -91,8 +117,9 @@ def parse_chain(urdf_text: str) -> Chain:
         raise UnsupportedRobot(f"URDF has {len(roots)} root links; expected one.")
 
     fingers = _finger_pair(joints, children)   # gripper fingers count as fixed for the arm
+    mobile = _mobile_info(root.find("mobile_base"))   # and so do a mobile base's wheels
 
-    finger_names = {*fingers, *fingers.values()}
+    finger_names = {*fingers, *fingers.values(), *(mobile.left + mobile.right if mobile else [])}
 
     def moving(j) -> bool:
         return j.get("type") != "fixed" and j.get("name") not in finger_names
@@ -102,7 +129,7 @@ def parse_chain(urdf_text: str) -> Chain:
 
     wheels = [j for j in joints
               if j.get("type") == "continuous" and not moving_below(j.find("child").get("link"))]
-    if len(wheels) >= 2:
+    if len(wheels) >= 2 and mobile is None:
         raise UnsupportedRobot(
             f"Joint '{wheels[0].get('name')}' looks like a wheel; mobile robots are not supported yet.")
     for j in joints:
@@ -115,7 +142,8 @@ def parse_chain(urdf_text: str) -> Chain:
         raise UnsupportedRobot(
             f"Robot has {len(leaves)} moving branches; only single-arm robots are supported yet.")
     if not leaves:
-        raise UnsupportedRobot("Robot has no moving joints.")
+        raise UnsupportedRobot("A mobile base without an arm isn't supported yet." if mobile
+                               else "Robot has no moving joints.")
 
     chain_joints: list[ChainJoint] = []
     link_poses: dict[str, tuple[int, np.ndarray]] = {}
@@ -146,7 +174,7 @@ def parse_chain(urdf_text: str) -> Chain:
     walk(roots[0], 0, np.eye(4))
     tip = "tcp" if "tcp" in link_poses else chain_joints[-1].child
     gripper = _gripper_info(fingers, joints, link_poses, tip, root.find("gripper")) if fingers else None
-    return Chain(root.get("name"), roots[0], tip, chain_joints, link_poses, gripper)
+    return Chain(root.get("name"), roots[0], tip, chain_joints, link_poses, gripper, mobile)
 
 
 def _finger_pair(joints, children) -> dict[str, str]:

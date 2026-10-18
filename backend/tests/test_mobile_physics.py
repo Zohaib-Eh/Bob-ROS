@@ -114,6 +114,17 @@ def test_a_heavy_reach_tips_a_base_with_no_caster_in_front():
     assert _base(m, d)[4] > 0.1        # pitched forward onto its nose: physics, not a bolted-down base
 
 
+def test_the_apps_physics_check_holds_still_and_drives_straight():
+    from app.sim.check import physics_check
+    links, joints, bodies, g, mobile = mobile_arm()
+    r = physics_check("mobi", links, joints, bodies, g, mobile)
+    assert r["ok"], r
+    assert "Drives straight" in r["message"]
+    weak = [j.model_copy(update={"max_effort": 0.05}) if j.id.startswith("j_wheel") else j for j in joints]
+    r = physics_check("mobi", links, weak, bodies, g, mobile)
+    assert not r["ok"] and r["kind"] == "drive" and "wheel" in r["message"]
+
+
 def test_a_box_set_on_the_chassis_rests_on_it(tmp_path, mobi):   # the chassis hull is off the floor (contype 2), not off objects
     import importlib.util
     from pathlib import Path

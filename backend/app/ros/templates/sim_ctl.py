@@ -84,13 +84,14 @@ def plugins_yaml() -> str:
         "glue": {"type": "cad_to_urdf_glue/GluePlugin"}}}}})
 
 
-def controller_names(has_gripper: bool) -> list[str]:
-    return ["arm_controller", "gripper_controller"] if has_gripper else ["arm_controller"]
+def controller_names(has_gripper: bool, mobile: bool = False) -> list[str]:
+    return ["arm_controller"] + (["gripper_controller"] if has_gripper else []) + (["base_controller"] if mobile else [])
 
 
-def _has_gripper() -> bool:
+def _controllers() -> list[str]:
     robot = next(p.name[:-len("_moveit_config")] for p in WS_SRC.glob("*_moveit_config"))
-    return __import__(f"{robot}_kinematics").load().chain.gripper is not None
+    chain = __import__(f"{robot}_kinematics").load().chain
+    return controller_names(chain.gripper is not None, chain.mobile is not None)
 
 
 def _robot_and_tool():
@@ -142,7 +143,7 @@ def _start_sim(robot: str):
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     (SIM / "control.pid").write_text(str(p.pid))
     try:
-        r = _ros(f"ros2 run controller_manager spawner joint_state_broadcaster {' '.join(controller_names(_has_gripper()))} "
+        r = _ros(f"ros2 run controller_manager spawner joint_state_broadcaster {' '.join(_controllers())} "
                  f"--controller-manager-timeout {int(RESTART_TIMEOUT)}", RESTART_TIMEOUT + 10)
         ok = r.returncode == 0
     except subprocess.TimeoutExpired:
@@ -196,11 +197,11 @@ def _reset_sim():
                       SwitchController.Request(strictness=SwitchController.Request.STRICT, **kw), "switch controllers")
             if not r.ok:
                 raise SimError(f"Could not switch the arm controller ({kw})")
-        switch(deactivate_controllers=controller_names(_has_gripper()))
+        switch(deactivate_controllers=_controllers())
         r = _call(node, ResetWorld, f"/{NODE}/reset_world", ResetWorld.Request(), "reset the simulation")
         if not r.success:
             raise SimError(f"Could not reset the simulation: {r.message}")
-        switch(activate_controllers=controller_names(_has_gripper()))
+        switch(activate_controllers=_controllers())
     finally:
         node.destroy_node()
 

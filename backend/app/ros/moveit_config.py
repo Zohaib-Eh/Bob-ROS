@@ -9,6 +9,9 @@ from pathlib import Path
 from app.export.urdf_writer import cmakelists, package_xml
 
 from .chain import MAX_ACCELERATION, MAX_VELOCITY, Chain, home, parse_chain
+
+LIFT = 0.0005   # m: as app.sim.mjcf.LIFT (this package needs no MuJoCo)
+BASE_JOINTS = ["base_x", "base_y", "base_z", "base_yaw", "base_pitch", "base_roll"]   # app.sim.mjcf.BASE_JOINTS
 from .collisions import disabled_pairs, link_meshes
 
 ROS_NAME = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
@@ -62,8 +65,10 @@ def _srdf(chain: Chain, robot: str, pairs, note: str) -> str:
     state = "\n".join(f'    <joint name="{j.name}" value="{v!r}"/>' for j, v in zip(chain.joints, home(chain)))
     skips = "\n".join(f'  <disable_collisions link1="{a}" link2="{b}" reason="{r}"/>'
                       for (a, b), r in sorted(pairs.items()))
+    world = (f'\n  <virtual_joint name="world_joint" type="floating" parent_frame="map" child_link="{chain.base}"/>'
+             if chain.mobile else "")
     return f"""<?xml version="1.0"?>
-{note}<robot name="{robot}">
+{note}<robot name="{robot}">{world}
   <group name="arm">
     <chain base_link="{chain.base}" tip_link="{chain.tip}"/>
   </group>
@@ -126,10 +131,40 @@ gripper_controller:
 """)
 
 
-def _controllers_yaml(names: str, note: str, gripper=None) -> str:
+def _base_controller_yaml(chain: Chain) -> tuple[str, str]:
+    """(controller_manager entry, parameters) for a mobile base's wheels; empty without one."""
+    m = chain.mobile
+    if m is None:
+        return "", ""
+    return ("""    base_controller:
+      type: diff_drive_controller/DiffDriveController
+""", f"""
+base_controller:
+  ros__parameters:
+    left_wheel_names: [{", ".join(m.left)}]
+    right_wheel_names: [{", ".join(m.right)}]
+    wheel_separation: {m.separation!r}
+    wheel_radius: {m.radius!r}
+    base_frame_id: {chain.base}
+    odom_frame_id: odom
+    enable_odom_tf: true
+    publish_rate: 50.0
+    cmd_vel_timeout: 0.5
+    linear.x.max_velocity: 1.0
+    linear.x.min_velocity: -1.0
+    linear.x.max_acceleration: 1.0
+    angular.z.max_velocity: 2.0
+    angular.z.min_velocity: -2.0
+    angular.z.max_acceleration: 3.0
+""")
+
+
+def _controllers_yaml(names: str, note: str, gripper=None, chain: Chain | None = None) -> str:
     # 0.1 rad (~6°) of lag aborts a move; 0.02 rad is the accuracy a move must end within
     per_joint = "\n".join(f"      {n}:\n        trajectory: 0.1\n        goal: 0.02" for n in names.split(", "))
     g_entry, g_params = _gripper_controller_yaml(gripper)
+    b_entry, b_params = _base_controller_yaml(chain) if chain is not None else ("", "")
+    g_entry, g_params = g_entry + b_entry, g_params + b_params
     return note + f"""controller_manager:
   ros__parameters:
     update_rate: 100
@@ -199,6 +234,22 @@ def _ros2_control_xacro(chain: Chain, robot: str, note: str) -> str:
         <state_interface name="velocity"/>
         <state_interface name="effort"/>
       </joint>""" for j in chain.joints)
+    mock_params = ""
+    if chain.mobile is not None:
+        joints += "".join(f"""
+      <joint name="{w}">
+        <command_interface name="velocity"/>
+        <state_interface name="position"/>
+        <state_interface name="velocity"/>
+      </joint>""" for w in chain.mobile.left + chain.mobile.right)
+        # where the base truly is: MuJoCo's base joints, read only (the localization node uses them)
+        joints += """
+      <xacro:if value="${hardware == 'mujoco'}">""" + "".join(f"""
+        <joint name="{b}">
+          <state_interface name="position"/>
+        </joint>""" for b in BASE_JOINTS) + """
+      </xacro:if>"""
+        mock_params = '\n          <param name="calculate_dynamics">true</param>'   # mock wheels turn at their command
     if chain.gripper is not None:
         g = chain.gripper
         joints += f"""
@@ -222,7 +273,7 @@ def _ros2_control_xacro(chain: Chain, robot: str, note: str) -> str:
       <hardware>
         <!-- mock: joints are wherever they are told to be. mujoco: physics on scene.xml (sim_ctl writes it). -->
         <xacro:if value="${{hardware == 'mock'}}">
-          <plugin>mock_components/GenericSystem</plugin>
+          <plugin>mock_components/GenericSystem</plugin>{mock_params}
         </xacro:if>
         <xacro:if value="${{hardware == 'mujoco'}}">
           <plugin>mujoco_ros2_control/MujocoSystemInterface</plugin>
@@ -251,13 +302,22 @@ def _urdf_xacro(robot: str, note: str) -> str:
 """
 
 
-def _launch(robot: str, note: str, gripper: bool = False) -> str:
+def _launch(robot: str, note: str, gripper: bool = False, chain: Chain | None = None) -> str:
+    mobile = chain is not None and chain.mobile is not None
+    z0 = -chain.mobile.ground + LIFT if mobile else 0.0
+    spawn = ', "gripper_controller"' if gripper else ''
+    spawn += ', "base_controller"' if mobile else ''
+    loc = (f"""
+    # a mobile base: map -> odom, so map -> {chain.base} is where the base truly is (see localization.py)
+    nodes.append(ExecuteProcess(cmd=["python3", str(cfg.package_path / "launch" / "localization.py"), "{chain.base}", "{z0!r}"],
+                                output="screen"))""" if mobile else "")
     return note + f'''"""MoveIt headless: robot_state_publisher, move_group, and on mock hardware ros2_control too.
 Hardware comes from /tmp/sim/hardware (written by sim_ctl). Under mujoco, sim_ctl runs the
 control node itself so it can restart the simulation without restarting MoveIt."""
 from pathlib import Path
 
 from launch import LaunchDescription
+from launch.actions import ExecuteProcess
 from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
 
@@ -275,7 +335,7 @@ def generate_launch_description():
         nodes += [Node(package="controller_manager", executable="ros2_control_node",
                        parameters=[controllers], remappings=[("~/robot_description", "/robot_description")]),
                   Node(package="controller_manager", executable="spawner",
-                       arguments=["joint_state_broadcaster", "arm_controller"{', "gripper_controller"' if gripper else ''}])]
+                       arguments=["joint_state_broadcaster", "arm_controller"{spawn}])]{loc}
     return LaunchDescription(nodes)
 '''
 
@@ -284,7 +344,8 @@ def _package_xml(robot: str, note: str) -> str:
     deps = [robot, "moveit_ros_move_group", "moveit_configs_utils", "moveit_kinematics",
             "moveit_planners_ompl", "moveit_simple_controller_manager", "trac_ik_kinematics_plugin",
             "controller_manager", "joint_state_broadcaster", "joint_trajectory_controller",
-            "robot_state_publisher", "xacro", "launch", "launch_ros", "mujoco_ros2_control", "cad_to_urdf_glue"]
+            "robot_state_publisher", "xacro", "launch", "launch_ros", "mujoco_ros2_control", "cad_to_urdf_glue",
+            "diff_drive_controller", "tf2_ros"]
     dep_lines = "\n".join(f"  <exec_depend>{d}</exec_depend>" for d in deps)
     return f"""<?xml version="1.0"?>
 {note}<package format="3">
@@ -310,7 +371,7 @@ def moveit_files(chain: Chain, robot: str, source: str, pairs) -> dict[str, str]
         f"config/{robot}.srdf": _srdf(chain, robot, pairs, x),
         "config/kinematics.yaml": _kinematics_yaml(robot, h),
         "config/joint_limits.yaml": _joint_limits_yaml(chain, h),
-        "config/ros2_controllers.yaml": _controllers_yaml(names, h, chain.gripper),
+        "config/ros2_controllers.yaml": _controllers_yaml(names, h, chain.gripper, chain),
         "config/moveit_controllers.yaml": _moveit_controllers_yaml(names, h),
         "config/ompl_planning.yaml": _ompl_yaml(h),
         "config/initial_positions.yaml": h + f"initial_positions:\n{initial}\n",
@@ -323,7 +384,9 @@ cartesian_limits:
 """,
         f"config/{robot}.ros2_control.xacro": _ros2_control_xacro(chain, robot, x),
         f"config/{robot}.urdf.xacro": _urdf_xacro(robot, x),
-        "launch/demo.launch.py": _launch(robot, h, chain.gripper is not None),
+        "launch/demo.launch.py": _launch(robot, h, chain.gripper is not None, chain),
+        **({"launch/localization.py": h + (Path(__file__).parent / "templates" / "localization.py").read_text(encoding="utf-8")}
+           if chain.mobile else {}),
         "CMakeLists.txt": h + f"""cmake_minimum_required(VERSION 3.8)
 project({robot}_moveit_config)
 find_package(ament_cmake REQUIRED)

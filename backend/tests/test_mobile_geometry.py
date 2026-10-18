@@ -27,6 +27,7 @@ def test_drive_info_reads_sides_size_ground_and_the_caster():
     assert (x, y) == pytest.approx((-0.2, 0.0), abs=0.01) and z - r == pytest.approx(d.ground, abs=1e-6)
     lo, hi = np.array(d.footprint[:2]), np.array(d.footprint[2:])   # chassis and wheels, not the arm
     assert lo == pytest.approx((-0.25, -0.27), abs=0.01) and hi == pytest.approx((0.25, 0.27), abs=0.01)
+    assert d.center == pytest.approx((0.1, 0.0)) and d.height == pytest.approx(0.24, abs=1e-3)   # the arm's bolted-on base box is part of it
 
 
 def test_skid_steer_and_the_mistakes_a_user_can_make():

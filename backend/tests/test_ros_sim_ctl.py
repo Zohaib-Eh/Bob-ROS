@@ -94,6 +94,7 @@ def test_plugins_file_loads_pose_publisher_and_glue():
 def test_controllers_include_the_gripper_only_when_there_is_one():
     assert sim_ctl.controller_names(False) == ["arm_controller"]
     assert sim_ctl.controller_names(True) == ["arm_controller", "gripper_controller"]
+    assert sim_ctl.controller_names(True, mobile=True) == ["arm_controller", "gripper_controller", "base_controller"]
 
 
 def _fake_sim(monkeypatch, tmp_path, waits):

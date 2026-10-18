@@ -33,6 +33,8 @@ class Drive:
     wheels: dict = field(default_factory=dict)    # joint id -> WheelFit
     casters: list = field(default_factory=list)   # [(x, y, z, r)]: spheres resting on the floor
     footprint: tuple = (0.0, 0.0, 0.0, 0.0)       # (xmin, ymin, xmax, ymax) of the base and wheels
+    center: tuple = (0.0, 0.0)                    # (x, y) the base turns about in place: the axles' middle
+    height: float = 0.0                           # m from the floor to the top of the base and wheels
 
 
 def fit_wheel(vertices, axis, point) -> WheelFit:
@@ -107,9 +109,12 @@ def drive_info(links: list[Link], joints: list[Joint], bodies_by_link: dict[str,
     base_links = _fixed_to_root(root, joints, {by_id[i].child_link_id for i in wheel_ids})
     base_pts = np.array([v for l in base_links for b in bodies_by_link.get(l, []) for v in b.vertices], float).reshape(-1, 3)
     wheel_pts = np.array([v for i in wheel_ids for b in bodies_by_link.get(by_id[i].child_link_id, []) for v in b.vertices], float)
-    plan = np.vstack([base_pts, wheel_pts])[:, :2]
+    allp = np.vstack([base_pts, wheel_pts])
+    plan = allp[:, :2]
+    mid = np.mean([f.center[:2] for f in fits.values()], axis=0)
     per_side = max(len(mobile.left_joint_ids), len(mobile.right_joint_ids))
     return Drive(drive="diff" if per_side == 1 else "skid", left=list(mobile.left_joint_ids), right=list(mobile.right_joint_ids),
                  radius=float(np.mean([f.radius for f in fits.values()])), separation=float(ly - ry), ground=float(ground),
                  wheels=fits, casters=_casters(base_pts, ground) if len(base_pts) else [],
-                 footprint=(*map(float, plan.min(axis=0)), *map(float, plan.max(axis=0))))
+                 footprint=(*map(float, plan.min(axis=0)), *map(float, plan.max(axis=0))),
+                 center=(float(mid[0]), float(mid[1])), height=float(allp[:, 2].max() - ground))

@@ -152,6 +152,13 @@ def mobile_arm(name: str = "mobi", arm: bool = True, skid: bool = False):
     return links, joints, bodies, g, Mobile(left_joint_ids=left, right_joint_ids=right)
 
 
+def mobile_arm_zip(tmp_path: Path, name: str = "mobi") -> Path:
+    links, joints, bodies, g, mobile = mobile_arm(name)
+    path = tmp_path / f"{name}.zip"
+    path.write_bytes(export_package(name, links, joints, bodies, gripper=g, mobile=mobile))
+    return path
+
+
 def six_axis_with_gripper_zip(tmp_path: Path, name: str = "sixg") -> Path:
     links, joints, bodies, g = six_axis_with_gripper(name)
     path = tmp_path / f"{name}.zip"
