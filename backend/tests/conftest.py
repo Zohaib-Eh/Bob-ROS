@@ -221,3 +221,10 @@ def irb1300_zip(tmp_path_factory):
     s = run.score_model(exp, _IRB_STEP, robot_name="irb1300", zip_out=out)
     assert s["export_ok"], s.get("export_error")
     return out
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _convex_cache_in_tmp(tmp_path_factory):
+    """The finger decomposition cache (app.export.gripper.CACHE_DIR) stays out of the user's ~/.cache."""
+    from app.export import gripper
+    gripper.CACHE_DIR = tmp_path_factory.mktemp("convex")

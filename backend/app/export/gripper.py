@@ -2,6 +2,10 @@
 and convex collision pieces for the gripper's links (MuJoCo collides a mesh as its convex hull, which
 would fill an L-shaped finger's hook)."""
 import functools
+import hashlib
+import json
+import os
+from pathlib import Path
 
 import numpy as np
 
@@ -93,13 +97,43 @@ def convex_pieces(vertices, triangles, max_pieces: int = 8) -> list[tuple[list, 
     return _pieces(v.tobytes(), f.tobytes(), max_pieces)
 
 
-@functools.lru_cache(maxsize=32)   # ponytail: per process; a disk cache if restarts make exports slow
+# Pieces per finger mesh on disk: each physics check runs in a fresh child process, which an in-memory
+# cache doesn't survive. The version part of the key changes whenever the decomposition does.
+CACHE_DIR = Path.home() / ".cache" / "cad-to-urdf" / "convex"
+_CACHE_VERSION = "2"
+
+
+@functools.lru_cache(maxsize=32)
 def _pieces(vertex_bytes: bytes, triangle_bytes: bytes, max_pieces: int):
+    key = hashlib.sha1(vertex_bytes + triangle_bytes + f"|{max_pieces}|{_CACHE_VERSION}".encode()).hexdigest()
+    path = CACHE_DIR / f"{key}.json"
+    try:
+        return [tuple(p) for p in json.loads(path.read_text())]
+    except (OSError, ValueError):
+        pass
+    parts = _decompose(np.frombuffer(vertex_bytes, float).reshape(-1, 3),
+                       np.frombuffer(triangle_bytes, np.int64).reshape(-1, 3), max_pieces)
+    try:   # a cache that can't be written only costs time
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(parts))
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    return parts
+
+
+def _decompose(vertices, triangles, max_pieces):
     import coacd
     coacd.set_log_level("error")
     import trimesh
-    vertices = np.frombuffer(vertex_bytes, float).reshape(-1, 3)
-    triangles = np.frombuffer(triangle_bytes, np.int64).reshape(-1, 3)
+    # CoACD cuts along axis-aligned planes, so a finger turned on the robot takes it ~7x longer (AirTAC
+    # HFK40 jaw: 36 s mounted, 5 s in its own frame): split in the finger's principal axes, then put back.
+    centre = vertices.mean(axis=0)
+    axes = np.linalg.svd(vertices - centre, full_matrices=False)[2]   # rows: principal directions
+    if np.linalg.det(axes) < 0:   # a proper rotation, not a mirror
+        axes[2] = -axes[2]
+    vertices = (vertices - centre) @ axes.T
     # Light settings: ~5 s for a real CAD jaw (AirTAC HFK40, tapped holes and chamfers; ~8-18 s at
     # resolution 400 / 20 iterations, ~33 s for a simple finger with the defaults), pieces within ~6%
     # of the solid's volume. CoACD's remesh step (needed only for leaky meshes) inflates a closed
@@ -108,7 +142,7 @@ def _pieces(vertex_bytes: bytes, triangle_bytes: bytes, max_pieces: int):
     parts = coacd.run_coacd(coacd.Mesh(vertices, triangles),
                             threshold=0.1, max_convex_hull=max_pieces, preprocess_mode="off" if closed else "on",
                             resolution=200, mcts_iterations=10, mcts_nodes=10, mcts_max_depth=2)
-    return [(v.tolist(), f.tolist()) for v, f in parts]
+    return [((np.asarray(v) @ axes + centre).tolist(), f.tolist()) for v, f in parts]
 
 
 def checked(gripper: Gripper, joints: list[Joint]) -> tuple[Joint, Joint]:

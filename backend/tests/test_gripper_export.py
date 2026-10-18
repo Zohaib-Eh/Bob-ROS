@@ -125,14 +125,33 @@ def test_only_the_fingers_are_split_into_convex_pieces():   # a real gripper bod
     assert not any(n.startswith("sixg/meshes/gbase_c") for n in names)
 
 
-def test_the_same_finger_is_split_once(monkeypatch):   # Simulate and Program re-export the same fingers
+def test_the_same_finger_is_split_once_even_in_a_new_process(monkeypatch, tmp_path):
+    """Simulate and Program re-export the same fingers, each check in a fresh child process."""
     import coacd
+    from app.export import gripper
+    monkeypatch.setattr(gripper, "CACHE_DIR", tmp_path)
     calls = []
     real = coacd.run_coacd
     monkeypatch.setattr(coacd, "run_coacd", lambda *a, **k: calls.append(1) or real(*a, **k))
     b = l_finger_body("cached", R=np.diag([1.0, -1.0, -1.0]))   # a mesh no other test has split
     first = convex_pieces(b.vertices, b.triangles)
+    gripper._pieces.cache_clear()                                 # what a new process starts with
     assert convex_pieces(b.vertices, b.triangles) == first and len(calls) == 1
+
+
+def test_a_finger_turned_on_the_robot_splits_into_pieces_where_it_is(monkeypatch, tmp_path):
+    """CoACD cuts along axis planes: a mounted, turned finger took it ~36 s instead of ~5 (AirTAC HFK40 on
+    the irb1300). It is split in its own frame, and the pieces put back where the finger is."""
+    from app.export import gripper
+    from scipy.spatial.transform import Rotation
+    monkeypatch.setattr(gripper, "CACHE_DIR", tmp_path)
+    R = Rotation.from_euler("xyz", [0.4, -0.7, 1.1]).as_matrix()
+    b = l_finger_body("turned", R=R, t=(0.3, -0.2, 0.9))
+    whole = trimesh.Trimesh(np.array(b.vertices), np.array(b.triangles))
+    pieces = [trimesh.Trimesh(np.array(v), np.array(f)) for v, f in convex_pieces(b.vertices, b.triangles)]
+    joined = trimesh.util.concatenate(pieces)
+    assert joined.bounds == pytest.approx(whole.bounds, abs=1e-4)   # CoACD hulls are a few um off
+    assert sum(m.volume for m in pieces) == pytest.approx(whole.volume, rel=0.1)
 
 
 def _bare_jaws():
