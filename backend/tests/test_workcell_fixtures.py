@@ -81,6 +81,17 @@ def test_a_box_set_on_an_imported_table_stays_on_it_in_mujoco(ws, tmp_path):
     assert z == pytest.approx(0.30 + 0.025, abs=0.003)        # on the top, not fallen through or onto the floor
 
 
+def test_the_editor_gets_a_fixtures_triangles_to_draw(ws):
+    client.post("/program/workcell/fixture", data={"robot": "bot", "scale": "1"},
+                files={"file": ("table.stl", table_stl(), "application/octet-stream")})
+    r = client.get("/program/workcell/mesh", params={"robot": "bot", "file": "table.stl"})
+    assert r.status_code == 200
+    m = r.json()
+    assert len(m["triangles"]) == 60 and max(max(t) for t in m["triangles"]) < len(m["vertices"])   # 5 boxes x 12
+    assert client.get("/program/workcell/mesh", params={"robot": "bot", "file": "../x.stl"}).status_code == 422
+    assert client.get("/program/workcell/mesh", params={"robot": "bot", "file": "nope.stl"}).status_code == 404
+
+
 def test_read_stl_gives_the_mesh_back(tmp_path):
     p = tmp_path / "t.stl"
     p.write_bytes(table_stl())

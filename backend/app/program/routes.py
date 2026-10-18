@@ -294,6 +294,16 @@ def import_fixture(file: UploadFile, robot: str = Form(...), scale: float = Form
         raise HTTPException(422, str(exc))
 
 
+@router.get("/workcell/mesh")
+def get_fixture_mesh(robot: str, file: str) -> dict:
+    try:
+        return workcell.fixture_mesh(robot, file)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except FileNotFoundError:
+        raise HTTPException(404, f"No fixture mesh '{file}'.")
+
+
 @router.put("/workcell")
 def put_workcell(req: WorkcellBody) -> dict:
     try:

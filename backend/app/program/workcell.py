@@ -125,6 +125,18 @@ def import_fixture(robot: str, filename: str, data: bytes, scale: float) -> dict
     return read(robot)
 
 
+def fixture_mesh(robot: str, file: str) -> dict:
+    """{vertices, triangles} of a fixture's <name>.stl, for the editor's 3D view. FileNotFoundError if absent."""
+    import trimesh
+    if not _scene_module().STL_NAME.match(file or ""):
+        raise ValueError(f"'{file}' is not a fixture mesh name")
+    f = meshes(robot) / file
+    if not f.exists():
+        raise FileNotFoundError(f)
+    m = trimesh.load(str(f))
+    return {"vertices": m.vertices.tolist(), "triangles": m.faces.tolist()}
+
+
 def _urdf(robot: str) -> Path:
     return _src(robot) / robot / "urdf" / f"{robot}.urdf"
 
