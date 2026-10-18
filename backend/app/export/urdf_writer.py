@@ -12,7 +12,7 @@ import trimesh
 
 from scipy.spatial.transform import Rotation
 
-from app.export.gripper import DEFAULT_GRIP_FORCE, checked, convex_pieces, inward_joints, tcp_point
+from app.export.gripper import DEFAULT_GRIP_FORCE, checked, convex_pieces, inward_joints, jaw_gap, tcp_point
 from app.massprops.link_mass import compute_link_mass_properties
 from app.models import Body, Gripper, Joint, Link, PartWarning
 from app.sim.mjcf import build_mjcf, compile_mjcf
@@ -211,6 +211,9 @@ def _add_gripper(robot, gripper: Gripper, joints, names, links_by_id, frames, bo
     ET.SubElement(j, "child", {"link": "tcp"})
     o_xyz, o_rpy = _xyz_rpy(np.linalg.inv(frames[leader.parent_link_id]) @ T)
     ET.SubElement(j, "origin", {"xyz": o_xyz, "rpy": o_rpy})
+    # an extension tag (like <gazebo>; URDF parsers skip it): the jaw gap at q = 0, which travel alone can't give
+    gap = jaw_gap(verts(leader.child_link_id), verts(follower.child_link_id), leader.axis)
+    ET.SubElement(robot, "gripper", {"jaw_gap": f"{gap:.6f}"})
 
 
 def package_xml(robot_name: str) -> str:

@@ -328,12 +328,12 @@ class Robot:
         self._settle()
 
     def gripper_width(self):
-        """Opening left before the fingers are fully closed (m)."""
+        """Current gap between the fingers (m), at their narrowest point."""
         g = self.chain.gripper
         if g is None:
             raise GripError("This robot has no gripper")
         self._current()
-        return 2 * (g.upper - self._joints.get(g.leader, g.lower))
+        return g.width(self._joints.get(g.leader, g.lower))
 
     def _tool_matrix(self):
         return self._kin.fk(self._current())
@@ -367,11 +367,11 @@ class Robot:
         obj = next((o for o in _meta()["objects"] if o["name"] == name), None)
         if obj is not None:
             T = self._tool_matrix()
-            wide = grip_logic.fits(obj, T[:3, :3] @ np.asarray(g.closing_axis_tcp, float), 2 * (g.upper - g.lower))
+            wide = grip_logic.fits(obj, T[:3, :3] @ np.asarray(g.closing_axis_tcp, float), g.opening)
             if wide is not None:
-                raise GripError(f"'{name}' is {wide:.2f} m wide; the gripper opens to {2 * (g.upper - g.lower):.2f} m.")
+                raise GripError(f"'{name}' is {wide:.2f} m wide; the gripper opens to {g.opening:.2f} m.")
         self._gripper_cmd(g.upper)
-        if _PHYSICS and grip_logic.outcome(self.gripper_width(), 0.0) == "empty":
+        if _PHYSICS and grip_logic.outcome(self.gripper_width(), g.width(g.upper)) == "empty":
             where = f" ('{name}' is really at {_fmt(self.pose(name)[0])})" if name is not None else ""
             raise GripError(f"The gripper closed on nothing: no object between the fingers at {_fmt(self.tool_pose()[0])}."
                             + where)

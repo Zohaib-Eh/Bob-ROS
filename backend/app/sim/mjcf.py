@@ -14,6 +14,7 @@ HOLD_ERROR = 0.01  # rad (or m) of error at which a motor gives full torque: kp 
 STIFF = 0.1  # kp <= STIFF * inertia / timestep²: a stiffer motor on a light link oscillates instead of holding
 GRIP_ERROR = 0.002          # m short of target at which a finger motor pushes with its full grip force
 GRIP_FRICTION = "1 0.005 0.0001"
+GRIP_SPEED = 0.1            # m/s: a real gripper's closing speed (~50-150 mm/s), set by finger damping
 GRIP_SOLREF = "0.004 1"     # time constant 2 × timestep: the stiffest MuJoCo keeps stable
 GRIP_SOLIMP = "0.99 0.999 0.0001"   # near-rigid pads and coupling (defaults 0.9 0.95 0.001)
 _last_xml = threading.Lock()  # mj_saveLastXML saves MuJoCo's process-wide "last loaded model"
@@ -22,6 +23,7 @@ _last_xml = threading.Lock()  # mj_saveLastXML saves MuJoCo's process-wide "last
 def _urdf_for_mujoco(urdf: str) -> str:
     """Bare mesh names (assets are passed by name), keep every link as a body, keep inertias as given."""
     urdf = re.sub(r'filename="package://[^"]*/meshes/([^"]+)"', r'filename="\1"', urdf)
+    urdf = re.sub(r"<gripper\b[^>]*/>", "", urdf)   # our extension tag, not MuJoCo's
     ext = ('<mujoco><compiler strippath="true" fusestatic="false" discardvisual="true" '
            'balanceinertia="false"/></mujoco>')
     return re.sub(r"(<robot[^>]*>)", lambda m: m.group(1) + ext, urdf, count=1)
@@ -93,6 +95,9 @@ def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | 
                     for f in root.iter("joint"):
                         if f.get("name") in (name, grip["follower"]):
                             f.set("armature", repr(finger_armature))
+                            # leader and follower share it: full force against both dampers is GRIP_SPEED;
+                            # damping only resists motion, so the squeeze at rest keeps its full force
+                            f.set("damping", repr(e / (2 * GRIP_SPEED)))
                 ET.SubElement(act, "position", {
                     "name": f"{name}_motor", "joint": name, "kp": repr(kp), "dampratio": "1",
                     "forcelimited": "true", "forcerange": f"{-e:g} {e:g}"})

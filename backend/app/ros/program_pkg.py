@@ -64,9 +64,34 @@ GRIPPER_DOC = """## Gripper
 from robot import GripError   # the gripper caught nothing, an object doesn't fit, or a held object slipped
 r.release()               # open the fingers fully (lets go of what is held)
 r.grip(name)              # close on the object between the fingers; it moves with the tool from then on
-r.gripper_width()         # opening left before fully closed, metres
+r.gripper_width()         # current gap between the fingers, metres
 r.tool_down(yaw)          # tool pointing down, jaws closing along (cos yaw, sin yaw) in the base x-y plane
+```
+
+Example (pick and place):
+
+```python
+from robot import Robot
+
+SCENE = [dict(name="box", shape="box", size=(0.04, 0.04, 0.04), xyz=(0.5, 0.2, 0.02), mass=0.2)]
+
+r = Robot()
+down = r.tool_down(yaw=0.0)                # pointing down, jaws closing along x: across two faces of the box
+r.release()                                # open before going down around the box
+r.move_to((0.5, 0.2, 0.15), down)
+r.move_line((0.5, 0.2, 0.02), down)        # tool point (between the fingertips) at the box's middle
+r.grip("box")
+r.move_line((0.5, 0.2, 0.15), down)
+r.move_to((0.4, -0.3, 0.15), down)
+r.move_line((0.4, -0.3, 0.025), down)      # box just above the floor
+r.release()
+r.move_line((0.4, -0.3, 0.15), down)       # fingers clear before checking
+(x, y, z), _ = r.pose("box")               # check where it really landed
+assert abs(x - 0.4) < 0.01 and abs(y + 0.3) < 0.01, f"box landed at {(x, y, z)}"
+r.home()
 ```"""
+
+EXAMPLE_HEAD = "\n\nExample (pick and place):"
 
 RULES = """## Rules
 - Write exactly one program per task: `programs/task_NNN_<name>.py`, with the next free number and a short snake_case name saying what it does (2-4 words), e.g. `programs/task_007_stack_two_boxes.py`. For a follow-up, write a new file starting from the previous one.
@@ -116,13 +141,14 @@ def brief(chain: Chain, robot: str, workcell_text: str | None = None) -> str:
     if chain.gripper is not None:
         g = chain.gripper
         lines += ["", "Gripper: two fingers that squeeze an object to hold it (friction only, nothing is glued).",
-                  f"- Opens to {2 * (g.upper - g.lower) * 1000:.0f} mm; grip force {g.effort:g} N per finger.",
+                  f"- Opens to {g.opening * 1000:.0f} mm; grip force {g.effort:g} N per finger.",
                   f"- The tool point ({chain.tip}) is between the fingertips: move_to / move_line place it, not the flange.",
                   "- To pick: r.release() to open, approach from above with r.tool_down(yaw=...) so the jaws close across",
                   "  two opposite faces (yaw = the object's yaw, or that + pi/2), lower so the object sits between the",
                   "  fingertips, r.grip(name), then lift. r.release() lets go; heavy or smooth objects can slip."]
     rules = RULES.replace("__MAX_RUNS__", str(MAX_RUNS)).replace("__ROBOT__", robot)
-    api = API_DOC + ("\n\n" + GRIPPER_DOC if chain.gripper is not None else "")
+    # with a gripper, its own pick example replaces the glue one (attach 5 mm above the box)
+    api = API_DOC if chain.gripper is None else API_DOC.split(EXAMPLE_HEAD)[0] + "\n\n" + GRIPPER_DOC
     return "\n".join(lines + ["", api, "", rules]) + "\n"
 
 

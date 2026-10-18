@@ -66,6 +66,16 @@ def test_follower_has_no_motor_and_mirrors_the_leader():
     assert _q(m, d, "gfr_joint") == pytest.approx(_q(m, d, "gfl_joint"), abs=1e-3)
 
 
+def test_fingers_close_at_a_real_grippers_speed():   # review: saturated motors slammed shut at ~1-2 m/s
+    m, d = _scene()
+    fl, v = _act(m, "gfl_joint"), m.jnt_dofadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "gfl_joint")]
+    peak = 0.0
+    for _ in range(200):
+        _run(m, d, 0.002, {fl: 0.02})
+        peak = max(peak, abs(d.qvel[v]))
+    assert 0.03 < peak < 0.15
+
+
 def test_fingers_stay_mirrored_while_squeezing_a_box():   # Task 1 finding: the coupling was soft
     m, d = _scene(box_mass=0.2)
     _run(m, d, 1.5, {_act(m, "gfl_joint"): 0.025})

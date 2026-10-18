@@ -44,6 +44,12 @@ def tcp_point(base_vertices, finger_a_vertices, finger_b_vertices, offset_m: flo
     return tuple(mid + axis * reach), tuple(axis)
 
 
+def jaw_gap(leader_vertices, follower_vertices, closing) -> float:
+    """Narrowest gap between the fingers along the leader's (inward) closing direction, as modelled."""
+    c = _unit(np.asarray(closing, float))
+    return float((np.asarray(follower_vertices, float) @ c).min() - (np.asarray(leader_vertices, float) @ c).max())
+
+
 def convex_pieces(vertices, triangles, max_pieces: int = 8) -> list[tuple[list, list]]:
     """The mesh split into convex parts (CoACD), each as (vertices, triangles)."""
     import coacd

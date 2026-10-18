@@ -53,6 +53,16 @@ class GripperInfo:
     upper: float
     effort: float
     closing_axis_tcp: np.ndarray   # the leader's closing direction in the tip (tcp) frame
+    jaw_gap: float                 # m between the fingers at q = 0 (narrowest point, as modelled)
+
+    @property
+    def opening(self) -> float:
+        """Widest the jaws open (m): fingers at their open limit."""
+        return self.width(self.lower)
+
+    def width(self, q: float) -> float:
+        """Gap between the fingers (m) with the leader at q (the follower mirrors it)."""
+        return self.jaw_gap - 2 * q
 
 
 @dataclass
@@ -134,7 +144,7 @@ def parse_chain(urdf_text: str) -> Chain:
 
     walk(roots[0], 0, np.eye(4))
     tip = "tcp" if "tcp" in link_poses else chain_joints[-1].child
-    gripper = _gripper_info(fingers, joints, link_poses, tip) if fingers else None
+    gripper = _gripper_info(fingers, joints, link_poses, tip, root.find("gripper")) if fingers else None
     return Chain(root.get("name"), roots[0], tip, chain_joints, link_poses, gripper)
 
 
@@ -152,7 +162,7 @@ def _finger_pair(joints, children) -> dict[str, str]:
     return {}
 
 
-def _gripper_info(fingers, joints, link_poses, tip) -> GripperInfo:
+def _gripper_info(fingers, joints, link_poses, tip, tag=None) -> GripperInfo:
     leader_name, follower_name = next(iter(fingers.items()))
     j = next(j for j in joints if j.get("name") == leader_name)
     base = j.find("parent").get("link")
@@ -163,8 +173,10 @@ def _gripper_info(fingers, joints, link_poses, tip) -> GripperInfo:
     _, T_tip = link_poses[tip]
     R_joint = (T_base @ origin_matrix(j.find("origin")))[:3, :3]   # base and tip share the last segment
     closing = T_tip[:3, :3].T @ (R_joint @ (axis / np.linalg.norm(axis)))
-    return GripperInfo(leader_name, follower_name, base, float(lim.get("lower")), float(lim.get("upper")),
-                       float(lim.get("effort", 0)), closing)
+    lower, upper = float(lim.get("lower")), float(lim.get("upper"))
+    # an older package has no <gripper jaw_gap>: assume the jaws just touch when fully closed
+    gap = float(tag.get("jaw_gap")) if tag is not None and tag.get("jaw_gap") else 2 * upper
+    return GripperInfo(leader_name, follower_name, base, lower, upper, float(lim.get("effort", 0)), closing, gap)
 
 
 def home(chain: Chain) -> list[float]:

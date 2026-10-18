@@ -118,6 +118,8 @@ def test_six_with_gripper_is_a_six_joint_arm_with_tip_tcp_and_a_gripper(tmp_path
     g = c.gripper
     assert (g.leader, g.follower, g.base) == ("gfl_joint", "gfr_joint", "gbase")
     assert (g.lower, g.upper, g.effort) == pytest.approx((0.0, 0.025, 40.0))
+    assert g.jaw_gap == pytest.approx(0.042, abs=1e-6)   # hook tips as modelled (fully open)
+    assert g.opening == pytest.approx(0.042, abs=1e-6) and g.width(0.01) == pytest.approx(0.022, abs=1e-6)
     # in the tcp frame the leader closes along +x (tcp_joint puts x on the leader's closing direction)
     assert g.closing_axis_tcp == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)
     assert "tcp" in c.links and "gfl" in c.links
@@ -140,6 +142,7 @@ def test_mimic_finger_pair_is_the_gripper_even_without_a_tcp_link():
                   links=("base", "a", "b", "c"))
     c = parse_chain(urdf)
     assert [j.name for j in c.joints] == ["j1"] and c.tip == "a" and c.gripper.leader == "f1"
+    assert c.gripper.jaw_gap == pytest.approx(0.04)   # no <gripper jaw_gap>: an older package, travel only
 
 
 def test_robot_without_gripper_parses_as_before(tmp_path):   # Review Focus 5
