@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DEFAULT_GRIP_FORCE, gripperIssues, jawGap } from "../model/gripper";
+import { gripSummary, gripperIssues, gripperWarnings } from "../model/gripper";
 import type { Ctx } from "./ctx";
 import Info from "./Info";
 
@@ -18,8 +18,7 @@ export default function GripperCard({ ctx }: { ctx: Ctx }) {
     dispatch({ type: "setGripper", gripper: next.length === 2 ? { leader: next[0], follower: next[1], tcp_offset: g?.tcp_offset ?? 0 } : null });
   };
   const leader = g && model.joints.find((j) => j.id === g.leader);
-  const issues = g ? gripperIssues(model, g) : [];
-  const mm = (m: number) => `${Math.round(m * 1000)} mm`;
+  const issues = g ? [...gripperIssues(model, g), ...gripperWarnings(model, g)] : [];
 
   return (
     <div className="card" data-testid="gripper">
@@ -33,10 +32,7 @@ export default function GripperCard({ ctx }: { ctx: Ctx }) {
       ))}
       {g && leader && (
         <>
-          <p data-testid="gripper-summary">
-            {`Jaws ${mm(jawGap(model, g))} apart as modelled · travel ${mm((leader.limit_upper ?? 0) - (leader.limit_lower ?? 0))} per finger`
-              + ` · grip force ${leader.max_effort ?? DEFAULT_GRIP_FORCE} N per finger`}
-          </p>
+          <p data-testid="gripper-summary">{gripSummary(model, g)}</p>
           <label className="field-row">
             <span>Tool point offset (mm)</span>
             <input type="number" step={1} aria-label="Tool point offset (mm)" value={Math.round(g.tcp_offset * 1000)}

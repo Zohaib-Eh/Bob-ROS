@@ -32,7 +32,7 @@ describe("GripperCard", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /fr/ }));
     expect(ctx.model.gripper).toEqual({ leader: "jl", follower: "jr", tcp_offset: 0 });
     expect(screen.getByTestId("gripper-summary").textContent)
-      .toBe("Jaws 50 mm apart as modelled · travel 25 mm per finger · grip force 40 N per finger");
+      .toBe("Opens to 50 mm and closes fully · grip force 40 N per finger");
   });
 
   it("the tool point offset field moves the tool point and shows a marker there", () => {

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Joint } from "../api/types";
 import { buildExportRequest } from "./exportRequest";
-import { gripperIssues, jawGap, tcpPoint } from "./gripper";
+import { gripSummary, gripperIssues, gripperWarnings, jawGap, tcpPoint } from "./gripper";
 import { modelReducer } from "./reducer";
 import { boxBody } from "./testBodies";
 import { emptyModel, type ModelState } from "./types";
+import type { Body } from "../api/types";
 
 const slider = (id: string, child: string, axis: [number, number, number], over: Partial<Joint> = {}): Joint => ({
   id, parent_link_id: "L_base", child_link_id: child, type: "prismatic", origin_xyz: [0, 0, 0], origin_rpy: [0, 0, 0],
@@ -76,5 +77,47 @@ describe("gripper in the model", () => {
     expect(x).toBeCloseTo(0, 9); expect(y).toBeCloseTo(0, 9);
     expect(z).toBeCloseTo(-0.06, 9);   // fingertips' far end, away from the base plate
     expect(tcpPoint(model(), { ...G, tcp_offset: 0.01 })[2]).toBeCloseTo(-0.07, 9);
+  });
+});
+
+/** Fingers made of several boxes each (merged into one link per finger), sliding along x. */
+function fingers(fl: Body[], fr: Body[], [lo, hi]: [number, number]): ModelState {
+  let m = modelReducer(emptyModel(), { type: "import", source: "g.step", warnings: [],
+    bodies: [boxBody("base", [-0.04, -0.02, 0], [0.04, 0.02, 0.01]), ...fl, ...fr] });
+  m = { ...m, links: m.links.map((l) => ({ ...l, id: `L_${l.body_ids[0]}` })) };
+  for (const group of [fl, fr]) if (group.length > 1) m = modelReducer(m, { type: "merge", linkIds: group.map((b) => `L_${b.id}`) });
+  m = modelReducer(m, { type: "addJoint", joint: slider("jl", `L_${fl[0].id}`, [1, 0, 0], { limit_lower: lo, limit_upper: hi }) });
+  return modelReducer(m, { type: "addJoint", joint: slider("jr", `L_${fr[0].id}`, [-1, 0, 0], { limit_lower: lo, limit_upper: hi }) });
+}
+const mirror = (id: string, [x0, y0, z0]: [number, number, number], [x1, y1, z1]: [number, number, number]) =>
+  [boxBody(`${id}l`, [-x1, y0, z0], [-x0, y1, z1]), boxBody(`${id}r`, [x0, y0, z0], [x1, y1, z1])];
+/** AirTAC HFK40-like bare jaws: slides touch inside the plate, the tips that stick out are 30 mm apart. */
+const [slideL, slideR] = mirror("slide", [0, -0.01, 0.002], [0.035, 0.01, 0.008]);
+const [tipL, tipR] = mirror("tip", [0.015, -0.01, -0.06], [0.025, 0.01, 0]);
+
+describe("what the gripper can hold, and warnings that say why", () => {
+  it("fingers that close fully: no warnings", () => {
+    expect(gripSummary(model(), G)).toBe("Opens to 50 mm and closes fully · grip force 40 N per finger");
+    expect(gripperWarnings(model(), G)).toEqual([]);
+  });
+
+  it("bare jaws whose tips stay apart: the size range and why smaller parts aren't gripped", () => {
+    const m = fingers([slideL, tipL], [slideR, tipR], [-0.015, 0]);
+    expect(gripSummary(m, G)).toBe("Grips objects 30 to 60 mm across the jaws · grip force 40 N per finger");
+    const [w] = gripperWarnings(m, G);
+    expect(w).toContain("Fully closed, the jaw tips are still 30 mm apart");
+    expect(w).toContain("fingers");
+  });
+
+  it("jaws modelled closed with travel that closes them further", () => {
+    const m = fingers([slideL, tipL], [slideR, tipR], [0, 0.015]);
+    expect(gripperWarnings(m, G).join(" ")).toContain("already touch");
+  });
+
+  it("hooks at the fingertips", () => {
+    const [upL, upR] = mirror("up", [0.025, -0.01, -0.06], [0.035, 0.01, 0]);
+    const [hookL, hookR] = mirror("hook", [0.021, -0.01, -0.06], [0.025, 0.01, -0.052]);
+    const w = gripperWarnings(fingers([upL, hookL], [upR, hookR], [0, 0.025]), G).join(" ");
+    expect(w).toContain("The fingertips reach in further than the gripping faces (tips 42 mm apart, faces 50 mm)");
   });
 });
