@@ -56,8 +56,9 @@ def test_moveit_puts_the_base_in_the_map_and_ros2_control_drives_the_wheels(ws):
     xacro = (cfg / "mobi.ros2_control.xacro").read_text()
     wheel = xacro[xacro.index('<joint name="wheel_l_joint">'):]
     assert '<command_interface name="velocity"/>' in wheel[:wheel.index("</joint>")]
-    base = xacro[xacro.index('<joint name="base_yaw">'):]
-    assert "command_interface" not in base[:base.index("</joint>")]     # truth from MuJoCo, read only
+    assert "base_yaw" not in xacro          # ros2_control only knows URDF joints: the truth comes from the glue plugin
+    glue = (ws / "src" / "cad_to_urdf_glue" / "src" / "glue_plugin.cpp").read_text()
+    assert "/sim/base_pose" in glue
     launch = (ws / "src" / "mobi_moveit_config" / "launch" / "demo.launch.py").read_text()
     assert '"base_controller"' in launch and "localization" in launch
     assert "diff_drive_controller" in (ws / "src" / "mobi_moveit_config" / "package.xml").read_text()

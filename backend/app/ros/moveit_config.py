@@ -11,7 +11,6 @@ from app.export.urdf_writer import cmakelists, package_xml
 from .chain import MAX_ACCELERATION, MAX_VELOCITY, Chain, home, parse_chain
 
 LIFT = 0.0005   # m: as app.sim.mjcf.LIFT (this package needs no MuJoCo)
-BASE_JOINTS = ["base_x", "base_y", "base_z", "base_yaw", "base_pitch", "base_roll"]   # app.sim.mjcf.BASE_JOINTS
 from .collisions import disabled_pairs, link_meshes
 
 ROS_NAME = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
@@ -242,13 +241,6 @@ def _ros2_control_xacro(chain: Chain, robot: str, note: str) -> str:
         <state_interface name="position"/>
         <state_interface name="velocity"/>
       </joint>""" for w in chain.mobile.left + chain.mobile.right)
-        # where the base truly is: MuJoCo's base joints, read only (the localization node uses them)
-        joints += """
-      <xacro:if value="${hardware == 'mujoco'}">""" + "".join(f"""
-        <joint name="{b}">
-          <state_interface name="position"/>
-        </joint>""" for b in BASE_JOINTS) + """
-      </xacro:if>"""
         mock_params = '\n          <param name="calculate_dynamics">true</param>'   # mock wheels turn at their command
     if chain.gripper is not None:
         g = chain.gripper

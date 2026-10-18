@@ -19,7 +19,10 @@ if not d["scenes"]:
     problems.append("no scene")
 if result and d["result"] != result[-1]:
     problems.append(f"result {d['result']!r} vs RESULT {result[-1]!r}")
-if physics and not any(f["poses"] for f in d["frames"]):
+meta = Path("/tmp/sim/meta.json")
+loose = physics and meta.exists() and any(o["name"] not in json.loads(meta.read_text())["fixed"]
+                                          for o in json.loads(meta.read_text())["objects"])
+if loose and not any(f["poses"] for f in d["frames"]):   # only loose objects have MuJoCo poses
     problems.append("no MuJoCo object poses")
 if problems:
     sys.exit("; ".join(problems))

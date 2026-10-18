@@ -39,6 +39,9 @@ export interface Link {
  *  further out along the gripper axis. */
 export interface GripperSel { leader: string; follower: string; tcp_offset: number }
 
+/** A wheeled base: the driven wheel joints on each side (the root link is the base). */
+export interface MobileSel { left: string[]; right: string[] }
+
 export type JointType =
   | "revolute" | "continuous" | "prismatic" | "cylindrical" | "planar" | "spherical" | "fixed";
 

@@ -6,6 +6,7 @@ import AllLimits from "../AllLimits";
 import type { Ctx } from "../ctx";
 import { shortName } from "../format";
 import GripperCard from "../GripperCard";
+import MobileCard from "../MobileCard";
 import Info from "../Info";
 
 export default function ConnectStep({ ctx }: { ctx: Ctx }) {
@@ -65,6 +66,7 @@ export default function ConnectStep({ ctx }: { ctx: Ctx }) {
         <Link2 size={14} />New joint <kbd>J</kbd>
       </button>
       <GripperCard ctx={ctx} />
+      <MobileCard ctx={ctx} />
     </section>
   );
 }

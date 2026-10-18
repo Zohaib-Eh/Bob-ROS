@@ -10,8 +10,9 @@ const SAVE_DELAY_MS = 800;
 const mm = (m: number) => Math.round(m * 1000);
 const DENSITY = 500;   // kg/m³ for a loose object's default mass (a wood-like part)
 
-/** The robot's workcell (<robot>_tasks/workcell.yaml: objects in every run), placed by dragging in the 3D view. */
-export default function WorkcellCard({ robot, viewer }: { robot: string; viewer: Viewer | null }) {
+/** The robot's workcell (<robot>_tasks/workcell.yaml: objects in every run), placed by dragging in the 3D view.
+ *  mobile: the base drives, so its reach (from where it starts) says nothing about what it can get to. */
+export default function WorkcellCard({ robot, viewer, mobile = false }: { robot: string; viewer: Viewer | null; mobile?: boolean }) {
   const [objects, setObjects] = useState<WorkcellObject[]>([]);
   const [reach, setReach] = useState<Reach>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,10 +24,10 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
 
   useEffect(() => {
     let live = true;
-    void api.getWorkcell(robot).then((w) => { if (!live) return; setObjects(w.objects); setReach(w.reach); setError(w.error); })
+    void api.getWorkcell(robot).then((w) => { if (!live) return; setObjects(w.objects); setReach(mobile ? null : w.reach); setError(w.error); })
       .catch((e) => { if (live) setError((e as Error).message); });
     return () => { live = false; };
-  }, [robot]);
+  }, [robot, mobile]);
 
   useEffect(() => {   // save a moment after the last change
     if (!dirty.current) return;
@@ -53,7 +54,7 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
     setImporting(true);
     try {
       const w = await api.importFixture(robot, file, 0.001);   // STEP/IGES carry their units; STL/OBJ in mm
-      setObjects(w.objects); setReach(w.reach); setError(w.error);
+      setObjects(w.objects); setReach(mobile ? null : w.reach); setError(w.error);
       setSelected(w.objects.at(-1)?.name ?? null);
     } catch (e) { setError((e as Error).message); }
     finally { setImporting(false); }
@@ -72,7 +73,7 @@ export default function WorkcellCard({ robot, viewer }: { robot: string; viewer:
       const w = await api.loadWorkcellBundle(robot, file);
       dirty.current = false;
       setMeshes({});   // the same fixture name may now be a different shape
-      setObjects(w.objects); setReach(w.reach ?? reach); setError(w.error); setSelected(null);
+      setObjects(w.objects); setReach(mobile ? null : w.reach ?? reach); setError(w.error); setSelected(null);
     } catch (e) { setError((e as Error).message); }
   }
 

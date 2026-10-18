@@ -1,4 +1,4 @@
-import type { Body, DetectResponse, Face, GripperSel, Joint, Link, PartWarning } from "../api/types";
+import type { Body, DetectResponse, Face, GripperSel, Joint, Link, MobileSel, PartWarning } from "../api/types";
 import type { Mat4 } from "./mount";
 
 export interface Suggestion {
@@ -19,6 +19,8 @@ export interface ModelState {
   joints: Joint[];
   suggestions: Record<string, Suggestion>;
   gripper: GripperSel | null;
+  /** The wheels of a mobile base (Connect > Mobile base); null: bolted down. Missing in older projects. */
+  mobile?: MobileSel | null;
   /** The last mount per source (Mount card), kept in the model so Edit > Undo restores it too. */
   mounts: Record<string, Mount>;
 }
@@ -26,11 +28,11 @@ export interface ModelState {
 /** M moved the part from `from` (on body fromBody) flush onto `to` (on body toBody), turned `turn` degrees. */
 export interface Mount { M: Mat4; from: Face; to: Face; turn: number; fromBody?: string; toBody?: string }
 
-export type { GripperSel };
+export type { GripperSel, MobileSel };
 
 export const emptyModel = (): ModelState => ({
   bodies: {}, fileWarnings: [], links: [], ignored: [], rootLinkId: null, joints: [], suggestions: {}, gripper: null,
-  mounts: {},
+  mobile: null, mounts: {},
 });
 
 export const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;

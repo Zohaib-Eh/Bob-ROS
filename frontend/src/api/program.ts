@@ -1,4 +1,4 @@
-import { gripperBody, json, parseSse as sse, readEvents, send, type GripperSel } from "./client";
+import { gripperBody, json, mobileBody, parseSse as sse, readEvents, send, type GripperSel, type MobileSel } from "./client";
 import type { Message } from "../model/chat";
 import type { Body, Joint, Link } from "./types";
 
@@ -15,9 +15,9 @@ export interface SessionStatus { state: "stopped" | "starting" | "ready" | "fail
   physics?: string }  // when ready: "mujoco" | "off: <reason>"
 
 export async function startSession(robotName: string, links: Link[], joints: Joint[],
-  bodiesByLink: Record<string, Body[]>, gripper: GripperSel | null = null): Promise<SessionStatus> {
+  bodiesByLink: Record<string, Body[]>, gripper: GripperSel | null = null, mobile: MobileSel | null = null): Promise<SessionStatus> {
   return (await send("/program/session", json({ robot_name: robotName, links, joints, bodies_by_link: bodiesByLink,
-    gripper: gripperBody(gripper) }))).json();
+    gripper: gripperBody(gripper), mobile: mobileBody(mobile) }))).json();
 }
 export async function sessionStatus(): Promise<SessionStatus> {
   return (await send("/program/session", { method: "GET" })).json();

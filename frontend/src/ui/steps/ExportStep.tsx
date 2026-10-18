@@ -50,7 +50,7 @@ export default function ExportStep({ ctx }: { ctx: Ctx }) {
     setBusy(true);
     setServer([]);
     try {
-      const { warnings } = await exportRobot(robotName, req.links, req.joints, req.bodiesByLink);  // server-side checks
+      const { warnings } = await exportRobot(robotName, req.links, req.joints, req.bodiesByLink, req.gripper, req.mobile);  // server-side checks
       goTo("program");
       notify(warnings.length ? `Notes: ${warnings.map((w) => w.message).join(" ")}` : null);
     } catch (e) {

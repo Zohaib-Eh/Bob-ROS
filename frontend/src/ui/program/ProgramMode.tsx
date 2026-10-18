@@ -225,7 +225,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
           onRename={(id, title) => void rename(id, title)} onDelete={(id) => void remove(id)} />
         <section className="chat-column" data-testid="chat-slot">
           <PhysicsCard ctx={ctx} />
-          <WorkcellCard robot={robot} viewer={ctx.viewer} />
+          <WorkcellCard robot={robot} viewer={ctx.viewer} mobile={!!ctx.model.mobile} />
           <Chat messages={active?.messages ?? []} live={live && active?.id === live.id ? live.msg : null} running={active?.id === runningId}
             disabled={!!waiting} waiting={waiting} onSend={(t) => void send(t)} onRunAgain={(p) => void runAgain(p)}
             onReplay={(t) => void startReplay(t)} />

@@ -24,7 +24,7 @@ export function useRosSession(ctx: Ctx, paused = false) {
     setError(null);
     try {
       const req = buildExportRequest(model);
-      const s = await api.startSession(robotName, req.links, req.joints, req.bodiesByLink, req.gripper);
+      const s = await api.startSession(robotName, req.links, req.joints, req.bodiesByLink, req.gripper, req.mobile);
       if (mounted.current) setStatus(s);
     } catch (e) { if (mounted.current) setError(msg(e)); }
   }
@@ -67,7 +67,8 @@ export function useRosSession(ctx: Ctx, paused = false) {
     if (status.state !== "ready" || !viewer || paused) return;
     const req = buildExportRequest(model);
     const root = model.rootLinkId ?? req.links[0]?.id;
-    const base = req.links.find((l) => l.id === root)?.name ?? "";
+    // the view's world: the base frame, or for a mobile base the floor (map), where the base drives
+    const base = req.mobile ? "map" : req.links.find((l) => l.id === root)?.name ?? "";
     const home = homeFrames(req.links, req.joints, root ?? "");
     const tree = new FrameTree();
     const bridge = new RosBridge(`ws://${location.hostname || "localhost"}:9090`);

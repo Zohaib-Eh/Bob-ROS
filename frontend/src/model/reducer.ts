@@ -1,8 +1,8 @@
-import type { Body, Joint, Link, PartWarning } from "../api/types";
+import type { Body, Joint, Link, PartWarning, Vec3 } from "../api/types";
 import { baseGuess, bodyBox, type Box } from "./geometry";
 import { isMountedPair, sourceOf, transformBody, type Mat4 } from "./mount";
 import { membership } from "./pairs";
-import { DEFAULT_DENSITY, emptyModel, type GripperSel, type ModelState, type Mount, type Suggestion } from "./types";
+import { DEFAULT_DENSITY, emptyModel, type GripperSel, type MobileSel, type ModelState, type Mount, type Suggestion } from "./types";
 
 export type LinkProps = Partial<Pick<Link, "density_kg_m3" | "mass_override_kg" | "accept_approximate_mass">>;
 
@@ -10,6 +10,8 @@ export type Action =
   | { type: "import"; bodies: Body[]; warnings: PartWarning[]; source?: string }
   | { type: "transformSource"; source: string; matrix: Mat4; mount?: Mount | null }
   | { type: "setGripper"; gripper: GripperSel | null }
+  | { type: "setMobile"; mobile: MobileSel | null }
+  | { type: "turnRobot"; yaw: number }   // every part and joint about z through the origin (Mobile base card)
   | { type: "merge"; linkIds: string[] }
   | { type: "mergeSmall"; pairs: { linkId: string; neighbourId: string }[] }
   | { type: "moveBody"; bodyId: string; toLinkId: string }
@@ -95,8 +97,21 @@ function mergeLinks(s: ModelState, target: string, others: string[]): ModelState
 }
 
 export function modelReducer(s: ModelState, a: Action): ModelState {
-  const next = reduce(s, a);
-  return next.gripper && !gripperJointsExist(next) ? { ...next, gripper: null } : next;
+  let next = reduce(s, a);
+  if (next.gripper && !gripperJointsExist(next)) next = { ...next, gripper: null };
+  if (next.mobile && !wheelJointsExist(next)) next = { ...next, mobile: null };
+  return next;
+}
+
+/** The mobile base refers to wheel joints on the base link; once one is gone or fixed, the selection goes too. */
+function wheelJointsExist(s: ModelState): boolean {
+  const m = s.mobile!;
+  return [...m.left, ...m.right].every((id) => s.joints.some((j) => j.id === id && j.parent_link_id === s.rootLinkId
+    && (j.type === "continuous" || j.type === "revolute")));
+}
+
+function turnedZ(v: Vec3, c: number, s: number): Vec3 {
+  return [c * v[0] - s * v[1], s * v[0] + c * v[1], v[2]];
 }
 
 function unionBox(bodies: Body[]): Box | null {
@@ -145,6 +160,18 @@ function reduce(s: ModelState, a: Action): ModelState {
     }
     case "setGripper":
       return { ...s, gripper: a.gripper };
+    case "setMobile":
+      return { ...s, mobile: a.mobile };
+    case "turnRobot": {
+      const c = Math.cos(a.yaw), sn = Math.sin(a.yaw);
+      const M: Mat4 = [c, -sn, 0, 0, sn, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+      const bodies = Object.fromEntries(Object.entries(s.bodies).map(([id, b]) => [id, transformBody(b, M)]));
+      // joints are world poses: the frame turns too (rpy gains the yaw when roll and pitch are 0, as wheels have)
+      const joints = s.joints.map((j) => ({ ...j, origin_xyz: turnedZ(j.origin_xyz, c, sn),
+        origin_rpy: [j.origin_rpy[0], j.origin_rpy[1], j.origin_rpy[2] + a.yaw] as Vec3,
+        axis: j.axis ? turnedZ(j.axis, c, sn) : null }));
+      return { ...s, bodies, joints, suggestions: {} };   // suggestions hold world-space origins: detect again
+    }
     case "transformSource": {
       const bodies = { ...s.bodies };
       for (const b of Object.values(s.bodies)) if (sourceOf(b) === a.source) bodies[b.id] = transformBody(b, a.matrix);

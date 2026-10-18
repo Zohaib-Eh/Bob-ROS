@@ -36,15 +36,20 @@ def _within_limits(q, chain):
 
 
 def _arm_only(urdf_path: str, chain) -> str:
-    """The URDF EAIK should see: a gripper's finger joints turned fixed (EAIK solves at most 6
-    moving joints, and the fingers aren't part of the arm's IK). Unchanged path without a gripper."""
-    if chain.gripper is None:
+    """The URDF EAIK should see: a gripper's finger joints and a mobile base's wheels turned fixed (EAIK solves
+    at most 6 moving joints, and neither is part of the arm's IK). Unchanged path without either."""
+    skip = set()
+    if chain.gripper is not None:
+        skip |= {chain.gripper.leader, chain.gripper.follower}
+    if getattr(chain, "mobile", None) is not None:
+        skip |= set(chain.mobile.left + chain.mobile.right)
+    if not skip:
         return urdf_path
     import tempfile
     import xml.etree.ElementTree as ET
     root = ET.parse(urdf_path).getroot()
     for j in root.iter("joint"):
-        if j.get("name") in (chain.gripper.leader, chain.gripper.follower):
+        if j.get("name") in skip:
             j.set("type", "fixed")
             for tag in ("axis", "limit", "mimic"):
                 for el in j.findall(tag):

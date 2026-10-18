@@ -23,7 +23,7 @@ export default function PhysicsCard({ ctx }: { ctx: Ctx }) {
     setRunning(true);
     setError(null);
     try {
-      const r = await physicsCheck(robotName, req.links, req.joints, req.bodiesByLink, req.gripper);
+      const r = await physicsCheck(robotName, req.links, req.joints, req.bodiesByLink, req.gripper, req.mobile);
       if (t !== token.current) return;
       setResult(r);
       if (!r.ok && r.link) viewer?.focus(model.links.find((l) => l.name === r.link)?.body_ids ?? []);

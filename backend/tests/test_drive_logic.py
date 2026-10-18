@@ -13,12 +13,14 @@ _spec.loader.exec_module(dl)
 CENTER = (0.1, 0.0)   # the fixture's axles: 0.1 m ahead of the base frame
 
 
-def _drive(start, goal_xy, goal_yaw, slip=1.0, dt=0.05, limit=60.0):
+def _drive(start, goal_xy, goal_yaw, slip=1.0, dt=0.05, limit=60.0, reverse=False, log=None):
     """drive_to's loop on a differential drive that turns about CENTER (slip < 1: the wheels lose grip)."""
-    target, final = dl.plan(start, goal_xy, goal_yaw, CENTER)
+    target, final = dl.plan(start, goal_xy, goal_yaw, CENTER, reverse)
     pose, phase, t = np.array(start, float), "face", 0.0
     while phase != "done" and t < limit:
-        v, w, phase = dl.command(phase, pose, target, final, CENTER, 0.3)
+        v, w, phase = dl.command(phase, pose, target, final, CENTER, 0.3, reverse)
+        if log is not None:
+            log.append((v, pose[2]))
         p = dl.pivot(pose, CENTER) + slip * v * dt * np.array([math.cos(pose[2]), math.sin(pose[2])])
         yaw = pose[2] + slip * w * dt
         c, s = math.cos(yaw), math.sin(yaw)
@@ -37,22 +39,32 @@ def test_drive_to_ends_at_the_goal_frame_not_just_near_it(goal):
         assert abs(dl.wrap(pose[2] - gyaw)) < dl.YAW_TOL + 1e-3
 
 
+def test_reverse_backs_up_without_turning_round():
+    log = []
+    pose, phase = _drive((1.0, 0.0, 0.0), (0.4, 0.0), None, reverse=True, log=log)
+    assert phase == "done" and abs(pose[0] - 0.4) < 0.025 and abs(dl.wrap(pose[2])) < dl.YAW_TOL + 1e-3
+    assert max(abs(dl.wrap(yaw)) for _, yaw in log) < 0.05 and min(v for v, _ in log) < -0.2   # it backed up, facing +x
+
+
 def test_slipping_wheels_still_get_there():   # closed loop on the true pose, not on the commands
     pose, phase = _drive((0.0, 0.0, 0.0), (1.0, 1.0), 0.0, slip=0.7)
     assert phase == "done" and math.hypot(pose[0] - 1, pose[1] - 1) < 0.03
 
 
-def test_the_path_check_names_what_is_in_the_way():
+def test_the_path_check_sweeps_the_real_outline():
     fp = (-0.25, -0.27, 0.25, 0.27)
-    r = dl.reach(fp, CENTER)
-    assert r == pytest.approx(math.hypot(0.35, 0.27) + dl.MARGIN)
-    table = {"name": "table", "xy": (1.0, 0.0), "half": (0.3, 0.3), "yaw": 0.0, "z0": 0.0}
-    shelf = {"name": "shelf", "xy": (1.0, 0.0), "half": (0.3, 0.3), "yaw": 0.0, "z0": 0.5}      # above the base
-    parcel = {"name": "parcel", "xy": (0.0, 0.0), "half": (0.05, 0.05), "yaw": 0.0, "z0": 0.18}   # on the base
-    assert dl.blocker((0.1, 0.0), (2.0, 0.0), r, [shelf, parcel, table], 0.24) == "table"
-    assert dl.blocker((0.1, 0.0), (0.1, 2.0), r, [table], 0.24) is None                            # beside the path
-    turned = {**table, "xy": (1.0, 0.9), "half": (0.05, 0.6), "yaw": math.pi / 2}                 # a long bar lying across x
-    assert dl.blocker((0.1, 0.0), (2.0, 0.0), r, [turned], 0.24) is None
+    start = (0.0, 0.0, 0.0)
+    table = {"name": "table", "xy": (1.5, 0.0), "half": (0.2, 0.3), "yaw": 0.0, "z0": 0.0}      # front edge x 1.3
+    shelf = {**table, "name": "shelf", "z0": 0.5}                                                 # above the base
+    parcel = {"name": "parcel", "xy": (0.0, 0.0), "half": (0.05, 0.05), "yaw": 0.0, "z0": 0.18}   # riding on it
+    go = lambda x, y, yaw: dl.sweep(start, *dl.plan(start, (x, y), yaw, CENTER), CENTER)
+    assert dl.blocker(go(0.85, 0.0, 0.0), fp, [shelf, parcel, table], 0.24) is None   # up to it: front 1.10 + margin < 1.30
+    assert dl.blocker(go(2.5, 0.0, 0.0), fp, [shelf, parcel, table], 0.24) == "table"  # through it
+    assert dl.blocker(go(0.95, 0.0, 0.0), fp, [table], 0.24) is None                   # front 1.20 + margin < 1.30
+    assert dl.blocker(go(0.95, 0.0, math.pi), fp, [table], 0.24) == "table"            # a half turn there swings the rear corner into it
+    assert dl.blocker(go(0.0, 2.0, None), fp, [table], 0.24) is None                   # off to the side
+    poses = go(1.0, 0.5, math.pi / 2)
+    assert poses[0] == pytest.approx(start) and poses[-1] == pytest.approx((1.0, 0.5, math.pi / 2), abs=1e-6)
 
 
 def test_remaining_is_metres_driving_and_radians_turning():

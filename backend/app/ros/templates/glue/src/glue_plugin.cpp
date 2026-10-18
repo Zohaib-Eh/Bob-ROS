@@ -2,14 +2,17 @@
 // ("glue_<name>", inactive in scene.xml), switched on holding the object where it is (no jump).
 // Commands arrive on /sim/glue ("attach <name>" | "detach <name>"); /sim/glued lists the glued
 // objects (comma-joined, transient local) after every change and after a world reset.
+// A mobile base (the body carrying the joint "base_x"): its true pose, MuJoCo's world = map, on /sim/base_pose
+// at ~50 Hz for the localization node (ros2_control only knows joints that are in the URDF).
 // Threads: pre_step/on_reset run on the physics thread, update/publish on the control thread;
-// mu_ guards pending_ and glued_.
+// mu_ guards pending_, glued_ and base_.
 #include <atomic>
 #include <mutex>
 #include <set>
 #include <string>
 #include <vector>
 
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <mujoco/mujoco.h>
 #include <pluginlib/class_list_macros.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -35,12 +38,22 @@ public:
         std::lock_guard<std::mutex> lk(mu_);
         pending_.push_back(m->data);
       });
+    const int j = mj_name2id(model, mjOBJ_JOINT, "base_x");
+    base_body_ = j < 0 ? -1 : model->jnt_bodyid[j];
+    if (base_body_ >= 0) {
+      base_pub_ = node->create_publisher<geometry_msgs::msg::PoseStamped>("/sim/base_pose", 10);
+    }
     publish();
     return true;
   }
 
   void pre_step(mjData * d) override
   {
+    if (base_body_ >= 0) {
+      std::lock_guard<std::mutex> lk(mu_);
+      mju_copy3(base_ + 0, d->xpos + 3 * base_body_);
+      mju_copy4(base_ + 3, d->xquat + 4 * base_body_);  // w x y z
+    }
     std::vector<std::string> todo;
     {
       std::lock_guard<std::mutex> lk(mu_);
@@ -86,6 +99,22 @@ public:
     if (dirty_.exchange(false)) {
       publish();
     }
+    if (base_pub_ && ++tick_ % 2 == 0) {  // the control loop runs at 100 Hz
+      geometry_msgs::msg::PoseStamped m;
+      m.header.stamp = node_->now();
+      m.header.frame_id = "map";
+      {
+        std::lock_guard<std::mutex> lk(mu_);
+        m.pose.position.x = base_[0];
+        m.pose.position.y = base_[1];
+        m.pose.position.z = base_[2];
+        m.pose.orientation.w = base_[3];
+        m.pose.orientation.x = base_[4];
+        m.pose.orientation.y = base_[5];
+        m.pose.orientation.z = base_[6];
+      }
+      base_pub_->publish(m);
+    }
   }
 
   void on_reset(mjData * d) override
@@ -120,6 +149,10 @@ private:
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr glued_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr base_pub_;
+  int base_body_ = -1;
+  mjtNum base_[7] = {0, 0, 0, 1, 0, 0, 0};
+  unsigned tick_ = 0;
   std::mutex mu_;
   std::vector<std::string> pending_;
   std::set<std::string> glued_;

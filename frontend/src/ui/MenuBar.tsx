@@ -88,7 +88,7 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
   const onExport = async () => {
     const req = buildExportRequest(model);
     try {
-      const { blob } = await exportRobot(robotName, req.links, req.joints, req.bodiesByLink, req.gripper);
+      const { blob } = await exportRobot(robotName, req.links, req.joints, req.bodiesByLink, req.gripper, req.mobile);
       downloadBlob(blob, `${robotName}.zip`);
     } catch (e) { notify(`Export failed: ${(e as Error).message}`); }
   };

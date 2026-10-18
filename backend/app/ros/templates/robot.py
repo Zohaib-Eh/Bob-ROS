@@ -187,7 +187,7 @@ class Robot:
         if self.chain.mobile is not None:
             from tf2_ros import Buffer, TransformListener
             self._tf = Buffer()
-            self._tf_listener = TransformListener(self._tf, n)
+            self._tf_listener = TransformListener(self._tf, n, spin_thread=True)   # its own thread: /tf comes fast, spin_once would fall behind
             self._cmd_vel = n.create_publisher(TwistStamped, "/base_controller/cmd_vel", 10)
             self._base_matrix()   # fails clearly if the base isn't localized
         if _PHYSICS:
@@ -888,29 +888,32 @@ class Robot:
                         "yaw": 0.0, "z0": float(lo[2])})
         return out
 
-    def drive_to(self, x: float, y: float, yaw: float | None = None, speed: float = 0.3):
+    def drive_to(self, x: float, y: float, yaw: float | None = None, speed: float = 0.3, reverse: bool = False):
         """Drive the base so its frame ends at (x, y) in the world, facing `yaw` (radians; None: the way it
-        drove): turn toward the goal, drive straight, turn. Raises PathBlocked when an object is in the way of
-        the straight path (drive to a point beside it first), MotionError when the base gets stuck."""
+        drove): turn toward the goal, drive straight, turn. reverse: back up to it instead (e.g. away from a
+        table without turning in front of it). Raises PathBlocked when an object is in the way, MotionError when
+        the base gets stuck."""
         self._need_base()
         m = self.chain.mobile
         start = self.base_pose()
-        target, final = drive_logic.plan(start, (x, y), yaw, m.center)
-        radius = drive_logic.reach(m.footprint, m.center)
-        name = drive_logic.blocker(drive_logic.pivot(start, m.center), target, radius, self._footprints(), m.height)
+        target, final = drive_logic.plan(start, (x, y), yaw, m.center, reverse)
+        attached = set(self._scene()[1])
+        name = drive_logic.blocker(drive_logic.sweep(start, target, final, m.center, reverse), m.footprint,
+                                   [o for o in self._footprints() if o["name"] not in attached], m.height)
         if name:
             raise PathBlocked(f"'{name}' is in the way of the base from {_fmt(start[:2])} to {_fmt((x, y))} "
-                              f"(it needs a {2 * radius:.2f} m wide clear path); drive to a point beside '{name}' first")
+                              f"(turning in place, then straight, then turning, with {drive_logic.MARGIN * 100:.0f} cm "
+                              f"to spare); drive to a point beside '{name}' first, or stop further from it")
         phase, history, t0 = "face", [], time.time()
         try:
             while phase != "done":
                 pose = self.base_pose()
-                v, w, nxt = drive_logic.command(phase, pose, target, final, m.center, speed)
+                v, w, nxt = drive_logic.command(phase, pose, target, final, m.center, speed, reverse)
                 if nxt != phase:
                     history = []
                 phase = nxt
                 now = time.time()
-                history.append((now, drive_logic.remaining(phase, pose, target, final, m.center)))
+                history.append((now, drive_logic.remaining(phase, pose, target, final, m.center, reverse)))
                 if drive_logic.stuck(history, now):
                     raise MotionError(f"The base is stuck at {_fmt(pose[:2])}: no progress for 2 s ({phase}). A wheel may be "
                                       "blocked, it may be pushing against something, or the load is too heavy for the wheel motors")

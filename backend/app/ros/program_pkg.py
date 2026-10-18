@@ -102,6 +102,7 @@ object first (within the reach given above, measured from the base origin), then
 from robot import PathBlocked   # an object is in the way of the base's straight path
 r.base_pose()                    # (x, y, yaw) of the base in the world
 r.drive_to(x, y, yaw=None)       # turn, drive straight, turn; ends within 2 cm and 2 degrees. yaw None: face the way it drove
+r.drive_to(x, y, reverse=True)   # back up to (x, y), still facing the way it faces (e.g. away from a table)
 r.drive(v, w, seconds)           # raw: v m/s forward, w rad/s left, no path check
 ```
 

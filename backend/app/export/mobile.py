@@ -9,6 +9,7 @@ from app.models import Body, Joint, Link, Mobile
 
 WHEEL_SPEED = 20.0    # rad/s: a wheel's top speed (1.6 m/s on an 8 cm wheel)
 ROUND = 0.97          # a wheel's rim, around the axis, stays within 3% of its radius
+BINS = 12             # directions around the axle that must reach the rim (a 24-sided CAD wheel fills them, a box can't)
 CASTER_BAND = 0.005   # m: base points this close to the floor carry it
 CASTER_RADIUS = 0.01  # m: the frictionless sphere standing in for a caster
 CLUSTER = 0.05        # m: points closer than this (in plan) are one caster (a caster is a few cm across)
@@ -39,7 +40,7 @@ class Drive:
 
 def fit_wheel(vertices, axis, point) -> WheelFit:
     """The cylinder a wheel's shape makes about its joint axis (through `point`). round: the rim is a circle
-    (in each of 36 directions around the axis the shape reaches within 3% of its radius)."""
+    (in each of 12 directions around the axis the shape reaches within 3% of its radius)."""
     v = np.asarray(vertices, float) - point
     a = np.asarray(axis, float) / np.linalg.norm(axis)
     along = v @ a
@@ -49,8 +50,8 @@ def fit_wheel(vertices, axis, point) -> WheelFit:
     u = np.cross(a, [1.0, 0.0, 0.0] if abs(a[0]) < 0.9 else [0.0, 1.0, 0.0])
     u /= np.linalg.norm(u)
     angle = np.arctan2(radial @ np.cross(a, u), radial @ u)
-    bins = ((angle + np.pi) / (2 * np.pi) * 36).astype(int) % 36
-    reach = np.zeros(36)
+    bins = ((angle + np.pi) / (2 * np.pi) * BINS).astype(int) % BINS
+    reach = np.zeros(BINS)
     np.maximum.at(reach, bins, dist)
     mid = (along.max() + along.min()) / 2
     return WheelFit(radius=r, width=float(along.max() - along.min()),
