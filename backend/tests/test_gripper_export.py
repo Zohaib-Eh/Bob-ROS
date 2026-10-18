@@ -137,12 +137,13 @@ def test_the_same_finger_is_split_once(monkeypatch):   # Simulate and Program re
 
 def _bare_jaws():
     """The test arm with HFK40-like jaws (AirTAC air gripper from GrabCAD): modelled closed, their slides
-    touch inside the plate, but the tips that stick out are 30 mm apart; 15 mm travel each (open 60)."""
+    touch inside the plate, but the tips that stick out are 30 mm apart; 15 mm travel each (open 60).
+    Like the HFK40's, the slides poke 4 mm out below the plate, between the jaws: the jaws are 56 mm deep."""
     links, joints, bodies, g = six_axis_with_gripper()
     R = np.array([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
     t = np.array([0.78, 0.0, 0.95]) - R @ [0.0, 0.0, 0.01]
     for name, s in (("gfl", -1.0), ("gfr", 1.0)):
-        slide = ((min(0.0, s * 0.035), -0.01, 0.002), (max(0.0, s * 0.035), 0.01, 0.008))
+        slide = ((min(0.0, s * 0.035), -0.01, -0.004), (max(0.0, s * 0.035), 0.01, 0.008))
         tip = ((min(s * 0.015, s * 0.025), -0.01, -0.06), (max(s * 0.015, s * 0.025), 0.01, 0.0))
         bodies[name] = [_boxes_body(name, [slide, tip], R, t)]
     up = tuple(float(x) for x in R @ [1.0, 0.0, 0.0])
@@ -158,3 +159,11 @@ def test_jaw_gap_is_measured_at_the_tips_not_at_slides_hidden_in_the_body():
     g = parse_chain(urdf).gripper
     assert g.jaw_gap == pytest.approx(0.03, abs=5e-4)
     assert g.opening == pytest.approx(0.06, abs=5e-4) and g.width(g.upper) == pytest.approx(0.03, abs=5e-4)
+    assert g.jaw_depth == pytest.approx(0.056, abs=5e-4)    # tips at -0.06, slides from -0.004
+
+
+def test_jaw_depth_of_plain_fingers_reaches_the_plate():
+    from app.ros.chain import parse_chain
+    links, joints, bodies, g = six_axis_with_gripper()
+    urdf = zipfile.ZipFile(io.BytesIO(export_package("sixg", links, joints, bodies, gripper=g))).read("sixg/urdf/sixg.urdf").decode()
+    assert parse_chain(urdf).gripper.jaw_depth == pytest.approx(0.06, abs=5e-4)   # fingertips to the base plate

@@ -13,7 +13,7 @@ from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (AttachedCollisionObject, CollisionObject, Constraints, JointConstraint,
                              MoveItErrorCodes, OrientationConstraint, PlanningScene,
                              PlanningSceneComponents, PositionConstraint)
-from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath, GetPlanningScene
+from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath, GetPlanningScene, GetStateValidity
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -159,6 +159,7 @@ class Robot:
         self._cartesian = n.create_client(GetCartesianPath, "/compute_cartesian_path")
         self._apply = n.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self._get = n.create_client(GetPlanningScene, "/get_planning_scene")
+        self._valid = n.create_client(GetStateValidity, "/check_state_validity")   # only to explain a blocked line
         self._joints = {}
         self._velocities = {}
         self._stamp = 0
@@ -680,6 +681,33 @@ class Robot:
         self._plan_execute(Constraints(position_constraints=[pc], orientation_constraints=[oc]),
                            f"pose {_fmt(xyz)}")
 
+    def _blocker(self, xyz, rpy, res) -> str | None:
+        """What a blocked straight line runs into, e.g. "hfk_fl would touch 'box'": MoveIt's contacts
+        a little past the last reachable point. None when nothing collides (a joint limit, the reach)."""
+        try:
+            pts = res.solution.joint_trajectory.points
+            last = np.asarray(pts[-1].positions if pts else self._current(), float)
+            start = np.asarray(self.tool_pose()[0], float)
+            p = start + (np.asarray(xyz, float) - start) * min(1.0, res.fraction + 0.03)
+            sols = self.solutions(tuple(p), rpy)
+            if not sols:
+                return None
+            q = min(sols, key=lambda s: float(np.abs(np.asarray(s) - last).max()))
+            req = GetStateValidity.Request()
+            req.group_name = GROUP
+            req.robot_state.is_diff = True
+            req.robot_state.joint_state.name = list(self.joint_names)
+            req.robot_state.joint_state.position = [float(v) for v in q]
+            out = _wait(self._valid.call_async(req), 5)
+        except Exception:   # explaining is best effort; the failure itself is reported regardless
+            return None
+        pairs = {tuple(sorted((c.contact_body_1, c.contact_body_2))) for c in out.contacts}
+        if not pairs:
+            return None
+        objects = set(self._scene()[0])
+        name = lambda b: f"'{b}'" if b in objects else b
+        return "; ".join(f"{name(a)} would touch {name(b)}" for a, b in sorted(pairs)[:3])
+
     def _step_line(self, xyz, step: float = 0.02):
         """Arms with fewer than 6 joints cannot keep an orientation along a line: follow it in short
         collision-checked joint moves, each to the position solution nearest the previous one."""
@@ -736,9 +764,11 @@ class Robot:
         if res.fraction < 0.999:
             if res.error_code.val != MoveItErrorCodes.SUCCESS and res.fraction == 0.0:
                 raise self._error(res.error_code.val, f"straight line to {_fmt(xyz)}")
+            why = self._blocker(xyz, rpy, res)
             raise PlanningFailed(f"a straight line to {_fmt(xyz)} is only possible for {res.fraction * 100:.0f}% "
-                                 "of the way (an obstacle, a joint limit or the edge of the reach is in the way); "
-                                 "try move_to or a different path")
+                                 + (f"of the way: just past there {why}; " if why else
+                                    "of the way (an obstacle, a joint limit or the edge of the reach is in the way); ")
+                                 + "try move_to or a different path")
         t0 = time.time()
         out = self._run(self._exec, ExecuteTrajectory.Goal(trajectory=res.solution), 120)
         self._physics_check(res.solution, out.error_code.val, time.time() - t0)

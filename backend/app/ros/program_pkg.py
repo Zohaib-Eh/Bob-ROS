@@ -116,6 +116,8 @@ def _gripper_lines(g, tip: str) -> list[str]:
             " often have 0.3-0.6, so less). Heavier, or fast moves, and it slips.",
             "- Leave at least 5 mm each side between the open jaws and the object on the way down: with less, a",
             "  slight lag swings a jaw into it.",
+            *([f"- The jaws are {mm(g.jaw_depth)} deep: an object reaching further up between them hits the gripper,"
+               " so grip tall objects nearer their top."] if g.jaw_depth > 0 else []),
             f"- The tool point ({tip}) is between the fingertips: move_to / move_line place it, not the flange.",
             "- To pick: r.release() to open, approach from above with r.tool_down(yaw=...) so the jaws close across",
             "  two opposite faces (yaw = the object's yaw, or that + pi/2), lower so the object sits between the",

@@ -91,19 +91,20 @@ function fingers(fl: Body[], fr: Body[], [lo, hi]: [number, number]): ModelState
 }
 const mirror = (id: string, [x0, y0, z0]: [number, number, number], [x1, y1, z1]: [number, number, number]) =>
   [boxBody(`${id}l`, [-x1, y0, z0], [-x0, y1, z1]), boxBody(`${id}r`, [x0, y0, z0], [x1, y1, z1])];
-/** AirTAC HFK40-like bare jaws: slides touch inside the plate, the tips that stick out are 30 mm apart. */
-const [slideL, slideR] = mirror("slide", [0, -0.01, 0.002], [0.035, 0.01, 0.008]);
+/** AirTAC HFK40-like bare jaws: slides touch inside the plate and poke 4 mm out below it, between the jaws;
+ *  the tips that stick out are 30 mm apart. */
+const [slideL, slideR] = mirror("slide", [0, -0.01, -0.004], [0.035, 0.01, 0.008]);
 const [tipL, tipR] = mirror("tip", [0.015, -0.01, -0.06], [0.025, 0.01, 0]);
 
 describe("what the gripper can hold, and warnings that say why", () => {
   it("fingers that close fully: no warnings", () => {
-    expect(gripSummary(model(), G)).toBe("Opens to 50 mm and closes fully · grip force 40 N per finger");
+    expect(gripSummary(model(), G)).toBe("Opens to 50 mm and closes fully · jaws 60 mm deep · grip force 40 N per finger");
     expect(gripperWarnings(model(), G)).toEqual([]);
   });
 
   it("bare jaws whose tips stay apart: the size range and why smaller parts aren't gripped", () => {
     const m = fingers([slideL, tipL], [slideR, tipR], [-0.015, 0]);
-    expect(gripSummary(m, G)).toBe("Grips objects 30 to 60 mm across the jaws · grip force 40 N per finger");
+    expect(gripSummary(m, G)).toBe("Grips objects 30 to 60 mm across the jaws · jaws 56 mm deep · grip force 40 N per finger");
     const [w] = gripperWarnings(m, G);
     expect(w).toContain("Fully closed, the jaw tips are still 30 mm apart");
     expect(w).toContain("fingers");

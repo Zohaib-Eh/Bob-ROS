@@ -254,9 +254,16 @@ def test_gripper_lines_give_the_size_range_clearance_and_weight():
     import numpy as np
     from app.ros.chain import GripperInfo
     from app.ros.program_pkg import _gripper_lines
-    hfk = GripperInfo("l", "r", "b", -0.015, 0.0, 40.0, np.array([1.0, 0, 0]), 0.03)   # AirTAC HFK40 jaws
+    hfk = GripperInfo("l", "r", "b", -0.015, 0.0, 40.0, np.array([1.0, 0, 0]), 0.03, 0.03675)   # AirTAC HFK40 jaws
     text = "\n".join(_gripper_lines(hfk, "tcp"))
     assert "Grips objects 30 to 60 mm across the jaws" in text and "still 30 mm apart" in text
+    assert "37 mm deep" in text and "hits the gripper" in text
     assert "at least 5 mm each side" in text and "about 8.2 kg" in text
-    full = GripperInfo("l", "r", "b", 0.0, 0.025, 40.0, np.array([1.0, 0, 0]), 0.05)
+    full = GripperInfo("l", "r", "b", 0.0, 0.025, 40.0, np.array([1.0, 0, 0]), 0.05, 0.06)
     assert "Opens to 50 mm and closes fully" in "\n".join(_gripper_lines(full, "tcp"))
+
+
+def test_a_blocked_straight_line_names_what_would_touch(ws):
+    lib = (ws / "bot_program" / "robot.py").read_text(encoding="utf-8")
+    line = lib[lib.index("    def move_line(self, xyz, rpy=None):"):]
+    assert "self._blocker(" in line and "/check_state_validity" in lib and "would touch" in lib

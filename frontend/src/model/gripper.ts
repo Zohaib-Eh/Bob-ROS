@@ -87,6 +87,26 @@ export function jawGap(m: ModelState, g: GripperSel): number {
   return gapIn(m, g, 0, TIP_BAND)?.gap ?? 0;
 }
 
+/** How far an object can reach up between the jaws before it hits the gripper (m): to the nearest part of a
+ *  jaw inward of its own tip face (an air gripper's slides) or of the base between the tip faces; else the base.
+ *  Mirrors backend export/gripper.jaw_depth. */
+export function jawDepth(m: ModelState, g: GripperSel): number {
+  const { leader, follower, verts } = parts(m, g);
+  const ap = approach(m, g);
+  if (!leader?.axis || !follower || !ap) return 0;
+  const a = unit(leader.axis);
+  const leaderFirst = dot(mean(verts(leader.child_link_id)), a) < dot(mean(verts(follower.child_link_id)), a);
+  const c: Vec3 = leaderFirst ? a : [-a[0], -a[1], -a[2]];
+  const back = (v: Vec3) => -dot([v[0] - ap.tip[0], v[1] - ap.tip[1], v[2] - ap.tip[2]], ap.ax);
+  const base = points(m, leader.parent_link_id), pl = points(m, leader.child_link_id), pf = points(m, follower.child_link_id);
+  const lo = Math.max(...pl.filter((v) => back(v) < TIP_BAND).map((v) => dot(v, c))) + 1e-4;
+  const hi = Math.min(...pf.filter((v) => back(v) < TIP_BAND).map((v) => dot(v, c))) - 1e-4;
+  const inward = [...pl.filter((v) => dot(v, c) > lo), ...pf.filter((v) => dot(v, c) < hi),
+    ...base.filter((v) => dot(v, c) > lo && dot(v, c) < hi)].map(back).filter((b) => b > 1e-4);
+  const all = inward.length ? inward : base.map(back);
+  return all.length ? Math.min(...all) : 0;
+}
+
 /** Jaw tips apart fully closed and fully open (m), from the gap as modelled and the leader's travel. */
 function gripRange(m: ModelState, g: GripperSel) {
   const leader = m.joints.find((j) => j.id === g.leader);
@@ -105,8 +125,9 @@ export function gripSummary(m: ModelState, g: GripperSel): string {
   const r = gripRange(m, g);
   const force = `grip force ${leader?.max_effort ?? DEFAULT_GRIP_FORCE} N per finger`;
   if (!r) return force;
-  return r.closed < 0.001 ? `Opens to ${mm(r.open)} and closes fully · ${force}`
-    : `Grips objects ${Math.round(r.closed * 1000)} to ${mm(r.open)} across the jaws · ${force}`;
+  const depth = `jaws ${mm(jawDepth(m, g))} deep`;
+  return r.closed < 0.001 ? `Opens to ${mm(r.open)} and closes fully · ${depth} · ${force}`
+    : `Grips objects ${Math.round(r.closed * 1000)} to ${mm(r.open)} across the jaws · ${depth} · ${force}`;
 }
 
 /** Designs that work but cause trouble in use, each with the reason (shown in the Gripper card). */

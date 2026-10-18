@@ -58,9 +58,32 @@ def jaw_gap(leader_mesh, follower_mesh, closing, approach, tip) -> float:
     c, a, tip = _unit(np.asarray(closing, float)), _unit(np.asarray(approach, float)), np.asarray(tip, float)
 
     def band(mesh):
-        pts = subdivide_to_size(np.asarray(mesh[0], float), np.asarray(mesh[1], int), 0.002)[0]
+        pts = _dense(mesh)
         return pts[(pts - tip) @ a > -TIP_BAND] @ c
     return float(band(follower_mesh).min() - band(leader_mesh).max())
+
+
+def _dense(mesh) -> np.ndarray:
+    from trimesh.remesh import subdivide_to_size
+    return subdivide_to_size(np.asarray(mesh[0], float), np.asarray(mesh[1], int), 0.002)[0]
+
+
+def jaw_depth(base_mesh, leader_mesh, follower_mesh, closing, approach, tip) -> float:
+    """How far an object can reach up between the jaws before it hits the gripper (m): from the tips
+    to the nearest part that juts in between them, i.e. any part of a jaw inward of that jaw's own tip
+    face (an air gripper's slides, 37 mm up its jaws) or of the base between the tip faces; else to the
+    base. Meshes are (vertices, triangles), as modelled (q = 0)."""
+    c, a, tip = _unit(np.asarray(closing, float)), _unit(np.asarray(approach, float)), np.asarray(tip, float)
+    base, lead, foll = _dense(base_mesh), _dense(leader_mesh), _dense(follower_mesh)
+    back = lambda pts: -(pts - tip) @ a
+    face_l = lead[back(lead) < TIP_BAND] @ c
+    face_f = foll[back(foll) < TIP_BAND] @ c
+    lo, hi = face_l.max() + 1e-4, face_f.min() - 1e-4
+    inward = [lead[lead @ c > lo], foll[foll @ c < hi], base[(base @ c > lo) & (base @ c < hi)]]
+    hits = [back(p) for p in inward if len(p)]
+    hits = [h[h > 1e-4] for h in hits]
+    hits = [h.min() for h in hits if len(h)]
+    return float(min(hits) if hits else back(base).min())
 
 
 def convex_pieces(vertices, triangles, max_pieces: int = 8) -> list[tuple[list, list]]:

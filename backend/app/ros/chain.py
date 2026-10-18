@@ -53,7 +53,8 @@ class GripperInfo:
     upper: float
     effort: float
     closing_axis_tcp: np.ndarray   # the leader's closing direction in the tip (tcp) frame
-    jaw_gap: float                 # m between the fingers at q = 0 (narrowest point, as modelled)
+    jaw_gap: float                 # m between the jaw tips at q = 0, as modelled
+    jaw_depth: float = 0.0         # m an object can reach up between the jaws before it hits the gripper (0: unknown)
 
     @property
     def opening(self) -> float:
@@ -176,7 +177,8 @@ def _gripper_info(fingers, joints, link_poses, tip, tag=None) -> GripperInfo:
     lower, upper = float(lim.get("lower")), float(lim.get("upper"))
     # an older package has no <gripper jaw_gap>: assume the jaws just touch when fully closed
     gap = float(tag.get("jaw_gap")) if tag is not None and tag.get("jaw_gap") else 2 * upper
-    return GripperInfo(leader_name, follower_name, base, lower, upper, float(lim.get("effort", 0)), closing, gap)
+    depth = float(tag.get("jaw_depth")) if tag is not None and tag.get("jaw_depth") else 0.0
+    return GripperInfo(leader_name, follower_name, base, lower, upper, float(lim.get("effort", 0)), closing, gap, depth)
 
 
 def home(chain: Chain) -> list[float]:
