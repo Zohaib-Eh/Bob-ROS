@@ -94,3 +94,35 @@ def test_plugins_file_loads_pose_publisher_and_glue():
 def test_controllers_include_the_gripper_only_when_there_is_one():
     assert sim_ctl.controller_names(False) == ["arm_controller"]
     assert sim_ctl.controller_names(True) == ["arm_controller", "gripper_controller"]
+
+
+def _fake_sim(monkeypatch, tmp_path, waits):
+    """sim_ctl's start/stop/wait replaced: waits = what each wait for object poses returns, in order."""
+    calls = []
+    monkeypatch.setattr(sim_ctl, "SIM", tmp_path)
+    (tmp_path / "control.log").write_text("sim log")
+    monkeypatch.setattr(sim_ctl, "_start_sim", lambda robot: calls.append("start"))
+    monkeypatch.setattr(sim_ctl, "_stop_sim", lambda: calls.append("stop"))
+    answers = iter(waits)
+    monkeypatch.setattr(sim_ctl, "_wait_for_object_poses", lambda names, timeout=10.0: calls.append("wait") or next(answers))
+    return calls
+
+
+def test_a_sim_that_starts_without_reporting_its_objects_is_restarted_once(monkeypatch, tmp_path):
+    # container check: after a restart the pose plugin sometimes published nothing, and a grip closed on air
+    calls = _fake_sim(monkeypatch, tmp_path, [False, True])
+    sim_ctl._start_with_object_poses("bot", {"box"})
+    assert calls == ["start", "wait", "stop", "start", "wait"]
+    assert (tmp_path / "silent_start_1.log").read_text() == "sim log"     # kept for diagnosis
+
+
+def test_a_sim_that_stays_silent_fails_the_run_in_plain_words(monkeypatch, tmp_path):
+    _fake_sim(monkeypatch, tmp_path, [False, False])
+    with pytest.raises(sim_ctl.SimError, match="did not report where the objects are"):
+        sim_ctl._start_with_object_poses("bot", {"box"})
+
+
+def test_a_scene_without_loose_objects_needs_no_poses(monkeypatch, tmp_path):
+    calls = _fake_sim(monkeypatch, tmp_path, [])
+    sim_ctl._start_with_object_poses("bot", set())
+    assert calls == ["start"]

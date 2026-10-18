@@ -46,9 +46,15 @@ if [ ${#physics[@]} -gt 0 ]; then
     for n in 1 2; do
       out=$(cd /ws/src/${ROBOT}_tasks && timeout 300 python3 -u -m runner "$p" 2>&1) || true
       if echo "$out" | grep -q "^RESULT: ok"; then echo "PASS physics $(basename "$p") run $n: $(echo "$out" | grep ' ok' | tail -n 1)"
-      else echo "FAIL physics $(basename "$p") run $n"; echo "$out" | tail -n 15; status=1; fi
+      else echo "FAIL physics $(basename "$p") run $n"; echo "$out" | tail -n 15; status=1
+        # the moment of failure: who publishes MuJoCo's object poses, one message, and the sim's start
+        echo "--- object poses topic ---"; { ros2 topic info -v /sim/free_joint_states 2>&1 | grep -E "Publisher count|Subscription count|Node name" | head -8; } || true
+        { timeout 5 ros2 topic echo --once /sim/free_joint_states 2>&1 | grep -E "name:|x:" | head -6; } || true
+        echo "--- sim start ---"; { grep -inE "plugin|free_joint|error|warn|fail" /tmp/sim/control.log | head -20; } || true
+        echo "--- sim log head ---"; head -n 25 /tmp/sim/control.log || true; fi
     done
   done
+  for f in /tmp/sim/silent_start_*.log; do echo "NOTE physics: the sim came up without object poses and was restarted ($(basename "$f"))"; done
   if [ "$status" -ne 0 ]; then
     echo "--- sim log ---"; tail -n 30 /tmp/sim/control.log
     echo "--- launch log ---"; tail -n 30 /tmp/launch_physics.log

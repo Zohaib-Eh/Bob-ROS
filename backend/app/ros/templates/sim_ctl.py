@@ -3,6 +3,7 @@ resets it (same scene) or restarts only the MuJoCo control node (new scene). Mov
 Writes /tmp/sim/hardware (mujoco | mock) for the launch file and /tmp/physics for the app."""
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -204,6 +205,41 @@ def _reset_sim():
         node.destroy_node()
 
 
+def _wait_for_object_poses(names: set[str], timeout: float = 10.0) -> bool:
+    """True once MuJoCo's pose plugin has reported every one of `names` on /sim/free_joint_states."""
+    import rclpy
+    from mujoco_ros2_control_msgs.msg import FreeJointStateArray
+    if not rclpy.ok():
+        rclpy.init()
+    node = rclpy.create_node("cad_to_urdf_sim_poses_wait")
+    seen: set[str] = set()
+    node.create_subscription(FreeJointStateArray, "/sim/free_joint_states",
+                             lambda m: seen.update(f.name for f in m.free_joints), 10)
+    end = time.time() + timeout
+    try:
+        while time.time() < end and not names <= seen:
+            rclpy.spin_once(node, timeout_sec=0.1)
+        return names <= seen
+    finally:
+        node.destroy_node()
+
+
+def _start_with_object_poses(robot: str, movable: set[str]) -> None:
+    """Start the sim and make sure it reports where its loose objects are. After a restart the pose plugin
+    sometimes comes up silent (container check: Publisher count 0 on /sim/free_joint_states while the arm
+    moved), so robot.py can't see the objects and a grip closes on nothing. Restart once; keep the silent
+    start's log (/tmp/sim/silent_start_<n>.log) for diagnosis."""
+    for attempt in (1, 2):
+        _start_sim(robot)
+        if not movable or _wait_for_object_poses(movable):
+            return
+        if (SIM / "control.log").exists():
+            shutil.copy(SIM / "control.log", SIM / f"silent_start_{attempt}.log")
+        _stop_sim()
+    raise SimError("The simulation started but did not report where the objects are (tried twice). "
+                   "Restart the session; the sim logs are in /tmp/sim/silent_start_*.log")
+
+
 def prepare(program):
     """Before a run: the program's scene (program = path relative to <robot>_tasks/, or None).
     Under mock hardware only the object list is written (robot.py adds it to MoveIt)."""
@@ -226,7 +262,7 @@ def prepare(program):
                 pass  # a stuck sim or controller: start fresh below
         _stop_sim()
         write_atomic(SIM / "scene.xml", xml)  # the sim node loads it at start
-        _start_sim(robot)
+        _start_with_object_poses(robot, set(info["masses"]))
         Path("/tmp/physics").write_text("mujoco")
     except SimError as exc:
         _stop_sim()
