@@ -1,4 +1,4 @@
-import { FilePlus, Play, Save, Trash2 } from "lucide-react";
+import { Clapperboard, FilePlus, Play, Save, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { FileEntry } from "../../api/program";
@@ -29,15 +29,16 @@ function nextProgram(files: FileEntry[]): string | null {
 }
 
 interface Props { preview: ReactNode; conversation: string | null; running: boolean; changed: Set<string>; onRan(id: string | null): void; onRunning(running: boolean): void;
-  overlay?: ReactNode; showPreview?: number; sessionReady?: boolean }
+  overlay?: ReactNode; showPreview?: number; sessionReady?: boolean; onReplay?(trace: string): void }
 
-export default function Workspace({ preview, conversation, running, changed, onRan, onRunning, overlay, showPreview = 0, sessionReady = false }: Props) {
+export default function Workspace({ preview, conversation, running, changed, onRan, onRunning, overlay, showPreview = 0, sessionReady = false, onReplay }: Props) {
   const [tab, setTab] = useState<"preview" | "code">("preview");
   useEffect(() => { if (showPreview) setTab("preview"); }, [showPreview]);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [file, setFile] = useState<{ path: string; content: string; editable: boolean } | null>(null);
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const [lastTrace, setLastTrace] = useState<string | null>(null);   // the last Code-tab run's recording
   const dirty = !!file && text !== file.content;
 
   // re-list when a task starts/finishes (it may have written files) and when ROS comes up (it sets up the
@@ -93,7 +94,12 @@ export default function Workspace({ preview, conversation, running, changed, onR
     if (dirty && !(await save())) return;
     const started = conversation;
     onRunning(true);
-    try { const r = await api.runFile(file.path, started); setNote(r.ok ? "Run ok" : r.output.trim().split("\n").pop() ?? "Run failed"); onRan(started); }
+    try {
+      const r = await api.runFile(file.path, started);
+      setNote(r.ok ? "Run ok" : r.output.trim().split("\n").pop() ?? "Run failed");
+      setLastTrace(r.trace ?? null);
+      onRan(started);
+    }
     catch (e) { setNote((e as Error).message); }
     finally { onRunning(false); }
   }
@@ -120,6 +126,8 @@ export default function Workspace({ preview, conversation, running, changed, onR
                   <span className="muted small">{file.path}{dirty ? " •" : ""}{file.editable ? "" : " (generated, read-only)"}</span>
                   <span className="spacer" />
                   {note && <span className="muted small">{note}</span>}
+                  {lastTrace && onReplay && <button className="btn" disabled={running} onClick={() => onReplay(lastTrace)}>
+                    <Clapperboard size={14} />Replay</button>}
                   {file.editable && <>
                     <button className="btn" onClick={() => void save()} disabled={running || !dirty}><Save size={14} />Save</button>
                     <button className="btn" onClick={() => void run()} disabled={running}><Play size={14} />Run</button>

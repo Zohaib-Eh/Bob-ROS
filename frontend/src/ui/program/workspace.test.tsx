@@ -136,6 +136,19 @@ describe("Workspace", () => {
     expect(await screen.findByText("task_001.py")).toBeTruthy();
   });
 
+  it("a run from the Code tab can be replayed from there", async () => {   // no chat open: nowhere else to replay it
+    vi.spyOn(api, "runFile").mockResolvedValue({ ok: true, output: "RESULT: ok", trace: "runs/task_001-1.json" });
+    const onReplay = vi.fn();
+    vi.spyOn(api, "listFiles").mockResolvedValue(files);
+    vi.spyOn(api, "readFile").mockImplementation(async (path) => ({ path, content: `# ${path}`, editable: true }));
+    render(<Workspace preview={<div />} conversation={null} running={false} changed={new Set()} onRan={vi.fn()} onRunning={vi.fn()} onReplay={onReplay} />);
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByText("task_001.py")); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^run$/i })); });
+    fireEvent.click(screen.getByRole("button", { name: /Replay/ }));
+    expect(onReplay).toHaveBeenCalledWith("runs/task_001-1.json");
+  });
+
   it("shows the error when a run is refused", async () => {
     vi.spyOn(api, "runFile").mockRejectedValue(new Error("A task is already running."));
     ui();

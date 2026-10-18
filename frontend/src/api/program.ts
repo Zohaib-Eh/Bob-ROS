@@ -97,7 +97,7 @@ export async function saveFile(path: string, content: string, conversation: stri
 export async function deleteFile(path: string): Promise<void> {
   await send(`/program/files/content?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 }
-export async function runFile(path: string, conversation: string | null): Promise<{ ok: boolean; output: string }> {
+export async function runFile(path: string, conversation: string | null): Promise<{ ok: boolean; output: string; trace?: string | null }> {
   return (await send("/program/files/run", json({ path, conversation }))).json();
 }
 

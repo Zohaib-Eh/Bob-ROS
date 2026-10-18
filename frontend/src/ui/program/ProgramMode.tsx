@@ -232,7 +232,7 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
         </section>
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
-            sessionReady={status.state === "ready"}
+            sessionReady={status.state === "ready"} onReplay={(t) => void startReplay(t)}
             onRan={() => void reload()}
             onRunning={(r) => { if (mounted.current) setRunningId(r ? activeId.current ?? NO_CHAT : null); }} showPreview={previewTick}
             overlay={replay ? <Replay trace={replay} viewer={ctx.viewer} links={buildExportRequest(ctx.model).links}
