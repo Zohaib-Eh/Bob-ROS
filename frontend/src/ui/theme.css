@@ -180,6 +180,9 @@ details > summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .tabs button.active { color: inherit; border-bottom-color: var(--accent); }
 .tab-body { flex: 1; min-height: 0; }
 .code-tab { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px 1fr; }
+.tree-col { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+.tree-col > .btn { margin: 8px 8px 0; }
+.tree-col .file-tree { flex: 1; border-right: 0; }
 .file-tree { border-right: 1px solid var(--border); overflow: auto; padding: 8px; font-size: 13px; }
 .file-tree ul { list-style: none; margin: 0 0 8px; padding: 0; }
 .file-tree .tree-group { font-size: 11px; text-transform: uppercase; color: var(--muted); margin: 6px 0 2px; }

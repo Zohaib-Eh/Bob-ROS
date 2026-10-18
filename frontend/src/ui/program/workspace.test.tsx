@@ -112,6 +112,30 @@ describe("Workspace", () => {
     expect(screen.getByText("Run ok")).toBeTruthy();
   });
 
+  it("New program writes the next numbered program from a starter and opens it", async () => {   // found driving the app
+    const save = vi.spyOn(api, "saveFile").mockResolvedValue();
+    ui();
+    await openCode();
+    await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /new program/i })); });
+    const [path, content] = save.mock.calls[0];
+    expect(path).toBe("bot_tasks/programs/task_002_new_program.py");   // task_001.py exists
+    expect(content).toContain("from robot import Robot");
+    expect(content).toContain("SCENE = [");
+    expect(screen.getByText("bot_tasks/programs/task_002_new_program.py")).toBeTruthy();
+  });
+
+  it("lists the programs once ROS is up, without leaving the Code tab", async () => {   // found driving the app
+    const list = vi.spyOn(api, "listFiles").mockResolvedValue([]);
+    vi.spyOn(api, "readFile").mockImplementation(async (path) => ({ path, content: "", editable: true }));
+    const props = { preview: <div />, conversation: null, running: false, changed: new Set<string>(), onRan: vi.fn(), onRunning: vi.fn() };
+    const { rerender } = render(<Workspace {...props} sessionReady={false} />);
+    await openCode();
+    expect(screen.getByText("Start ROS to see this robot's programs.")).toBeTruthy();
+    list.mockResolvedValue(files);
+    await act(async () => { rerender(<Workspace {...props} sessionReady={true} />); });
+    expect(await screen.findByText("task_001.py")).toBeTruthy();
+  });
+
   it("shows the error when a run is refused", async () => {
     vi.spyOn(api, "runFile").mockRejectedValue(new Error("A task is already running."));
     ui();
