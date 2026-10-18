@@ -70,6 +70,7 @@ export default function MenuBar({ ctx, lock = null }: { ctx: Ctx; lock?: string 
       dispatch({ type: "load", model: { ...emptyModel(), bodies: Object.fromEntries(r.bodies.map((b) => [b.id, { ...b, source: file.name }])),
         links: r.links, joints: r.joints, rootLinkId: r.root_link_id, gripper: r.gripper, fileWarnings: r.warnings } });
       if (r.robot_name && NAME_RE.test(r.robot_name)) ctx.setRobotName(r.robot_name);
+      notify(`Imported ${file.name}. ${r.warnings.map((w) => w.message).join(" ")}`);   // no CAD faces, left-out links...
       ctx.setAutoGrouped(true);   // links come from the file
       goTo("connect");            // its joints, to review
     } catch (e) {

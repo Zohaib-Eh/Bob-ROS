@@ -42,7 +42,9 @@ describe("MenuBar", () => {
       robot_name: "ur5", bodies: [boxBody("base_part", [0, 0, 0], [1, 1, 1]), boxBody("arm_part", [0, 0, 1], [1, 1, 2])],
       links: [link("base"), link("arm")], joints: [joint], root_link_id: "base", gripper: null,
       warnings: [{ code: "no_faces", message: "no CAD faces", fixes: [] }] });
-    bar(imported([boxBody("old", [0, 0, 0], [1, 1, 1])]));
+    let notify: ReturnType<typeof vi.fn> | null = null;
+    render(<Harness start={imported([boxBody("old", [0, 0, 0], [1, 1, 1])])}
+      ui={(ctx) => { notify = ctx.notify as ReturnType<typeof vi.fn>; return <MenuBar ctx={ctx} />; }} />);
     vi.spyOn(window, "confirm").mockReturnValue(true);              // it replaces the robot being built
     open("File");
     const file = new File(["x"], "ur5.zip");
@@ -52,6 +54,7 @@ describe("MenuBar", () => {
     expect(s.links.map((l: { id: string }) => l.id)).toEqual(["base", "arm"]);
     expect(s.joints).toHaveLength(1);
     expect([s.rootLinkId, s.robotName, s.step, s.sources]).toEqual(["base", "ur5", "connect", ["ur5.zip"]]);
+    expect(notify!).toHaveBeenCalledWith("Imported ur5.zip. no CAD faces");   // what came in, and what didn't
   });
 
   it("Edit ▸ Undo undoes, and is disabled with nothing to undo", () => {
