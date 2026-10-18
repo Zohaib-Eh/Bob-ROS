@@ -17,6 +17,11 @@ GRIP_FRICTION = "1 0.005 0.0001"
 GRIP_SPEED = 0.1            # m/s: a real gripper's closing speed (~50-150 mm/s), set by finger damping
 GRIP_SOLREF = "0.004 1"     # time constant 2 × timestep: the stiffest MuJoCo keeps stable
 GRIP_SOLIMP = "0.99 0.999 0.0001"   # near-rigid pads and coupling (defaults 0.9 0.95 0.001)
+WHEEL_FRICTION = "1 0.005 0.0001"   # rubber on a floor
+WHEEL_SLIP = 0.5            # rad/s short of its target at which a wheel motor pushes with full torque
+LIFT = 0.0005               # m: the wheels start this far above the floor, settling onto it
+BASE_JOINTS = [("base_x", "slide", "1 0 0"), ("base_y", "slide", "0 1 0"), ("base_z", "slide", "0 0 1"),
+               ("base_yaw", "hinge", "0 0 1"), ("base_pitch", "hinge", "0 1 0"), ("base_roll", "hinge", "1 0 0")]
 _last_xml = threading.Lock()  # mj_saveLastXML saves MuJoCo's process-wide "last loaded model"
 
 
@@ -52,7 +57,53 @@ def _exclude_touching_at_home(root, model: mujoco.MjModel) -> None:
             ET.SubElement(contact, "exclude", {"body1": a, "body2": b})
 
 
-def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | None, grip: dict | None = None) -> str:
+def _mobile(root, mobile: dict, efforts: dict[str, float] | None) -> None:
+    """The base free on the floor: six scalar joints, not a free joint, so the arm's gravity compensation can be
+    kept inside the robot (a free joint takes its share as an outside force: the floor carried 98 of 147 N);
+    wheels roll on fitted cylinders with velocity motors; casters are frictionless spheres; the base's own
+    shapes (contype 2) hit objects but not the floor."""
+    world = root.find("worldbody")
+    base = world.find(f"body[@name='{mobile['base']}']")
+    base.set("pos", f"0 0 {-mobile['ground'] + LIFT!r}")
+    base.set("gravcomp", "0")
+    at = 1 if base.find("inertial") is not None else 0
+    for k, (name, kind, axis) in enumerate(BASE_JOINTS):
+        base.insert(at + k, ET.Element("joint", {
+            "name": name, "type": kind, "axis": axis, "limited": "false", "damping": "0",
+            "actuatorgravcomp": "true", "actuatorfrclimited": "true", "actuatorfrcrange": "-1e-9 1e-9"}))
+    for g in base.findall("geom"):
+        g.set("contype", "2")
+        g.set("conaffinity", "2")
+    for i, (x, y, z, r) in enumerate(mobile["casters"]):
+        ET.SubElement(base, "geom", {"name": f"caster_{i}", "type": "sphere", "size": repr(r), "pos": f"{x!r} {y!r} {z!r}",
+                                     # priority: its condim wins over the floor's (MuJoCo takes the larger otherwise)
+                                     "condim": "1", "priority": "1", "rgba": "0.3 0.3 0.3 1"})
+    act = root.find("actuator")
+    if act is None:
+        act = ET.SubElement(root, "actuator")
+    for joint, w in mobile["wheels"].items():
+        body = next(b for b in base.iter("body") if b.get("name") == w["link"])
+        body.set("gravcomp", "0")
+        for g in body.findall("geom"):
+            g.set("contype", "2")
+            g.set("conaffinity", "2")
+        c = [a - o for a, o in zip(w["center"], w["origin"])]   # the body's frame is the joint's, world-aligned
+        ET.SubElement(body, "geom", {"name": f"{w['link']}_tire", "type": "cylinder", "size": f"{w['radius']!r} {w['width'] / 2!r}",
+                                     "pos": " ".join(repr(v) for v in c), "zaxis": " ".join(repr(float(v)) for v in w["axis"]),
+                                     "friction": WHEEL_FRICTION, "rgba": "0.1 0.1 0.1 1"})
+        for a in list(act):
+            if a.get("joint") == joint:
+                act.remove(a)
+        if efforts and joint in efforts:
+            e = float(efforts[joint])
+            ET.SubElement(act, "velocity", {"name": f"{joint}_motor", "joint": joint, "kv": repr(e / WHEEL_SLIP),
+                                            "forcelimited": "true", "forcerange": f"{-e:g} {e:g}"})
+        for j in body.findall("joint"):
+            j.attrib.pop("actuatorgravcomp", None)
+
+
+def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | None, grip: dict | None = None,
+               mobile: dict | None = None) -> str:
     """MJCF text for our URDF. `meshes` maps "<link>.stl" to bytes; `efforts` maps URDF joint names to
     motor strength (None = no motors). Meshes are referenced from ../meshes, next to urdf/.
     `grip` = {"links": [base, finger, finger], "fingers": [leader, follower], "follower": follower}
@@ -118,5 +169,7 @@ def build_mjcf(urdf: str, meshes: dict[str, bytes], efforts: dict[str, float] | 
             if eq.get("joint1") == grip["follower"] or eq.get("joint2") == grip["follower"]:
                 eq.set("solref", GRIP_SOLREF)   # an <equality><joint>; MuJoCo's default gives way under grip force
                 eq.set("solimp", GRIP_SOLIMP)
+    if mobile is not None:
+        _mobile(root, mobile, efforts)
     _exclude_touching_at_home(root, model)
     return ET.tostring(root, encoding="unicode")

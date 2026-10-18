@@ -217,7 +217,7 @@ def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str, 
             for i in range(o["pieces"]):
                 mesh = f"wc_{o['name']}_c{i}"
                 ET.SubElement(asset, "mesh", {"name": mesh, "file": str(Path(fixture_dir) / f"{Path(o['file']).stem}_c{i}.stl")})
-                g = {"type": "mesh", "mesh": mesh}
+                g = {"type": "mesh", "mesh": mesh, "conaffinity": "3"}
                 if o["friction"] is not None:
                     g["friction"] = f"{o['friction']!r} 0.005 0.0001"
                 ET.SubElement(body, "geom", g)
@@ -225,7 +225,7 @@ def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str, 
         if not o["fixed"]:
             ET.SubElement(body, "freejoint", {"name": o["name"]})
         half = [s / 2 for s in o["size"]] if o["shape"] == "box" else [o["size"][0], o["size"][1] / 2]
-        g = {"type": o["shape"], "size": _fmt(half)}
+        g = {"type": o["shape"], "size": _fmt(half), "conaffinity": "3"}   # 3: also a mobile base's own shapes (contype 2)
         if o["mass"] is not None:
             g["mass"] = repr(o["mass"])
         if o["friction"] is not None:

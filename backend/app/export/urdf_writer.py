@@ -15,7 +15,8 @@ from scipy.spatial.transform import Rotation
 from app.export.gripper import (DEFAULT_GRIP_FORCE, checked, convex_pieces, inward_joints, jaw_depth, jaw_gap,
                                 tcp_point)
 from app.massprops.link_mass import compute_link_mass_properties
-from app.models import Body, Gripper, Joint, Link, PartWarning
+from app.export.mobile import WHEEL_SPEED, Drive, drive_info
+from app.models import Body, Gripper, Joint, Link, Mobile, PartWarning
 from app.sim.mjcf import build_mjcf, compile_mjcf
 from app.sim.torque import required_efforts, suggest
 from app.validate.structural import validate_structure
@@ -93,7 +94,8 @@ def _joint_names(joints: list[Joint], links_by_id) -> dict[str, str]:
     return names
 
 
-def _add_joint_element(robot, joint: Joint, name: str, links_by_id, frames, effort: float = 100.0) -> None:
+def _add_joint_element(robot, joint: Joint, name: str, links_by_id, frames, effort: float = 100.0,
+                       wheel: bool = False) -> None:
     joint_el = ET.SubElement(robot, "joint", {"name": name, "type": joint.type})
     ET.SubElement(joint_el, "parent", {"link": links_by_id[joint.parent_link_id].name})
     ET.SubElement(joint_el, "child", {"link": links_by_id[joint.child_link_id].name})
@@ -109,6 +111,8 @@ def _add_joint_element(robot, joint: Joint, name: str, links_by_id, frames, effo
             "lower": str(joint.limit_lower), "upper": str(joint.limit_upper),
             "effort": f"{effort:g}", "velocity": "1.0",
         })
+    elif wheel:   # a wheel turns for ever: no position limits, but a motor strength and top speed
+        ET.SubElement(joint_el, "limit", {"effort": f"{effort:g}", "velocity": f"{WHEEL_SPEED:g}"})
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
@@ -150,6 +154,7 @@ def export_urdf(
     efforts: dict[str, float] | None = None,
     gripper: Gripper | None = None,
     collision_pieces: dict[str, int] | None = None,
+    drive: Drive | None = None,
 ) -> str:
     """URDF text. `efforts` maps joint ids to motor strength; a missing one is written as 100.
     With `gripper`: both finger axes point inward, the follower <mimic>s the leader, and a fixed
@@ -173,10 +178,14 @@ def export_urdf(
     for link in links:
         _add_link_element(robot, robot_name, link, frames[link.id], (collision_pieces or {}).get(link.id, 0))
     names = _joint_names(joints, links_by_id)
+    wheels = set(drive.left + drive.right) if drive else set()
     for joint in joints:
-        _add_joint_element(robot, joint, names[joint.id], links_by_id, frames, (efforts or {}).get(joint.id, 100.0))
+        _add_joint_element(robot, joint, names[joint.id], links_by_id, frames, (efforts or {}).get(joint.id, 100.0),
+                           joint.id in wheels)
     if gripper is not None:
         _add_gripper(robot, gripper, joints, names, links_by_id, frames, bodies_by_link)
+    if drive is not None:
+        _add_mobile(robot, drive, names)
 
     return minidom.parseString(ET.tostring(robot, encoding="unicode")).toprettyxml(indent="  ")
 
@@ -222,6 +231,21 @@ def _add_gripper(robot, gripper: Gripper, joints, names, links_by_id, frames, bo
                       leader.axis, z, tip)
     # an extension tag (like <gazebo>; URDF parsers skip it): the jaw gap at q = 0, which travel alone can't give
     ET.SubElement(robot, "gripper", {"jaw_gap": f"{gap:.6f}", "jaw_depth": f"{depth:.6f}"})
+
+
+def _add_mobile(robot, d: Drive, names) -> None:
+    """An extension tag (URDF parsers skip it, like <gripper>): how the base drives, for ROS and MuJoCo."""
+    ET.SubElement(robot, "mobile_base", {
+        "drive": d.drive, "left": " ".join(names[j] for j in d.left), "right": " ".join(names[j] for j in d.right),
+        "wheel_radius": f"{d.radius:.6f}", "wheel_separation": f"{d.separation:.6f}", "ground": f"{d.ground:.6f}",
+        "casters": "; ".join(" ".join(f"{v:.6f}" for v in c) for c in d.casters),
+        "footprint": " ".join(f"{v:.6f}" for v in d.footprint)})
+
+
+def _wheel_effort(links: list[Link], n_wheels: int, radius: float) -> float:
+    """N·m per wheel that accelerates the whole robot at 0.5 m/s² up a 5% slope, twice over."""
+    mass = sum(l.mass_kg or 0.0 for l in links)
+    return 2 * mass * (0.5 + 9.81 * 0.05) * radius / n_wheels
 
 
 def package_xml(robot_name: str) -> str:
@@ -369,12 +393,14 @@ def export_package(
     joints: list[Joint],
     bodies_by_link: dict[str, list[Body]],
     gripper: Gripper | None = None,
+    mobile: Mobile | None = None,
 ) -> bytes:
     """The ROS description package zip. A robot MuJoCo can't load still exports: its efforts fall back
     to 100 (or max_effort) and the zip has no mjcf/; the physics check reports why. With `gripper`
     the fingers' effort is their grip force (max_effort or 40 N) and the follower has no motor."""
     links, bodies_by_link, meshes, pieces = _prepared(robot_name, links, joints, bodies_by_link, gripper)
-    kw = {"gripper": gripper, "collision_pieces": pieces}
+    drive = drive_info(links, joints, bodies_by_link, mobile) if mobile is not None else None
+    kw = {"gripper": gripper, "collision_pieces": pieces, "drive": drive}
     urdf = export_urdf(robot_name, links, joints, bodies_by_link, **kw)  # structural errors raise here
     try:
         sug = _suggested_from(urdf, links, joints, meshes)
@@ -382,6 +408,9 @@ def export_package(
         sug = {}
     fingers = {gripper.leader_joint_id, gripper.follower_joint_id} if gripper else set()
     efforts = {j.id: j.max_effort or (DEFAULT_GRIP_FORCE if j.id in fingers else sug.get(j.id, 100.0)) for j in joints}
+    if drive is not None:
+        wheel = _wheel_effort(links, len(drive.left) + len(drive.right), drive.radius)
+        efforts |= {j: by.max_effort or wheel for j in drive.left + drive.right for by in [next(x for x in joints if x.id == j)]}
     urdf = export_urdf(robot_name, links, joints, bodies_by_link, efforts, **kw)
     names = _joint_names(joints, {l.id: l for l in links})
     motors = {names[j.id]: efforts[j.id] for j in joints if not (gripper and j.id == gripper.follower_joint_id)}
@@ -391,8 +420,18 @@ def export_package(
         by_id = {l.id: l for l in links}
         grip = {"links": [by_id[i].name for i in (leader.parent_link_id, leader.child_link_id, follower.child_link_id)],
                 "fingers": [names[leader.id], names[follower.id]], "follower": names[follower.id]}
+    mob = None
+    if drive is not None:
+        by_id = {l.id: l for l in links}
+        by_j = {j.id: j for j in joints}
+        mob = {"base": next(l.name for l in links if l.id not in {j.child_link_id for j in joints}),
+               "ground": drive.ground, "casters": drive.casters,
+               "wheels": {names[j]: {"link": by_id[by_j[j].child_link_id].name, "origin": by_j[j].origin_xyz,
+                                     "center": drive.wheels[j].center, "radius": drive.wheels[j].radius,
+                                     "width": drive.wheels[j].width, "axis": by_j[j].axis}
+                          for j in drive.left + drive.right}}
     try:
-        mjcf = build_mjcf(urdf, meshes, motors, grip)  # fixed joints get no motor
+        mjcf = build_mjcf(urdf, meshes, motors, grip, mob)  # fixed joints get no motor
     except (ValueError, mujoco.FatalError):
         mjcf = None
     buf = io.BytesIO()

@@ -117,3 +117,10 @@ class Gripper(_Model):
     leader_joint_id: str
     follower_joint_id: str
     tcp_offset_m: float = 0.0
+
+
+class Mobile(_Model):
+    """A wheeled base: the driven wheel joints on each side (the root link is the base). One per side is a
+    differential drive (plus casters), more is a skid steer."""
+    left_joint_ids: list[str] = Field(min_length=1)
+    right_joint_ids: list[str] = Field(min_length=1)

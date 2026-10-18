@@ -105,6 +105,53 @@ def six_axis_with_gripper(name: str = "sixg"):
     return links, joints, bodies, Gripper(leader_joint_id="finger_l", follower_joint_id="finger_r")
 
 
+CHASSIS_TOP = 0.18   # m: the fixture chassis' top face, where its arm stands
+
+
+def _wheel_body(id_, center, radius=0.08, width=0.04):
+    """A wheel: a cylinder about y."""
+    import numpy as np
+    c = trimesh.creation.cylinder(radius=radius, height=width, sections=48)
+    c.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    c.apply_translation(center)
+    return Body(id=f"{id_}_body", name=id_, vertices=[tuple(v) for v in c.vertices], triangles=[tuple(t) for t in c.faces], faces=[])
+
+
+def mobile_arm(name: str = "mobi", arm: bool = True, skid: bool = False):
+    """A differential-drive base (chassis 0.5 x 0.4 x 0.12 m, top at z 0.18; wheels r 0.08 at x 0.1, y ±0.25,
+    axles along y, resting on z = 0; a caster bump under the rear at x -0.2) carrying six_axis_with_gripper's
+    arm, moved up onto the chassis. skid: four wheels (x ±0.15), no caster.
+    Returns (links, joints, bodies_by_link, Gripper | None, Mobile)."""
+    from app.models import Mobile
+    chassis = [_boxes_body("chassis", [((-0.25, -0.2, 0.06), (0.25, 0.2, CHASSIS_TOP))])]
+    if not skid:
+        chassis.append(_boxes_body("caster", [((-0.22, -0.02, 0.0), (-0.18, 0.02, 0.06))]))
+    links, joints = [Link(id="chassis", name="chassis", body_ids=[b.id for b in chassis], density_kg_m3=1000.0)], []
+    bodies = {"chassis": chassis}
+    xs = (0.15, -0.15) if skid else (0.1,)
+    left, right = [], []
+    for i, x in enumerate(xs):
+        for side, y, ids in (("l", 0.25, left), ("r", -0.25, right)):
+            n = f"wheel_{side}{i if skid else ''}"
+            links.append(_link(n))
+            bodies[n] = [_wheel_body(n, (x, y, 0.08))]
+            joints.append(Joint(id=f"j_{n}", parent_link_id="chassis", child_link_id=n, type="continuous",
+                                origin_xyz=(x, y, 0.08), origin_rpy=(0.0, 0.0, 0.0), axis=(0.0, 1.0, 0.0), source="confirmed"))
+            ids.append(f"j_{n}")
+    g = None
+    if arm:
+        a_links, a_joints, a_bodies, g = six_axis_with_gripper(name)
+        up = CHASSIS_TOP - 0.07                       # the arm's base box (z 0.07..0.13) onto the chassis top
+        lift = lambda v: (v[0], v[1], v[2] + up)
+        a_joints = [j.model_copy(update={"origin_xyz": lift(j.origin_xyz)}) for j in a_joints]
+        a_bodies = {k: [b.model_copy(update={"vertices": [lift(v) for v in b.vertices]}) for b in bs] for k, bs in a_bodies.items()}
+        links += a_links
+        joints += [Joint(id="arm_mount", parent_link_id="chassis", child_link_id="base", type="fixed",
+                         origin_xyz=(0.0, 0.0, CHASSIS_TOP), origin_rpy=(0.0, 0.0, 0.0), source="confirmed")] + a_joints
+        bodies.update(a_bodies)
+    return links, joints, bodies, g, Mobile(left_joint_ids=left, right_joint_ids=right)
+
+
 def six_axis_with_gripper_zip(tmp_path: Path, name: str = "sixg") -> Path:
     links, joints, bodies, g = six_axis_with_gripper(name)
     path = tmp_path / f"{name}.zip"
