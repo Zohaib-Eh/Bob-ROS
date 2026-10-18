@@ -104,6 +104,24 @@ RULES = """## Rules
 - Finish with a two-line summary: what the program does, and the last run result."""
 
 
+def _gripper_lines(g, tip: str) -> list[str]:
+    mm = lambda v: f"{v * 1000:.0f} mm"
+    closed = max(0.0, g.width(g.upper))
+    size = (f"- Opens to {mm(g.opening)} and closes fully" if closed < 0.001 else
+            f"- Grips objects {closed * 1000:.0f} to {mm(g.opening)} across the jaws: fully closed the jaw tips are still "
+            f"{mm(closed)} apart, so anything narrower can't be gripped")
+    return ["Gripper: two fingers that squeeze an object to hold it (friction only, nothing is glued).",
+            size + ".",
+            f"- Grip force {g.effort:g} N per finger: holds about {2 * g.effort / 9.81:.1f} kg here (friction 1; real pads"
+            " often have 0.3-0.6, so less). Heavier, or fast moves, and it slips.",
+            "- Leave at least 5 mm each side between the open jaws and the object on the way down: with less, a",
+            "  slight lag swings a jaw into it.",
+            f"- The tool point ({tip}) is between the fingertips: move_to / move_line place it, not the flange.",
+            "- To pick: r.release() to open, approach from above with r.tool_down(yaw=...) so the jaws close across",
+            "  two opposite faces (yaw = the object's yaw, or that + pi/2), lower so the object sits between the",
+            "  fingertips, r.grip(name), then lift. r.release() lets go."]
+
+
 def reach(chain: Chain, samples: int = 2000, seed: int = 0) -> float:
     rng = np.random.default_rng(seed)
     best = 0.0
@@ -139,13 +157,7 @@ def brief(chain: Chain, robot: str, workcell_text: str | None = None) -> str:
         lines.append(f"- {j.name}: {j.type}, {span}, home {h:.3f}")
     lines += ["", "Workcell (always present; see workcell.yaml):"] + _workcell_lines(workcell_text)
     if chain.gripper is not None:
-        g = chain.gripper
-        lines += ["", "Gripper: two fingers that squeeze an object to hold it (friction only, nothing is glued).",
-                  f"- Opens to {g.opening * 1000:.0f} mm; grip force {g.effort:g} N per finger.",
-                  f"- The tool point ({chain.tip}) is between the fingertips: move_to / move_line place it, not the flange.",
-                  "- To pick: r.release() to open, approach from above with r.tool_down(yaw=...) so the jaws close across",
-                  "  two opposite faces (yaw = the object's yaw, or that + pi/2), lower so the object sits between the",
-                  "  fingertips, r.grip(name), then lift. r.release() lets go; heavy or smooth objects can slip."]
+        lines += [""] + _gripper_lines(chain.gripper, chain.tip)
     rules = RULES.replace("__MAX_RUNS__", str(MAX_RUNS)).replace("__ROBOT__", robot)
     # with a gripper, its own pick example replaces the glue one (attach 5 mm above the box)
     api = API_DOC if chain.gripper is None else API_DOC.split(EXAMPLE_HEAD)[0] + "\n\n" + GRIPPER_DOC

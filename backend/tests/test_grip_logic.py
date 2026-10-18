@@ -33,11 +33,18 @@ def test_yaw_rotation_lines_the_jaws_up_with_the_requested_direction():
     assert (R @ [0.0, 0.0, 1.0]) == pytest.approx([0.0, 0.0, -1.0], abs=1e-9)   # still pointing down
 
 
-def test_fits_reports_an_object_too_wide_for_the_jaws():
+def test_extent_is_the_objects_size_across_the_jaws():
     box12 = {"shape": "box", "size": [0.12, 0.04, 0.04], "rpy": [0, 0, 0]}
-    box4 = {"shape": "box", "size": [0.04, 0.04, 0.04], "rpy": [0, 0, 0]}
-    assert gl.fits(box12, (1.0, 0.0, 0.0), 0.06) == pytest.approx(0.12)
-    assert gl.fits(box12, (0.0, 1.0, 0.0), 0.06) is None     # jaws across its narrow side
-    assert gl.fits(box4, (1.0, 0.0, 0.0), 0.06) is None
+    assert gl.extent(box12, (1.0, 0.0, 0.0)) == pytest.approx(0.12)
+    assert gl.extent(box12, (0.0, 1.0, 0.0)) == pytest.approx(0.04)     # jaws across its narrow side
     can = {"shape": "cylinder", "size": [0.05, 0.1], "rpy": [0, 0, 0]}
-    assert gl.fits(can, (1.0, 0.0, 0.0), 0.06) == pytest.approx(0.1)   # 0.1 diameter across the axis
+    assert gl.extent(can, (1.0, 0.0, 0.0)) == pytest.approx(0.1)        # 0.1 diameter across the axis
+
+
+def test_size_problem_says_why_an_object_cannot_be_gripped():
+    # an AirTAC HFK40's bare jaws: 30 mm apart closed, 60 open
+    assert gl.size_problem("box", 0.04, 0.06, 0.03) is None
+    wide = gl.size_problem("box", 0.08, 0.06, 0.03)
+    assert "'box' is 80 mm across the jaws" in wide and "open only to 60 mm" in wide
+    narrow = gl.size_problem("box", 0.02, 0.06, 0.03)
+    assert "'box' is 20 mm across the jaws" in narrow and "still 30 mm apart" in narrow and "fingers" in narrow

@@ -43,16 +43,26 @@ def _object_R(rpy) -> np.ndarray:
     return _rot((0, 0, 1), y) @ _rot((0, 1, 0), p) @ _rot((1, 0, 0), r)
 
 
-def fits(obj: dict, closing_dir_base, open_width: float) -> float | None:
-    """The object's extent along the jaws' closing direction when that exceeds open_width, else None.
-    obj: a scene object (shape, size, rpy) as in meta.json."""
+def extent(obj: dict, closing_dir_base) -> float:
+    """The object's size along the jaws' closing direction (m). obj: a scene object (shape, size, rpy)
+    as in meta.json."""
     d = np.asarray(closing_dir_base, float)
     d /= np.linalg.norm(d)
     local = _object_R(obj.get("rpy", (0, 0, 0))).T @ d
-    if obj["shape"] == "box":
-        extent = float(np.abs(local) @ np.asarray(obj["size"], float))
-    else:   # cylinder: axis along local z, size = (radius, height)
+    if obj["shape"] != "box":   # cylinder: axis along local z, size = (radius, height)
         r, h = obj["size"]
         along = abs(local[2])
-        extent = 2 * r * math.sqrt(max(0.0, 1 - along ** 2)) + h * along
-    return extent if extent > open_width + 1e-9 else None
+        return 2 * r * math.sqrt(max(0.0, 1 - along ** 2)) + h * along
+    return float(np.abs(local) @ np.asarray(obj["size"], float))
+
+
+def size_problem(name: str, across: float, opening: float, closed: float) -> str | None:
+    """Why `name` (`across` m wide between the jaws) can't be gripped by jaws that open to `opening`
+    and close to `closed` m apart; None when it can."""
+    mm = lambda v: f"{v * 1000:.0f} mm"
+    if across > opening + 1e-9:
+        return f"'{name}' is {mm(across)} across the jaws, but they open only to {mm(opening)}."
+    if across < closed - 1e-9:
+        return (f"'{name}' is {mm(across)} across the jaws, but fully closed they are still {mm(closed)} apart, "
+                "so they can't squeeze it. Grip it across a wider side, or give the gripper fingers that close further.")
+    return None

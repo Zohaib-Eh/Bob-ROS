@@ -248,3 +248,15 @@ def test_release_puts_moveits_copy_where_mujoco_has_the_object(wsg):
     lib = (wsg / "sixg_program" / "robot.py").read_text(encoding="utf-8")
     release = lib[lib.index("    def release(self):"):lib.index("    def grip(self, name=None):")]
     assert "self._sync_from_sim(name)" in release   # else the carried copy overlaps the open fingers
+
+
+def test_gripper_lines_give_the_size_range_clearance_and_weight():
+    import numpy as np
+    from app.ros.chain import GripperInfo
+    from app.ros.program_pkg import _gripper_lines
+    hfk = GripperInfo("l", "r", "b", -0.015, 0.0, 40.0, np.array([1.0, 0, 0]), 0.03)   # AirTAC HFK40 jaws
+    text = "\n".join(_gripper_lines(hfk, "tcp"))
+    assert "Grips objects 30 to 60 mm across the jaws" in text and "still 30 mm apart" in text
+    assert "at least 5 mm each side" in text and "about 8.2 kg" in text
+    full = GripperInfo("l", "r", "b", 0.0, 0.025, 40.0, np.array([1.0, 0, 0]), 0.05)
+    assert "Opens to 50 mm and closes fully" in "\n".join(_gripper_lines(full, "tcp"))

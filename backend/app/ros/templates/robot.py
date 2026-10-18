@@ -385,9 +385,10 @@ class Robot:
         obj = next((o for o in _meta()["objects"] if o["name"] == name), None)
         if obj is not None:
             T = self._tool_matrix()
-            wide = grip_logic.fits(obj, T[:3, :3] @ np.asarray(g.closing_axis_tcp, float), g.opening)
-            if wide is not None:
-                raise GripError(f"'{name}' is {wide:.2f} m wide; the gripper opens to {g.opening:.2f} m.")
+            across = grip_logic.extent(obj, T[:3, :3] @ np.asarray(g.closing_axis_tcp, float))
+            problem = grip_logic.size_problem(name, across, g.opening, g.width(g.upper))
+            if problem:
+                raise GripError(problem)
         self._gripper_cmd(g.upper)
         if _PHYSICS and grip_logic.outcome(self.gripper_width(), g.width(g.upper)) == "empty":
             if name is None:
