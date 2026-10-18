@@ -1,6 +1,8 @@
 """Gripper geometry for export: finger axes that close inward, the tool point between the fingertips,
 and convex collision pieces for the gripper's links (MuJoCo collides a mesh as its convex hull, which
 would fill an L-shaped finger's hook)."""
+import functools
+
 import numpy as np
 
 from app.models import Body, Gripper, Joint
@@ -51,17 +53,27 @@ def jaw_gap(leader_vertices, follower_vertices, closing) -> float:
 
 
 def convex_pieces(vertices, triangles, max_pieces: int = 8) -> list[tuple[list, list]]:
-    """The mesh split into convex parts (CoACD), each as (vertices, triangles)."""
+    """The mesh split into convex parts (CoACD), each as (vertices, triangles). Cached per mesh:
+    Simulate and Program export the same fingers again and again."""
+    v, f = np.ascontiguousarray(vertices, float), np.ascontiguousarray(triangles, np.int64)
+    return _pieces(v.tobytes(), f.tobytes(), max_pieces)
+
+
+@functools.lru_cache(maxsize=32)   # ponytail: per process; a disk cache if restarts make exports slow
+def _pieces(vertex_bytes: bytes, triangle_bytes: bytes, max_pieces: int):
     import coacd
     coacd.set_log_level("error")
     import trimesh
-    # Light settings: well under a second per finger instead of ~33 s with the defaults. CoACD's
-    # remesh step (needed only for leaky meshes) inflates a closed finger's volume ~12%, so it runs
-    # only when the mesh isn't watertight; a closed CAD solid goes straight to decomposition.
+    vertices = np.frombuffer(vertex_bytes, float).reshape(-1, 3)
+    triangles = np.frombuffer(triangle_bytes, np.int64).reshape(-1, 3)
+    # Light settings: ~5 s for a real CAD jaw (AirTAC HFK40, tapped holes and chamfers; ~8-18 s at
+    # resolution 400 / 20 iterations, ~33 s for a simple finger with the defaults), pieces within ~6%
+    # of the solid's volume. CoACD's remesh step (needed only for leaky meshes) inflates a closed
+    # finger ~12%, so it runs only when the mesh isn't watertight.
     closed = trimesh.Trimesh(vertices, triangles, process=False).is_watertight
-    parts = coacd.run_coacd(coacd.Mesh(np.asarray(vertices, float), np.asarray(triangles, int)),
+    parts = coacd.run_coacd(coacd.Mesh(vertices, triangles),
                             threshold=0.1, max_convex_hull=max_pieces, preprocess_mode="off" if closed else "on",
-                            resolution=400, mcts_iterations=20, mcts_max_depth=2)
+                            resolution=200, mcts_iterations=10, mcts_nodes=10, mcts_max_depth=2)
     return [(v.tolist(), f.tolist()) for v, f in parts]
 
 

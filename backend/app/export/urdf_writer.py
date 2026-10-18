@@ -324,7 +324,9 @@ def _prepared(robot_name, links, joints, bodies_by_link, gripper: Gripper | None
     gripper_links = set()
     if gripper is not None:
         leader, follower = checked(gripper, joints)
-        gripper_links = {leader.parent_link_id, leader.child_link_id, follower.child_link_id}
+        # only the fingers touch what is gripped; a real gripper body (ports, holes) takes CoACD
+        # ~30-40 s, so it keeps one convex hull (MuJoCo's default for a mesh)
+        gripper_links = {leader.child_link_id, follower.child_link_id}
     for link in links:
         parts = [trimesh.Trimesh(vertices=b.vertices, faces=b.triangles, process=False)
                  for b in bodies_by_link.get(link.id, []) if b.vertices]

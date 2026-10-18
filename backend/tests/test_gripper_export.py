@@ -116,3 +116,20 @@ def test_a_gripper_bolted_into_the_last_arm_link_leaves_the_wrist_an_arm_joint()
     rpy = [float(x) for x in tcp.find("origin").get("rpy").split()]
     approach = trimesh.transformations.euler_matrix(*rpy, axes="sxyz")[:3, 2]
     assert approach == pytest.approx((1.0, 0.0, 0.0), abs=1e-6)   # along the wrist axis, not tilted by the lump
+
+
+def test_only_the_fingers_are_split_into_convex_pieces():   # a real gripper body takes CoACD ~30-40 s
+    links, joints, bodies, g = six_axis_with_gripper()
+    names = zipfile.ZipFile(io.BytesIO(export_package("sixg", links, joints, bodies, gripper=g))).namelist()
+    assert "sixg/meshes/gfl_c0.stl" in names and "sixg/meshes/gfr_c0.stl" in names
+    assert not any(n.startswith("sixg/meshes/gbase_c") for n in names)
+
+
+def test_the_same_finger_is_split_once(monkeypatch):   # Simulate and Program re-export the same fingers
+    import coacd
+    calls = []
+    real = coacd.run_coacd
+    monkeypatch.setattr(coacd, "run_coacd", lambda *a, **k: calls.append(1) or real(*a, **k))
+    b = l_finger_body("cached", R=np.diag([1.0, -1.0, -1.0]))   # a mesh no other test has split
+    first = convex_pieces(b.vertices, b.triangles)
+    assert convex_pieces(b.vertices, b.triangles) == first and len(calls) == 1
