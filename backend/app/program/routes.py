@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import iterate_in_threadpool
 
-from app.program import agent, conversations, files, session, workcell
+from app.program import agent, conversations, files, session, traces, workcell
 from app.ros.moveit_config import ROS_NAME
 from app.routes.export_routes import ExportRequest
 
@@ -276,6 +276,17 @@ def run_file(req: RunFile) -> dict:
 class WorkcellBody(BaseModel):
     robot: str
     objects: list
+
+
+@router.get("/traces/{name}")
+def get_trace(name: str, robot: str) -> dict:
+    """A run's recording for replay (see templates/recorder.py)."""
+    try:
+        return traces.read(robot, name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except FileNotFoundError:
+        raise HTTPException(404, "Replay not available: this run has no recording.")
 
 
 @router.get("/workcell")

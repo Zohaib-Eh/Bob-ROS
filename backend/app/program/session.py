@@ -154,4 +154,5 @@ def run_program(program: str) -> dict:
            f"cd /ws/src/{robot}_tasks && PYTHONPATH=/ws/src/{robot}_program:$PYTHONPATH python3 -u -m runner {program}")
     r = _docker("exec", SESSION_CONTAINER, "timeout", str(RUN_TIMEOUT_S), "bash", "-c", cmd, check=False)
     out = (r.stdout or "") + (r.stderr or "")
-    return {"ok": "RESULT: ok" in out, "output": out}
+    from app.program.traces import trace_of   # local: traces imports this module
+    return {"ok": "RESULT: ok" in out, "output": out, "trace": trace_of(out)}

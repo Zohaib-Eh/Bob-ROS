@@ -116,7 +116,7 @@ def test_run_program_rejects_bad_paths_and_runs_good_ones(fake):
     _started()
     with pytest.raises(ValueError):
         session.run_program("../x.py")
-    assert session.run_program("programs/task_001.py") == {"ok": True, "output": "hello\nRESULT: ok\n"}
+    assert session.run_program("programs/task_001.py") == {"ok": True, "output": "hello\nRESULT: ok\n", "trace": None}
 
 
 def test_start_returns_at_once_and_status_walks_the_stages(fake, monkeypatch):

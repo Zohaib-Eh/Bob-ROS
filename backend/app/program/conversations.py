@@ -109,6 +109,8 @@ def fold(events: list[dict]) -> dict:
             for it in reversed(m["items"]):
                 if it["kind"] == "run":
                     it.update(ok=e["ok"], message=e["message"], output=e.get("output", ""))
+                    if e.get("trace"):
+                        it["trace"] = e["trace"]   # run replay
                     break
         elif k == "done":
             m["summary"] = e.get("summary", "")

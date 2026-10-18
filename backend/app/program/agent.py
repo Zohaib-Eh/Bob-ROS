@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 from typing import Iterable, Iterator
 
+from app.program.traces import trace_of
+
 SIGN_IN = "Run `claude` once in a terminal to sign in."
 NOT_FOUND = "Claude Code was not found. Install it, then run `claude` once in a terminal to sign in."
 _SIGNED_OUT = re.compile(r"(invalid api key|not logged in|please run /login)", re.I)
@@ -75,7 +77,8 @@ def parse_stream(lines: Iterable[str], tasks_dir: Path) -> Iterator[dict]:
                     m = re.findall(r"^RESULT: (ok|failed: .*)$", _result_text(b), re.M)
                     if m:
                         last_ok = m[-1] == "ok"
-                        yield {"kind": "run_result", "ok": last_ok, "message": m[-1], "output": _result_text(b)}
+                        yield {"kind": "run_result", "ok": last_ok, "message": m[-1], "output": _result_text(b),
+                               "trace": trace_of(_result_text(b))}
         elif kind == "result":
             if msg.get("is_error"):
                 text = str(msg.get("result") or msg.get("subtype") or "Claude stopped with an error.")
