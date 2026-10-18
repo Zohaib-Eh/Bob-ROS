@@ -45,6 +45,9 @@ if [ ${#physics[@]} -gt 0 ]; then
   for p in "${physics[@]}"; do
     for n in 1 2; do
       out=$(cd /ws/src/${ROBOT}_tasks && timeout 300 python3 -u -m runner "$p" 2>&1) || true
+      echo "$out" > /tmp/run_out.txt   # run replay: every run leaves a recording
+      if t=$(python3 /check/trace_check.py /ws/src/${ROBOT}_tasks /tmp/run_out.txt physics 2>&1); then echo "PASS trace $(basename "$p") run $n: $t"
+      else echo "FAIL trace $(basename "$p") run $n: $t"; status=1; fi
       if echo "$out" | grep -q "^RESULT: ok"; then echo "PASS physics $(basename "$p") run $n: $(echo "$out" | grep ' ok' | tail -n 1)"
       else echo "FAIL physics $(basename "$p") run $n"; echo "$out" | tail -n 15; status=1
         # the moment of failure: who publishes MuJoCo's object poses, one message, and the sim's start

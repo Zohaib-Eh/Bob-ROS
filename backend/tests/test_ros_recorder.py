@@ -34,6 +34,16 @@ def test_scenes_are_kept_only_when_they_change():
     assert [x["t"] for x in t.scenes] == [0.2, 0.6]
 
 
+def test_a_scene_that_only_moved_is_not_kept_again():   # container: 65 copies, meshes and all, per 18 s run
+    t = recorder.Trace("bot", "p", "base", start=0.0)
+    box = lambda z, stamp: {"world": {"collision_objects": [{"id": "box", "header": {"stamp": {"sec": stamp}, "frame_id": "base"},
+                                                             "pose": {"position": {"z": z}}, "primitive_poses": [{"position": {"z": 0}}]}]}}
+    t.scene(0.2, box(0.2, 1))
+    t.scene(0.4, box(0.25, 2))                           # moved (MuJoCo's poses show motion at 20 Hz)
+    t.scene(0.6, {"world": {"collision_objects": []}, "robot_state": {"attached_collision_objects": [{"object": {"id": "box"}}]}})
+    assert [x["t"] for x in t.scenes] == [0.2, 0.6]      # picked up: a real change
+
+
 def test_recording_stops_after_the_cap_and_the_file_says_how_the_run_ended(tmp_path):
     t = recorder.Trace("bot", "programs/task_001.py", "base", start=0.0)
     t.sample(1.0)

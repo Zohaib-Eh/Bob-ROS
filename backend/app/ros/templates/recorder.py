@@ -17,6 +17,19 @@ def trace_name(program: str, now: float) -> str:
     return f"runs/{Path(program).stem}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(now))}.json"
 
 
+_MOTION = {"pose", "primitive_poses", "mesh_poses", "plane_poses", "stamp"}
+
+
+def _structure(x):
+    """The scene without poses or time stamps: what objects there are, their shapes, which are held. A scene
+    that only moved isn't kept again (MuJoCo's poses show motion at 20 Hz; a fixture mesh is large)."""
+    if isinstance(x, dict):
+        return {k: _structure(v) for k, v in x.items() if k not in _MOTION}
+    if isinstance(x, (list, tuple)):
+        return [_structure(v) for v in x]
+    return x
+
+
 def _row(t) -> list:
     tr, q = t.transform.translation, t.transform.rotation
     return [t.child_frame_id, t.header.frame_id, tr.x, tr.y, tr.z, q.x, q.y, q.z, q.w]
@@ -48,7 +61,7 @@ class Trace:
             self.frames.append({"t": round(t, 3), "tf": list(self.latest.values()), "poses": dict(self.poses)})
 
     def scene(self, now: float, scene: dict) -> None:
-        key = json.dumps(scene, sort_keys=True, default=str)
+        key = json.dumps(_structure(scene), sort_keys=True, default=str)
         if key == self._last_scene or now - self.start > MAX_S:
             return
         self._last_scene = key
