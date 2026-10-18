@@ -1,5 +1,5 @@
 import type { Body, Joint, Link, PartWarning } from "../api/types";
-import { baseGuess } from "./geometry";
+import { baseGuess, bodyBox, type Box } from "./geometry";
 import { sourceOf, transformBody, type Mat4 } from "./mount";
 import { membership } from "./pairs";
 import { DEFAULT_DENSITY, emptyModel, type GripperSel, type ModelState, type Mount, type Suggestion } from "./types";
@@ -99,6 +99,28 @@ export function modelReducer(s: ModelState, a: Action): ModelState {
   return next.gripper && !gripperJointsExist(next) ? { ...next, gripper: null } : next;
 }
 
+function unionBox(bodies: Body[]): Box | null {
+  const boxes = bodies.map(bodyBox).filter((b): b is Box => b !== null);
+  if (!boxes.length) return null;
+  return { min: [0, 1, 2].map((k) => Math.min(...boxes.map((b) => b.min[k]))) as Box["min"],
+           max: [0, 1, 2].map((k) => Math.max(...boxes.map((b) => b.max[k]))) as Box["max"] };
+}
+
+/** A part added to a robot keeps its file's coordinates, which often put it inside the robot (a gripper
+ *  drawn around its own origin, a robot standing on the world origin): there it can't be seen or picked.
+ *  Then it is set down beside the robot, on the same floor, ready for the Mount card. */
+function besideMatrix(existing: Body[], added: Body[]): Mat4 | null {
+  const have = unionBox(existing), add = unionBox(added);
+  if (!have || !add) return null;
+  const overlaps = [0, 1, 2].every((k) => add.min[k] < have.max[k] && add.max[k] > have.min[k]);
+  if (!overlaps) return null;
+  const gap = Math.max(0.05, 0.25 * (add.max[0] - add.min[0]));
+  const dx = have.max[0] + gap - add.min[0];
+  const dy = (have.min[1] + have.max[1]) / 2 - (add.min[1] + add.max[1]) / 2;
+  const dz = have.min[2] - add.min[2];
+  return [1, 0, 0, dx, 0, 1, 0, dy, 0, 0, 1, dz, 0, 0, 0, 1];
+}
+
 /** The gripper refers to joints; once either is gone or no longer sliding, the gripper goes too. */
 function gripperJointsExist(s: ModelState): boolean {
   const g = s.gripper!;
@@ -111,9 +133,15 @@ function reduce(s: ModelState, a: Action): ModelState {
       const taken = new Set(s.links.map((l) => l.name));
       const bodies = { ...s.bodies };
       const source = a.source && uniqueSource(a.source, s.bodies);
-      for (const b of a.bodies) bodies[b.id] = source ? { ...b, source } : b;
-      const links = [...s.links, ...a.bodies.map((b) => newLink(b, taken))];
-      return tidy({ ...s, bodies, links, fileWarnings: [...s.fileWarnings, ...a.warnings] });
+      const shift = besideMatrix(Object.values(s.bodies).filter((b) => !s.ignored.includes(b.id)), a.bodies);
+      for (const b of a.bodies) {
+        const placed = shift ? transformBody(b, shift) : b;
+        bodies[b.id] = source ? { ...placed, source } : placed;
+      }
+      // an empty placeholder in the file (no geometry at all) is left out; it stays listed under Ignored
+      const empty = a.bodies.filter((b) => b.warnings.some((w) => w.code === "empty")).map((b) => b.id);
+      const links = [...s.links, ...a.bodies.filter((b) => !empty.includes(b.id)).map((b) => newLink(b, taken))];
+      return tidy({ ...s, bodies, links, ignored: [...s.ignored, ...empty], fileWarnings: [...s.fileWarnings, ...a.warnings] });
     }
     case "setGripper":
       return { ...s, gripper: a.gripper };

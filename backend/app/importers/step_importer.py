@@ -241,9 +241,10 @@ def _is_watertight(vertices, triangles) -> bool:
     return trimesh.Trimesh(np.asarray(vertices), np.asarray(triangles), process=False).is_watertight
 
 
-def _failed_body(name: str, reason: str) -> Body:
+def _failed_body(name: str, reason: str, code: str = "degenerate") -> Body:
+    """code "empty": the file has no geometry at all for this product (a placeholder); the app leaves it out."""
     return Body(id=str(uuid.uuid4()), name=name, vertices=[], triangles=[], status="failed",
-                warnings=[PartWarning(code="degenerate", fixes=["replace", "ignore"],
+                warnings=[PartWarning(code=code, fixes=["replace", "ignore"],
                                       message=f"{name}: {reason}")])
 
 
@@ -320,7 +321,7 @@ def import_cad(file_path: str, brep_scale: float = 0.001,
     for product, groups in plan:
         mine: list[Body] = []
         if not groups:
-            mine.append(_failed_body(product or f"part_{len(bodies)}", "no geometry was transferred"))
+            mine.append(_failed_body(product or f"part_{len(bodies)}", "no geometry was transferred", "empty"))
         for sources, prefix, repaired in groups:
             n = len(bodies) + len(mine)
             try:

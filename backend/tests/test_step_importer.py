@@ -301,7 +301,7 @@ def test_empty_step_product_becomes_failed_body(tmp_path):
     bodies, _ = import_cad(path)
     assert [b.name for b in bodies] == ["REAL_BOX", "EMPTY_PART"]
     assert bodies[1].status == "failed"
-    assert bodies[1].warnings[0].code == "degenerate"
+    assert bodies[1].warnings[0].code == "empty"   # a placeholder: the app leaves it out (Ignored)
     assert bodies[1].warnings[0].fixes == ["replace", "ignore"]
 
 
