@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FileCode, Loader2, Play, Send } from "lucide-react";
+import { ChevronDown, ChevronRight, Clapperboard, FileCode, Loader2, Play, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import type { ClaudeMessage, Item, Message } from "../../model/chat";
@@ -15,11 +15,19 @@ function RunOutput({ head, output, cls }: { head: string; output?: string; cls: 
   );
 }
 
-function Step({ item }: { item: Item }) {
+/** Watch a finished run again in the 3D view (its recording, see templates/recorder.py). */
+function ReplayButton({ trace, onReplay, disabled }: { trace?: string | null; onReplay?: (trace: string) => void; disabled: boolean }) {
+  if (!trace || !onReplay) return null;
+  return <button className="btn run-again" disabled={disabled} title={disabled ? "Wait for the task to finish" : "Watch this run again"}
+    onClick={() => onReplay(trace)}><Clapperboard size={12} />Replay</button>;
+}
+
+function Step({ item, onReplay, busy = false }: { item: Item; onReplay?: (trace: string) => void; busy?: boolean }) {
   if (item.kind === "text") return <div className="narration"><Markdown>{item.text}</Markdown></div>;
   if (item.kind === "file") return <div className="step"><FileCode size={12} />Wrote {item.path}</div>;
   const mark = item.ok === undefined ? "…" : item.ok ? "✓" : "✗";
-  return <RunOutput head={`Run ${item.n} ${mark} ${item.message ?? "running"}`} output={item.output} cls={item.ok === false ? "bad" : item.ok ? "ok" : ""} />;
+  return <><RunOutput head={`Run ${item.n} ${mark} ${item.message ?? "running"}`} output={item.output} cls={item.ok === false ? "bad" : item.ok ? "ok" : ""} />
+    <ReplayButton trace={item.trace} onReplay={onReplay} disabled={busy} /></>;
 }
 
 /** Re-runs a program live in the 3D view. */
@@ -28,10 +36,12 @@ function RunAgain({ path, onRunAgain, disabled }: { path: string; onRunAgain?: (
   return <button className="btn run-again" disabled={disabled} onClick={() => onRunAgain(path)}><Play size={12} />Run again</button>;
 }
 
-function Claude({ m, live, onRunAgain, busy }: { m: ClaudeMessage; live: boolean; onRunAgain?: (path: string) => void; busy: boolean }) {
+function Claude({ m, live, onRunAgain, onReplay, busy }: {
+  m: ClaudeMessage; live: boolean; onRunAgain?: (path: string) => void; onReplay?: (trace: string) => void; busy: boolean;
+}) {
   return (
     <div className="claude-msg">
-      {m.items.map((it, i) => <Step key={i} item={it} />)}
+      {m.items.map((it, i) => <Step key={i} item={it} onReplay={live ? undefined : onReplay} busy={busy} />)}
       {m.summary && <div className="answer"><Markdown>{m.summary}</Markdown></div>}
       {m.result && <div className={`result ${m.result.ok ? "ok" : "bad"}`}>
         {m.result.ok ? `✓ Worked on run ${m.result.runs}/${MAX_RUNS}` : `✗ Failed after ${m.result.runs} run${m.result.runs === 1 ? "" : "s"}`}
@@ -45,10 +55,10 @@ function Claude({ m, live, onRunAgain, busy }: { m: ClaudeMessage; live: boolean
 
 interface Props {
   messages: Message[]; live: ClaudeMessage | null; running: boolean; disabled: boolean; onSend(task: string): void;
-  onRunAgain?(path: string): void; waiting?: string;
+  onRunAgain?(path: string): void; onReplay?(trace: string): void; waiting?: string;
 }
 
-export default function Chat({ messages, live, running, disabled, onSend, onRunAgain, waiting }: Props) {
+export default function Chat({ messages, live, running, disabled, onSend, onRunAgain, onReplay, waiting }: Props) {
   const [task, setTask] = useState("");
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [messages, live]);
@@ -58,8 +68,9 @@ export default function Chat({ messages, live, running, disabled, onSend, onRunA
       <div className="chat-scroll">
         {messages.map((m, i) => m.role === "user" ? <div key={i} className="bubble">{m.text}</div>
           : m.role === "run" ? <div key={i}><RunOutput head={`You ran ${m.path} ${m.ok ? "✓" : "✗"}`} output={m.output} cls={m.ok ? "ok" : "bad"} />
-              <RunAgain path={m.path} onRunAgain={onRunAgain} disabled={running || disabled} /></div>
-          : <Claude key={i} m={m} live={false} onRunAgain={onRunAgain} busy={running || disabled} />)}
+              <RunAgain path={m.path} onRunAgain={onRunAgain} disabled={running || disabled} />
+              <ReplayButton trace={m.trace} onReplay={onReplay} disabled={running || disabled} /></div>
+          : <Claude key={i} m={m} live={false} onRunAgain={onRunAgain} onReplay={onReplay} busy={running || disabled} />)}
         {live && <Claude m={live} live={true} busy={true} />}
         <div ref={end} />
       </div>

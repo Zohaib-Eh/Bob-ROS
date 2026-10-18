@@ -6,7 +6,7 @@ export type ProgramEvent =
   | { kind: "text"; text: string }
   | { kind: "file"; path: string }
   | { kind: "run"; n: number }
-  | { kind: "run_result"; ok: boolean; message: string; output?: string }
+  | { kind: "run_result"; ok: boolean; message: string; output?: string; trace?: string | null }
   | { kind: "done"; summary: string; runs: number; ok: boolean; session_id: string | null; program: string | null; code: string | null }
   | { kind: "error"; message: string };
 export type Stage = "export" | "collisions" | "image" | "build" | "physics" | "moveit" | "bridge" | "ready";
@@ -79,6 +79,11 @@ export async function getWorkcell(robot: string): Promise<Workcell> {
 }
 export async function putWorkcell(robot: string, objects: WorkcellObject[]): Promise<WorkcellObject[]> {
   return (await (await send("/program/workcell", put({ robot, objects }))).json()).objects;
+}
+/** A run's recording (runs/<program>-<UTC>.json, from the run's `trace`), read from the robot's workspace. */
+export async function getTrace(robot: string, trace: string): Promise<import("../model/replay").Trace> {
+  const name = trace.replace(/^runs\//, "");
+  return (await send(`/program/traces/${encodeURIComponent(name)}${q(robot)}`, { method: "GET" })).json();
 }
 export async function listFiles(): Promise<FileEntry[]> {
   return (await send("/program/files", { method: "GET" })).json();

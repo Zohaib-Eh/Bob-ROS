@@ -3,11 +3,11 @@ import type { ProgramEvent } from "../api/program";
 export type Item =
   | { kind: "text"; text: string }
   | { kind: "file"; path: string }
-  | { kind: "run"; n: number; ok?: boolean; message?: string; output?: string };
+  | { kind: "run"; n: number; ok?: boolean; message?: string; output?: string; trace?: string | null };
 export interface ClaudeMessage {
   role: "claude"; items: Item[]; summary: string; result: { ok: boolean; runs: number } | null; error: string | null; program: string | null;
 }
-export type Message = { role: "user"; text: string } | ClaudeMessage | { role: "run"; path: string; ok: boolean; output: string };
+export type Message = { role: "user"; text: string } | ClaudeMessage | { role: "run"; path: string; ok: boolean; output: string; trace?: string | null };
 
 export const emptyClaude = (): ClaudeMessage => ({ role: "claude", items: [], summary: "", result: null, error: null, program: null });
 
@@ -24,7 +24,7 @@ export function applyEvent(m: ClaudeMessage, e: ProgramEvent): ClaudeMessage {
     case "run_result": {
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i];
-        if (it.kind === "run") { items[i] = { ...it, ok: e.ok, message: e.message, output: e.output ?? "" }; break; }
+        if (it.kind === "run") { items[i] = { ...it, ok: e.ok, message: e.message, output: e.output ?? "", ...(e.trace ? { trace: e.trace } : {}) }; break; }
       }
       return { ...m, items };
     }

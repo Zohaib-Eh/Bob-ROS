@@ -9,7 +9,8 @@ import { withNames } from "../useLinkMass";
 
 export const POLL = { starting: 1000, ready: 5000 };  // ms; mutable so tests can shorten
 
-export function useRosSession(ctx: Ctx) {
+/** paused: a replay is showing, so the live robot stays out of the 3D view until it ends. */
+export function useRosSession(ctx: Ctx, paused = false) {
   const { model, robotName, viewer } = ctx;
   const [status, setStatus] = useState<SessionStatus>({ state: "stopped" });
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export function useRosSession(ctx: Ctx) {
   }, [status.state]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {  // live robot while ready
-    if (status.state !== "ready" || !viewer) return;
+    if (status.state !== "ready" || !viewer || paused) return;
     const req = buildExportRequest(model);
     const root = model.rootLinkId ?? req.links[0]?.id;
     const base = req.links.find((l) => l.id === root)?.name ?? "";
@@ -83,7 +84,7 @@ export function useRosSession(ctx: Ctx) {
       refreshScene();
     }).catch((e) => setError(e.message));
     return () => { cancelAnimationFrame(frame); bridge.close(); ros.current = null; viewer.setBodyPoses({}); viewer.setSceneObjects([]); };
-  }, [status.state, viewer, model]);
+  }, [status.state, viewer, model, paused]);
 
   return { status, error, setError, start, stop, restart, refresh, busy };
 }

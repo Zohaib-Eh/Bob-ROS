@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as api from "../../api/program";
 import type { Conversation, ConversationInfo } from "../../api/program";
 import type { Ctx } from "../ctx";
+import { buildExportRequest } from "../../model/exportRequest";
 import { applyEvent, emptyClaude, type ClaudeMessage } from "../../model/chat";
 import MenuBar from "../MenuBar";
 import Chat from "./Chat";
@@ -12,12 +13,15 @@ import Workspace from "./Workspace";
 import WorkcellCard from "./WorkcellCard";
 import StartupPanel, { stageText } from "./StartupPanel";
 import { useRosSession } from "./useRosSession";
+import Replay from "./Replay";
+import type { Trace } from "../../model/replay";
 import { fmtElapsed, useElapsed } from "../useElapsed";
 
 const NO_CHAT = "";  // runningId for a Code-tab run with no chat open: still locks, matches no chat
 
 export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: ReactNode }) {
-  const ros = useRosSession(ctx);
+  const [replay, setReplay] = useState<Trace | null>(null);   // a finished run shown again in the 3D view
+  const ros = useRosSession(ctx, !!replay);
   const { status } = ros;
   const [convs, setConvs] = useState<ConversationInfo[]>([]);
   const [active, setActive] = useState<Conversation | null>(null);
@@ -36,6 +40,15 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
   useEffect(() => { activeId.current = active?.id ?? null; }, [active]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; abort.current?.abort(); }; }, []);
   const fail = (e: unknown) => ros.setError((e as Error).message);
+
+  async function startReplay(trace: string) {
+    try {
+      const t = await api.getTrace(robot, trace);
+      if (t.robot !== robot) throw new Error("it was recorded for another robot");
+      setReplay(t);
+      setPreviewTick((n) => n + 1);   // show the 3D view
+    } catch (e) { ros.setError(`Replay not available: ${(e as Error).message}`); }
+  }
 
   // select: id = switch to it, null = first non-broken of the fresh list, undefined = keep current
   async function reload(select?: string | null) {
@@ -214,14 +227,17 @@ export default function ProgramMode({ ctx, preview }: { ctx: Ctx; preview: React
           <PhysicsCard ctx={ctx} />
           <WorkcellCard robot={robot} viewer={ctx.viewer} />
           <Chat messages={active?.messages ?? []} live={live && active?.id === live.id ? live.msg : null} running={active?.id === runningId}
-            disabled={!!waiting} waiting={waiting} onSend={(t) => void send(t)} onRunAgain={(p) => void runAgain(p)} />
+            disabled={!!waiting} waiting={waiting} onSend={(t) => void send(t)} onRunAgain={(p) => void runAgain(p)}
+            onReplay={(t) => void startReplay(t)} />
         </section>
         <section className="workspace-column" data-testid="workspace-slot">
           <Workspace preview={preview} conversation={active?.id ?? null} running={running} changed={changed}
             sessionReady={status.state === "ready"}
             onRan={() => void reload()}
             onRunning={(r) => { if (mounted.current) setRunningId(r ? activeId.current ?? NO_CHAT : null); }} showPreview={previewTick}
-            overlay={pick && (
+            overlay={replay ? <Replay trace={replay} viewer={ctx.viewer} links={buildExportRequest(ctx.model).links}
+                joints={buildExportRequest(ctx.model).joints} rootLinkId={ctx.model.rootLinkId} onStop={() => setReplay(null)} />
+              : pick && (
               <div className="preview-run" data-testid="preview-run">
                 <select aria-label="Program to run" value={pick} disabled={running} title={busyWhy}
                   onChange={(e) => { if (e.target.value === "__all__") setShowAll(true); else setChosen(e.target.value); }}>
