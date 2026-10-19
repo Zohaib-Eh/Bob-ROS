@@ -45,7 +45,7 @@ describe("ExportStep", () => {
     expect(screen.getByTestId("summary").textContent).toMatch(/2 links · 1 joints · 2 meshes/);
     expect(screen.queryByText(/export urdf \(\.zip\)/i)).toBeNull();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /continue to simulate/i })); });
-    expect(spy).toHaveBeenCalledWith("robot", expect.any(Array), [expect.objectContaining({ id: "j" })], expect.any(Object));
+    expect(spy).toHaveBeenCalledWith("robot", expect.any(Array), [expect.objectContaining({ id: "j" })], expect.any(Object), null, null);   // gripper, mobile base: validates the robot as exported
     expect(dl).not.toHaveBeenCalled();
     expect(state().step).toBe("program");
   });

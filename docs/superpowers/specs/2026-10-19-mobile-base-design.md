@@ -1,6 +1,8 @@
 # Mobile Bases — Design
 
 Date: 2026-10-19. Branch: `worktree-mobile-base`. This branch is for review and is not merged.
+
+> **Status: built 2026-10-19.** Container check (fixture `mobi`): 26 PASS, 0 FAIL; drive_to accuracy and drive-pick-carry-place pass under MuJoCo. Changes from the text below: the true base pose comes from the glue plugin on `/sim/base_pose` (ros2_control refuses joints that aren't in the URDF, risk 1 in §10); `drive_to(..., reverse=True)` backs up; the path check sweeps the base outline through the real turn-drive-turn motion; a base without an arm is not in v1.
 Builds on: MuJoCo programs (`2026-10-17-mujoco-programs-design.md`), the gripper (`2026-10-17-gripper-design.md`) and the workcell editor.
 
 ## 1. The picture
