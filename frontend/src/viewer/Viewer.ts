@@ -51,6 +51,7 @@ export class Viewer {
   private frame = 0;
   private dirty = true;
   private framed = false;
+  private follow: { id: string; last: Vector3 | null } | null = null;   // a driving base the camera moves with
   private observer: ResizeObserver;
   private selection: string[] = [];
   private hovered: string | null = null;
@@ -242,7 +243,29 @@ export class Viewer {
       mesh.matrix.copy(poses[id] ?? new Matrix4());
       mesh.matrixWorldNeedsUpdate = true;
     }
+    this.followBody(poses);
     this.requestRender();
+  }
+
+  /** Move the camera along with body `id` (a mobile base) as it drives: the view keeps its angle and zoom,
+   *  and orbiting still works around the moving robot. null: the camera stays put. */
+  setFollow(id: string | null) {
+    this.follow = id ? { id, last: null } : null;
+  }
+
+  private followBody(poses: Record<string, Matrix4>) {
+    const f = this.follow, mesh = f && this.meshes.get(f.id);
+    if (!f || !mesh) return;
+    if (!poses[f.id]) { f.last = null; return; }   // back at its CAD pose: start again from there
+    mesh.geometry.computeBoundingBox();
+    const now = mesh.geometry.boundingBox!.getCenter(new Vector3()).applyMatrix4(poses[f.id]);
+    if (f.last) {
+      const d = now.clone().sub(f.last);
+      this.camera.position.add(d);
+      this.controls.target.add(d);
+      this.controls.update();
+    }
+    f.last = now;
   }
 
   setSceneObjects(objs: SceneObject[]) {

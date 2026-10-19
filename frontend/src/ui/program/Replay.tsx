@@ -15,6 +15,12 @@ export default function Replay({ trace, viewer, links, joints, rootLinkId, onSto
   const total = duration(trace);
   const home = useMemo(() => homeFrames(links, joints, rootLinkId ?? links[0]?.id ?? ""), [links, joints, rootLinkId]);
 
+  useEffect(() => {   // a mobile base (recorded in map): the camera rides along with it
+    if (!viewer || trace.base !== "map") return;
+    viewer.setFollow(links.find((l) => l.id === (rootLinkId ?? links[0]?.id))?.body_ids[0] ?? null);
+    return () => viewer.setFollow(null);
+  }, [viewer, trace.base, links, rootLinkId]);
+
   useEffect(() => {   // the robot and the objects at time t, as the live view draws them
     if (!viewer) return;
     const frame = trace.frames[at(trace.frames, t)];

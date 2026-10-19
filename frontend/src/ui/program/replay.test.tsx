@@ -28,7 +28,19 @@ describe("run replay in the chat", () => {
 });
 
 describe("Replay controls", () => {
-  const viewer = () => ({ setBodyPoses: vi.fn(), setSceneObjects: vi.fn() }) as unknown as Viewer & { setBodyPoses: ReturnType<typeof vi.fn> };
+  const viewer = () => ({ setBodyPoses: vi.fn(), setSceneObjects: vi.fn(), setFollow: vi.fn() }) as unknown as
+    Viewer & { setBodyPoses: ReturnType<typeof vi.fn>; setFollow: ReturnType<typeof vi.fn> };
+
+  it("a mobile robot's replay (recorded in map) has the camera ride along with its base", () => {
+    const v = viewer();
+    const base = { id: "chassis", name: "chassis", body_ids: ["chassis_b"], density_kg_m3: 1000, mass_override_kg: null, accept_approximate_mass: false };
+    const { unmount } = render(<Replay trace={{ ...trace, base: "map" }} viewer={v} links={[base]} joints={[]} rootLinkId="chassis" onStop={vi.fn()} />);
+    expect(v.setFollow).toHaveBeenCalledWith("chassis_b");
+    unmount();
+    expect(v.setFollow).toHaveBeenLastCalledWith(null);
+    render(<Replay trace={trace} viewer={v} links={[base]} joints={[]} rootLinkId="chassis" onStop={vi.fn()} />);
+    expect(v.setFollow).toHaveBeenCalledTimes(2);           // a bolted-down robot's replay: no following
+  });
 
   it("scrubbing moves the robot to that moment; the run's result is shown; Stop hands back to live", () => {
     const v = viewer();

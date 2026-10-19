@@ -74,6 +74,7 @@ export function useRosSession(ctx: Ctx, paused = false) {
     const bridge = new RosBridge(`ws://${location.hostname || "localhost"}:9090`);
     ros.current = bridge;
     let frame = 0;
+    viewer.setFollow(req.mobile ? req.links.find((l) => l.id === root)?.body_ids[0] ?? null : null);   // the camera rides along
     const redraw = () => { frame = 0; viewer.setBodyPoses(bodyPoses(req.links, tree, home, base)); };
     const onTf = (m: { transforms: never[] }) => { tree.update(m.transforms); if (!frame) frame = requestAnimationFrame(redraw); };
     const refreshScene = () => bridge.call<{ scene: unknown }>("/get_planning_scene", "moveit_msgs/srv/GetPlanningScene",
