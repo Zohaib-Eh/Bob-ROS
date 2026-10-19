@@ -33,7 +33,7 @@ export default function MobileCard({ ctx }: { ctx: Ctx }) {
       {wheels.map((w) => (
         <label key={w.jointId} className="field-row">
           <input type="checkbox" checked={ticked.has(w.jointId)} onChange={() => toggle(w.jointId)} />
-          <span>{name(w.jointId)}</span><span className="muted small">{side(w.jointId)}</span>
+          <span>{name(w.jointId)}</span>{side(w.jointId) && <span className="muted small">· {side(w.jointId)}</span>}
         </label>
       ))}
       {turn !== 0 && (
