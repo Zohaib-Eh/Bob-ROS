@@ -20,7 +20,7 @@ near((0.8, 0.6, math.pi / 2))
 r.drive_to(0.8, 0.2, reverse=True)           # back up, still facing +y
 near((0.8, 0.2, math.pi / 2))
 try:
-    r.drive_to(0.8, -1.0, -math.pi / 2)      # turning round there swings the base into the table
+    r.drive_to(2.5, 0.2, 0.0)                # straight across the table
     raise AssertionError("drive_to went through the table")
 except PathBlocked as e:
     assert "table" in str(e), e

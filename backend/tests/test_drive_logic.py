@@ -63,6 +63,11 @@ def test_the_path_check_sweeps_the_real_outline():
     assert dl.blocker(go(0.95, 0.0, 0.0), fp, [table], 0.24) is None                   # front 1.20 + margin < 1.30
     assert dl.blocker(go(0.95, 0.0, math.pi), fp, [table], 0.24) == "table"            # a half turn there swings the rear corner into it
     assert dl.blocker(go(0.0, 2.0, None), fp, [table], 0.24) is None                   # off to the side
+    # the container program's cases (mobi_drive.py): from (0.8, 0.2) facing +y
+    s2 = (0.8, 0.2, math.pi / 2)
+    leg = lambda x, y, yaw: dl.sweep(s2, *dl.plan(s2, (x, y), yaw, CENTER), CENTER)
+    assert dl.blocker(leg(0.8, -1.0, -math.pi / 2), fp, [table], 0.24) is None   # turns 19 cm clear of it
+    assert dl.blocker(leg(2.5, 0.2, 0.0), fp, [table], 0.24) == "table"
     poses = go(1.0, 0.5, math.pi / 2)
     assert poses[0] == pytest.approx(start) and poses[-1] == pytest.approx((1.0, 0.5, math.pi / 2), abs=1e-6)
 
