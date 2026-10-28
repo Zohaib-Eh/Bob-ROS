@@ -124,13 +124,11 @@ def test_library_has_position_only_moves_and_tool_down(ws):
     assert "def tool_down(self, yaw=None)" in lib and "def _position_ik(self" in lib and "def tool_facing(self, direction, yaw=None)" in lib
 
 
-def test_glue_package_is_generated(ws):
-    glue = ws / "cad_to_urdf_glue"
-    assert (glue / "src" / "glue_plugin.cpp").is_file() and (glue / "plugins.xml").is_file()
-    assert (glue / "package.xml").is_file() and (glue / "CMakeLists.txt").is_file()
-    cpp = (glue / "src" / "glue_plugin.cpp").read_text()
-    assert "MuJoCoROS2ControlPluginBase" in cpp and '"/sim/glue"' in cpp and "eq_active" in cpp
-    assert "cad_to_urdf_glue" in (ws / "bot_moveit_config" / "package.xml").read_text()
+def test_no_glue_package_and_an_old_one_is_removed(ws, tmp_path):
+    assert "cad_to_urdf_glue" not in (ws / "bot_moveit_config" / "package.xml").read_text()
+    (ws / "cad_to_urdf_glue").mkdir()   # left by an older version
+    workspace_from_zip(two_joint_zip(tmp_path, name="bot"), ws.parent, samples=50)
+    assert not (ws / "cad_to_urdf_glue").exists()
 
 
 def test_regenerating_keeps_the_users_workcell(ws, tmp_path):
@@ -157,7 +155,7 @@ def test_robot_library_speaks_physics(ws):
     lib = (ws / "bot_program" / "robot.py").read_text()
     assert "class MotionError(RobotError)" in lib and "def pose(self, name)" in lib
     assert "Objects can't appear mid-run. Declare '{name}' in SCENE at the top of the program (or in workcell.yaml)." in lib
-    assert '"/sim/glue"' in lib and "sim_errors.lag_message(" in lib and "sim_errors.blow_up(" in lib
+    assert "/sim/glue" not in lib and "NO_GRIPPER" in lib and "sim_errors.lag_message(" in lib and "sim_errors.blow_up(" in lib
     assert "_meta()[\"objects\"]" in lib  # reset loads the run's objects into MoveIt
     compile(lib, "robot.py", "exec")
     runner = (ws / "bot_program" / "runner.py").read_text()
@@ -192,6 +190,7 @@ def test_brief_teaches_scene_and_pose(ws):
     assert "SCENE = [" in text and "workcell.yaml" in text and "r.pose(" in text
     assert "r.add_box(" not in text and "Physics is real" in text
     assert "Workcell (always present; see workcell.yaml):" in text and "- (empty)" in text
+    assert "This robot has no gripper. Under physics" in text   # bot has no gripper: attach() won't pick under physics
 
 
 def test_brief_lists_the_workcell_objects(ws, tmp_path):

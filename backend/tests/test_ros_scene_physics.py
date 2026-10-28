@@ -40,30 +40,29 @@ def _settle(m, d, seconds):
 
 
 def test_no_objects_is_just_the_robot(bot):
-    m = _model(scene.build_scene_xml(bot[0], [], "hand", bot[1]))
+    m = _model(scene.build_scene_xml(bot[0], [], bot[1]))
     assert m.neq == 0 and mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "hand") >= 0
 
 
-def test_box_has_its_mass_free_joint_and_an_inactive_glue(bot):
+def test_box_has_its_mass_and_a_free_joint_and_nothing_glues_it(bot):
     objs = scene.validate([_far_box(mass=0.2)], "SCENE")
-    m = _model(scene.build_scene_xml(bot[0], objs, "hand", bot[1]))
+    m = _model(scene.build_scene_xml(bot[0], objs, bot[1]))
     b = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "part_a")
     assert m.body_mass[b] == pytest.approx(0.2)
     assert m.jnt_type[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "part_a")] == mujoco.mjtJoint.mjJNT_FREE
-    e = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY, "glue_part_a")
-    assert e >= 0 and m.eq_active0[e] == 0
+    assert m.neq == 0   # no weld to the tool: only real fingers hold an object
 
 
 def test_fixed_object_has_no_joint_and_no_glue(bot):
     objs = scene.validate([{"name": "table", "shape": "box", "size": [0.5, 0.5, 0.05],
                             "xyz": [2.0, 2.0, 0.025], "fixed": True}], "workcell.yaml")
-    m = _model(scene.build_scene_xml(bot[0], objs, "hand", bot[1]))
+    m = _model(scene.build_scene_xml(bot[0], objs, bot[1]))
     assert mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "table") == -1 and m.neq == 0
 
 
 def test_dropped_box_lands_on_the_floor_and_settles(bot):
     objs = scene.validate([_far_box(xyz=[2.0, 2.0, 0.3])], "SCENE")
-    m = _model(scene.build_scene_xml(bot[0], objs, "hand", bot[1]))
+    m = _model(scene.build_scene_xml(bot[0], objs, bot[1]))
     d = mujoco.MjData(m)
     _settle(m, d, 2.0)
     assert d.xpos[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "part_a")][2] == pytest.approx(0.025, abs=0.003)
@@ -73,32 +72,32 @@ def test_box_resting_on_table_is_not_an_overlap(bot):
     objs = scene.validate([
         {"name": "table", "shape": "box", "size": [0.5, 0.5, 0.05], "xyz": [2.0, 2.0, 0.025], "fixed": True},
         _far_box(xyz=[2.0, 2.0, 0.075])], "SCENE")
-    scene.check_start(scene.build_scene_xml(bot[0], objs, "hand", bot[1]), None, _robot_bodies(bot[0]))
+    scene.check_start(scene.build_scene_xml(bot[0], objs, bot[1]), None, _robot_bodies(bot[0]))
 
 
 def test_box_inside_another_box_is_an_overlap(bot):
     objs = scene.validate([_far_box(), _far_box(name="part_b", xyz=[2.01, 2.0, 0.025])], "SCENE")
     with pytest.raises(scene.SceneError, match="'part_a' and 'part_b' overlap"):
-        scene.check_start(scene.build_scene_xml(bot[0], objs, "hand", bot[1]), None, _robot_bodies(bot[0]))
+        scene.check_start(scene.build_scene_xml(bot[0], objs, bot[1]), None, _robot_bodies(bot[0]))
 
 
 def test_box_inside_the_floor_is_an_overlap(bot):
     objs = scene.validate([_far_box(xyz=[2.0, 2.0, 0.0])], "SCENE")
     with pytest.raises(scene.SceneError, match="'part_a' and 'world' overlap"):
-        scene.check_start(scene.build_scene_xml(bot[0], objs, "hand", bot[1]), None, _robot_bodies(bot[0]))
+        scene.check_start(scene.build_scene_xml(bot[0], objs, bot[1]), None, _robot_bodies(bot[0]))
 
 
 def test_object_named_like_a_robot_link_is_rejected(bot):
     objs = scene.validate([_far_box(name="hand")], "SCENE")
     with pytest.raises(scene.SceneError, match="'hand' is a name the robot model already uses"):
-        scene.build_scene_xml(bot[0], objs, "hand", bot[1])
+        scene.build_scene_xml(bot[0], objs, bot[1])
 
 
 @pytest.mark.parametrize("name", ["arm_joint", "world"])
 def test_object_named_like_a_robot_joint_or_world_is_rejected(bot, name):  # review M-8
     objs = scene.validate([_far_box(name=name)], "SCENE")
     with pytest.raises(scene.SceneError, match=f"'{name}' is a name the robot model already uses"):
-        scene.build_scene_xml(bot[0], objs, "hand", bot[1])
+        scene.build_scene_xml(bot[0], objs, bot[1])
 
 
 def test_a_scene_mujoco_cannot_load_keeps_mujocos_message():  # review M-9
@@ -106,31 +105,11 @@ def test_a_scene_mujoco_cannot_load_keeps_mujocos_message():  # review M-9
         scene.check_start("<mujoco><worldbody><geom type='nonsense'/></worldbody></mujoco>", None, {"world"})
 
 
-def test_glued_box_follows_the_tool_and_released_box_falls(bot):
-    # just under the hand (hand cube centre (0.5, 0, 0.2), half-size 0.05), as attach() requires
-    box = _far_box(xyz=[0.5, 0.0, 0.12])
-    m = _model(scene.build_scene_xml(bot[0], scene.validate([box], "SCENE"), "hand", bot[1]))
+def test_reset_puts_objects_back(bot):
+    m = _model(scene.build_scene_xml(bot[0], scene.validate([_far_box(xyz=[2.0, 2.0, 0.3])], "SCENE"), bot[1]))
     d = mujoco.MjData(m)
-    mujoco.mj_forward(m, d)
-    e = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY, "glue_part_a")
-    b = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "part_a")
-    scene.glue_on(m, d, e)                         # the same maths the C++ plugin uses
-    start = d.xpos[b].copy()
-    _settle(m, d, 0.5)
-    assert np.linalg.norm(d.xpos[b] - start) < 0.01   # held where it was when glued: no jump, no fall
-    d.eq_active[e] = 0
-    _settle(m, d, 1.0)
-    assert d.xpos[b][2] == pytest.approx(0.025, abs=0.003)
-
-
-def test_reset_puts_objects_back_and_glue_off(bot):
-    m = _model(scene.build_scene_xml(bot[0], scene.validate([_far_box(xyz=[2.0, 2.0, 0.3])], "SCENE"), "hand", bot[1]))
-    d = mujoco.MjData(m)
-    e = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_EQUALITY, "glue_part_a")
-    d.eq_active[e] = 1
     _settle(m, d, 0.4)
     mujoco.mj_resetData(m, d)
-    assert d.eq_active[e] == 0
     assert d.qpos[m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "part_a")] + 2] == pytest.approx(0.3)
 
 

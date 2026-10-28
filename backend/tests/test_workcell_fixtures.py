@@ -71,7 +71,7 @@ def test_a_box_set_on_an_imported_table_stays_on_it_in_mujoco(ws, tmp_path):
     objs = scene.validate([table, box], "workcell")
     zipfile.ZipFile(two_joint_zip(tmp_path)).extractall(tmp_path / "x")
     root = tmp_path / "x" / "bot"
-    xml = scene.build_scene_xml((root / "mjcf" / "bot.xml").read_text(), objs, "hand", str(root / "meshes"),
+    xml = scene.build_scene_xml((root / "mjcf" / "bot.xml").read_text(), objs, str(root / "meshes"),
                                 fixture_dir=str(workcell.path("bot").parent / "meshes"))
     m = mujoco.MjModel.from_xml_string(xml)
     d = mujoco.MjData(m)

@@ -187,9 +187,9 @@ def _fmt(v) -> str:
     return " ".join(repr(float(x)) for x in v)
 
 
-def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str, fixture_dir: str | None = None) -> str:
+def build_scene_xml(robot_mjcf: str, objs: list[dict], meshdir: str, fixture_dir: str | None = None) -> str:
     """The robot MJCF plus a floor and the objects. Movable objects get a free joint named after
-    them and an inactive weld 'glue_<name>' to the tool; fixed objects get neither. CAD fixtures are
+    them; fixed objects don't. CAD fixtures are
     their convex pieces from fixture_dir (MuJoCo collides with a mesh's hull, which would fill a table's
     underside or a bin)."""
     root = ET.fromstring(robot_mjcf)
@@ -205,7 +205,6 @@ def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str, 
     world = root.find("worldbody")
     if world.find("geom[@name='floor']") is None:
         ET.SubElement(world, "geom", {"name": "floor", "type": "plane", "size": "0 0 1"})
-    eq = None
     for o in objs:
         body = ET.SubElement(world, "body", {"name": o["name"], "pos": _fmt(o["xyz"]), "quat": _fmt(_quat(o["rpy"]))})
         if o["shape"] == "mesh":
@@ -231,31 +230,7 @@ def build_scene_xml(robot_mjcf: str, objs: list[dict], tool: str, meshdir: str, 
         if o["friction"] is not None:
             g["friction"] = f"{o['friction']!r} 0.005 0.0001"
         ET.SubElement(body, "geom", g)
-        if not o["fixed"]:
-            if eq is None:  # not `find() or ...`: an Element with no children is falsy
-                eq = root.find("equality")
-                if eq is None:
-                    eq = ET.SubElement(root, "equality")
-            ET.SubElement(eq, "weld", {"name": f"glue_{o['name']}", "body1": tool, "body2": o["name"],
-                                       "active": "false"})
     return ET.tostring(root, encoding="unicode")
-
-
-def glue_on(m, d, e: int) -> None:
-    """Switch weld e on, holding body2 where it is now relative to body1 (no jump).
-    Mirrors glue_plugin.cpp: eq_data = [anchor(3), relpos(3), relquat(4), torquescale]."""
-    import mujoco
-    b1, b2 = m.eq_obj1id[e], m.eq_obj2id[e]
-    q1inv = np.zeros(4)
-    mujoco.mju_negQuat(q1inv, d.xquat[b1])
-    relpos = np.zeros(3)
-    mujoco.mju_rotVecQuat(relpos, d.xpos[b2] - d.xpos[b1], q1inv)
-    relquat = np.zeros(4)
-    mujoco.mju_mulQuat(relquat, q1inv, d.xquat[b2])
-    m.eq_data[e, 0:3] = 0.0
-    m.eq_data[e, 3:6] = relpos
-    m.eq_data[e, 6:10] = relquat
-    d.eq_active[e] = 1
 
 
 def check_start(xml: str, meshes, robot_bodies: set[str]) -> None:

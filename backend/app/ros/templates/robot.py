@@ -15,10 +15,8 @@ from moveit_msgs.msg import (AttachedCollisionObject, CollisionObject, Constrain
                              PlanningSceneComponents, PositionConstraint)
 from moveit_msgs.srv import ApplyPlanningScene, GetCartesianPath, GetPlanningScene, GetStateValidity
 from rclpy.action import ActionClient
-from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import Mesh, MeshTriangle, SolidPrimitive
-from std_msgs.msg import String
 
 import grip_logic
 import scene
@@ -27,6 +25,8 @@ import sim_errors
 ROBOT = "__ROBOT__"
 GROUP = "arm"
 ATTACH_REACH = 0.02   # m: attach() needs the tool frame this close to the object's surface
+NO_GRIPPER = ("This robot has no gripper, so it can't pick things up in the physics simulation. "
+              "Add one in Build (File > Add part from CAD, mount it, then mark its fingers in Connect > Gripper).")
 STILL = 0.01          # rad/s (m/s): under physics, the next motion waits until every joint is this slow
 _kin = importlib.import_module(f"{ROBOT}_kinematics")
 _home = importlib.import_module(f"{ROBOT}_kinematics._chain").home
@@ -166,10 +166,6 @@ class Robot:
         self._stamp = 0
         n.create_subscription(JointState, "/joint_states",
                               self._on_joints, 10)
-        self._glued = set()
-        self._glue = n.create_publisher(String, "/sim/glue", 10)
-        n.create_subscription(String, "/sim/glued", self._on_glued,
-                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self._holding = None          # (name, object pose in the tool frame when gripped)
         self._sim_poses = {}          # object -> 4x4 world pose, straight from MuJoCo
         if self.chain.gripper is not None:
@@ -228,19 +224,6 @@ class Robot:
         self._no_mid_run_objects(name)
         self._add(name, SolidPrimitive.CYLINDER, (height, radius), xyz, rpy)
 
-    def _on_glued(self, m):
-        self._glued = set(filter(None, m.data.split(",")))
-
-    def _glue_cmd(self, op, name):
-        """attach/detach in MuJoCo (cad_to_urdf_glue), waiting until the sim confirms it."""
-        done = (lambda: name in self._glued) if op == "attach" else (lambda: name not in self._glued)
-        self._glue.publish(String(data=f"{op} {name}"))
-        end = time.time() + 2.0
-        while not done() and time.time() < end:
-            rclpy.spin_once(_node(), timeout_sec=0.05)
-        if not done():
-            raise MotionError(f"The simulation did not confirm {op} of '{name}'")
-
     def _attached(self, name, op) -> AttachedCollisionObject:
         a = AttachedCollisionObject()
         a.link_name = self.chain.tip
@@ -271,6 +254,8 @@ class Robot:
     def attach(self, name):
         if self.chain.gripper is not None:
             return self.grip(name)
+        if _PHYSICS:   # nothing holds an object but real fingers: no glue
+            raise GripError(NO_GRIPPER)
         world, attached = self._scene()
         if name not in world:
             raise UnknownObject(f"'{name}' is not a free object in the scene "
@@ -279,20 +264,16 @@ class Robot:
         if gap > ATTACH_REACH:
             raise UnknownObject(f"'{name}' is {gap:.2f} m from the tool; move the tool to touch it first "
                                 f"(within {ATTACH_REACH * 100:.0f} cm, e.g. 5 mm above its top face)")
-        if _PHYSICS:
-            if name in _meta()["fixed"]:
-                raise UnknownObject(f"'{name}' is fixed (bolted down in the workcell) and can't be picked up")
-            self._glue_cmd("attach", name)
         self._diff(attached=[self._attached(name, CollisionObject.ADD)])
 
     def detach(self, name):
         if self.chain.gripper is not None:
             return self.release()
+        if _PHYSICS:
+            raise GripError(NO_GRIPPER)
         _, attached = self._scene()
         if name not in attached:
             raise UnknownObject(f"'{name}' is not attached to the tool (attached: {', '.join(attached) or 'none'})")
-        if _PHYSICS:
-            self._glue_cmd("detach", name)   # released: it falls under gravity from here
         self._diff(attached=[self._attached(name, CollisionObject.REMOVE)])
 
     def pose(self, name):
@@ -467,7 +448,7 @@ class Robot:
             now = dict(zip(jt.joint_names, sim_errors.planned_at(times, [list(p.positions) for p in jt.points], elapsed)))
             planned = [now.get(n, p) for n, p in zip(names, pos)]
             m = _meta()
-            carrying = {k: m["masses"][k] for k in sorted(self._glued) if k in m["masses"]}
+            carrying = {k: m["masses"][k] for k in ([self._holding[0]] if self._holding else []) if k in m["masses"]}
             hinge = {j.name: j.type != "prismatic" for j in self.chain.joints}
             raise MotionError(sim_errors.lag_message(names, planned, pos, m["efforts"], carrying, hinge))
 

@@ -30,7 +30,8 @@ r.tool_down()             # an orientation (rpy) with the tool pointing straight
 r.tool_facing(direction)  # an orientation (rpy) pointing the tool along a base-frame direction, e.g. (0, 0, 1) = up
 r.move_joints(q)          # joint values in joint order
 r.home()
-r.attach(name)            # the object rides on the tool link (pick); the tool must be within 2 cm of it
+r.attach(name)            # pick: needs a gripper under physics (raises GripError without one); without
+                          # physics the object rides on the tool link, the tool within 2 cm of it
 r.detach(name)            # the object is released and falls under gravity (place it low)
 r.pose(name)              # where an object really is now: (xyz, rpy)
 r.solutions(xyz, rpy)     # every exact joint solution, nearest first; [] = unreachable
@@ -92,6 +93,9 @@ r.home()
 ```"""
 
 EXAMPLE_HEAD = "\n\nExample (pick and place):"
+
+NO_GRIPPER_NOTE = ("This robot has no gripper. Under physics (the normal case) it can't pick anything up: attach() "
+                   "raises GripError. If a task needs a pick, stop and say a gripper must be added in Build first.")
 
 RULES = """## Rules
 - Write exactly one program per task: `programs/task_NNN_<name>.py`, with the next free number and a short snake_case name saying what it does (2-4 words), e.g. `programs/task_007_stack_two_boxes.py`. For a follow-up, write a new file starting from the previous one.
@@ -161,8 +165,9 @@ def brief(chain: Chain, robot: str, workcell_text: str | None = None) -> str:
     if chain.gripper is not None:
         lines += [""] + _gripper_lines(chain.gripper, chain.tip)
     rules = RULES.replace("__MAX_RUNS__", str(MAX_RUNS)).replace("__ROBOT__", robot)
-    # with a gripper, its own pick example replaces the glue one (attach 5 mm above the box)
-    api = API_DOC if chain.gripper is None else API_DOC.split(EXAMPLE_HEAD)[0] + "\n\n" + GRIPPER_DOC
+    # with a gripper, its own pick example replaces the attach one; without, attach only works off physics
+    api = (API_DOC + "\n\n" + NO_GRIPPER_NOTE if chain.gripper is None else
+           API_DOC.split(EXAMPLE_HEAD)[0] + "\n\n" + GRIPPER_DOC)
     return "\n".join(lines + ["", api, "", rules]) + "\n"
 
 
@@ -195,12 +200,6 @@ def _template(name: str, robot: str, source: str) -> str:
     return (text.replace("__ROBOT__", robot).replace("__SOURCE__", source)
             .replace("__MAX_RUNS__", str(MAX_RUNS)).replace("__TIMEOUT__", str(RUN_TIMEOUT_S))
             .replace("__CONTAINER__", SESSION_CONTAINER))
-
-
-def glue_files() -> dict[str, str]:
-    """The cad_to_urdf_glue MuJoCo plugin package (robot-independent)."""
-    d = HERE / "templates" / "glue"
-    return {p.relative_to(d).as_posix(): p.read_text(encoding="utf-8") for p in d.rglob("*") if p.is_file()}
 
 
 def program_files(chain: Chain, robot: str, source: str, workcell_text: str | None = None) -> dict[str, str]:

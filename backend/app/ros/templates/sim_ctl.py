@@ -34,14 +34,14 @@ def _with_paths(objs: list[dict], ws_src: Path, robot: str) -> list[dict]:
     return [{**o, "path": str(_fixture_dir(ws_src, robot) / o["file"])} if o["shape"] == "mesh" else o for o in objs]
 
 
-def plan(ws_src: Path, robot: str, tool: str, program_source):
+def plan(ws_src: Path, robot: str, program_source):
     """(scene.xml text, meta) for the workcell plus the program's SCENE; raises SceneError."""
     robot_mjcf = (ws_src / robot / "mjcf" / f"{robot}.xml").read_text()
     wc_path = ws_src / f"{robot}_tasks" / "workcell.yaml"
     workcell = scene.validate(scene.load_workcell(wc_path.read_text() if wc_path.exists() else None), "workcell.yaml")
     program = scene.validate(scene.read_scene(program_source), "SCENE") if program_source else []
     objs = _with_paths(scene.merge(workcell, program), ws_src, robot)
-    xml = scene.build_scene_xml(robot_mjcf, objs, tool, str(ws_src / robot / "meshes"), str(_fixture_dir(ws_src, robot)))
+    xml = scene.build_scene_xml(robot_mjcf, objs, str(ws_src / robot / "meshes"), str(_fixture_dir(ws_src, robot)))
     robot_bodies = {b.get("name") for b in ET.fromstring(robot_mjcf).iter("body")} | {"world"}
     scene.check_start(xml, None, robot_bodies)
     return xml, scene.meta(robot_mjcf, objs)
@@ -80,8 +80,7 @@ def _sim_alive() -> bool:
 def plugins_yaml() -> str:
     return yaml.safe_dump({"/**": {"ros__parameters": {"mujoco_plugins": {
         "free_joint_state_publisher": {"type": "mujoco_ros2_control_plugins/FreeJointStatePublisherPlugin",
-                                       "topic": "/sim/free_joint_states", "publish_rate": 20.0},
-        "glue": {"type": "cad_to_urdf_glue/GluePlugin"}}}}})
+                                       "topic": "/sim/free_joint_states", "publish_rate": 20.0}}}}})
 
 
 def controller_names(has_gripper: bool) -> list[str]:
@@ -93,9 +92,8 @@ def _has_gripper() -> bool:
     return __import__(f"{robot}_kinematics").load().chain.gripper is not None
 
 
-def _robot_and_tool():
-    robot = next(p.name[:-len("_moveit_config")] for p in WS_SRC.glob("*_moveit_config"))
-    return robot, __import__(f"{robot}_kinematics").load().chain.tip
+def _robot():
+    return next(p.name[:-len("_moveit_config")] for p in WS_SRC.glob("*_moveit_config"))
 
 
 def _ros(cmd: str, timeout: float) -> subprocess.CompletedProcess:
@@ -244,13 +242,13 @@ def prepare(program):
     """Before a run: the program's scene (program = path relative to <robot>_tasks/, or None).
     Under mock hardware only the object list is written (robot.py adds it to MoveIt)."""
     SIM.mkdir(parents=True, exist_ok=True)
-    robot, tool = _robot_and_tool()
+    robot = _robot()
     source = (WS_SRC / f"{robot}_tasks" / program).read_text() if program else None
     hw = SIM / "hardware"
     if not (hw.exists() and hw.read_text().strip() == "mujoco"):
         write_atomic(SIM / "meta.json", json.dumps(objects_meta(WS_SRC, robot, source)))
         return
-    xml, info = plan(WS_SRC, robot, tool, source)
+    xml, info = plan(WS_SRC, robot, source)
     write_atomic(SIM / "meta.json", json.dumps(info))
     try:
         if decide(xml, SIM / "scene.xml", _sim_alive()) == "reset":
@@ -274,7 +272,7 @@ def prepare(program):
 def hardware():
     """Before MoveIt starts: mujoco when the export has a MuJoCo model, else mock (as before)."""
     SIM.mkdir(parents=True, exist_ok=True)
-    robot, _ = _robot_and_tool()
+    robot = _robot()
     if (WS_SRC / robot / "mjcf" / f"{robot}.xml").exists():
         (SIM / "hardware").write_text("mujoco")
     else:

@@ -24,7 +24,7 @@ def test_plan_merges_workcell_and_program_scene(src):
     (src / "bot_tasks" / "workcell.yaml").write_text(
         "- {name: table, shape: box, size: [0.4, 0.4, 0.05], xyz: [2, 2, 0.025], fixed: true}\n")
     prog = "SCENE = [dict(name='part_a', shape='box', size=(0.05, 0.05, 0.05), xyz=(2, 2, 0.075))]\n"
-    xml, info = sim_ctl.plan(src, "bot", "hand", prog)
+    xml, info = sim_ctl.plan(src, "bot", prog)
     assert 'name="table"' in xml and 'name="part_a"' in xml and info["fixed"] == ["table"]
     assert [o["name"] for o in info["objects"]] == ["table", "part_a"]
 
@@ -37,26 +37,26 @@ def test_plan_brings_a_cad_fixture_in_as_its_pieces_and_tells_moveit_where_its_m
         trimesh.creation.box([0.6, 0.4, 0.3]).export(meshes / f, file_type="stl")
     (src / "bot_tasks" / "workcell.yaml").write_text(
         "- {name: table, shape: mesh, file: table.stl, pieces: 1, size: [0.6, 0.4, 0.3], xyz: [2, 2, 0.15], fixed: true}\n")
-    xml, info = sim_ctl.plan(src, "bot", "hand", None)
+    xml, info = sim_ctl.plan(src, "bot", None)
     assert 'type="mesh" mesh="wc_table_c0"' in xml
     assert info["objects"][0]["path"] == str(meshes / "table.stl") and info["fixed"] == ["table"]
     assert sim_ctl.objects_meta(src, "bot", None)["objects"][0]["path"] == str(meshes / "table.stl")
 
 
 def test_plan_without_workcell_or_scene_is_robot_only(src):
-    xml, info = sim_ctl.plan(src, "bot", "hand", None)
+    xml, info = sim_ctl.plan(src, "bot", None)
     assert "glue_" not in xml and info["masses"] == {} and info["objects"] == []
 
 
 def test_plan_errors_name_the_problem(src):
     with pytest.raises(sim_ctl.scene.SceneError, match="unknown field 'colour'"):
-        sim_ctl.plan(src, "bot", "hand", "SCENE = [dict(name='a', shape='box', size=(1,1,1), xyz=(5,5,1), colour=1)]\n")
+        sim_ctl.plan(src, "bot", "SCENE = [dict(name='a', shape='box', size=(1,1,1), xyz=(5,5,1), colour=1)]\n")
 
 
 def test_plan_catches_overlap_with_the_robot(src):
     prog = "SCENE = [dict(name='a', shape='box', size=(0.1, 0.1, 0.1), xyz=(0.7, 0, 0.2))]\n"  # on the hand's cube
     with pytest.raises(sim_ctl.scene.SceneError, match="'a' and 'hand' overlap"):
-        sim_ctl.plan(src, "bot", "hand", prog)
+        sim_ctl.plan(src, "bot", prog)
 
 
 def test_decide_resets_only_a_live_sim_on_the_identical_scene(tmp_path):  # review I-3
@@ -84,11 +84,11 @@ def test_meta_is_written_atomically(tmp_path):  # review I-4: scene_sync reads i
     assert p.read_text() == '{"a": 1}' and [f.name for f in tmp_path.iterdir()] == ["meta.json"]
 
 
-def test_plugins_file_loads_pose_publisher_and_glue():
+def test_plugins_file_loads_only_the_pose_publisher():
     cfg = yaml.safe_load(sim_ctl.plugins_yaml())["/**"]["ros__parameters"]["mujoco_plugins"]
     assert cfg["free_joint_state_publisher"]["type"] == "mujoco_ros2_control_plugins/FreeJointStatePublisherPlugin"
     assert cfg["free_joint_state_publisher"]["topic"] == "/sim/free_joint_states"
-    assert cfg["glue"]["type"] == "cad_to_urdf_glue/GluePlugin"
+    assert set(cfg) == {"free_joint_state_publisher"}
 
 
 def test_controllers_include_the_gripper_only_when_there_is_one():
