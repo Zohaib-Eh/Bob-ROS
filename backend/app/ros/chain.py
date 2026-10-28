@@ -112,8 +112,12 @@ def parse_chain(urdf_text: str) -> Chain:
                 "continuous and fixed joints are supported.")
     leaves = [j for j in joints if moving(j) and not moving_below(j.find("child").get("link"))]
     if len(leaves) > 1:
+        two_slides = (len(leaves) == 2 and all(j.get("type") == "prismatic" for j in leaves)
+                      and len({j.find("parent").get("link") for j in leaves}) == 1)
+        hint = (" These two sliding joints look like gripper fingers: tick both in Build > Connect > Gripper."
+                if two_slides else "")
         raise UnsupportedRobot(
-            f"Robot has {len(leaves)} moving branches; only single-arm robots are supported yet.")
+            f"Robot has {len(leaves)} moving branches; only single-arm robots are supported yet." + hint)
     if not leaves:
         raise UnsupportedRobot("Robot has no moving joints.")
 

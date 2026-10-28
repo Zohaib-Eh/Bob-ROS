@@ -65,8 +65,9 @@ def test_two_wheels_are_declined():
 
 def test_branching_is_declined():
     urdf = _robot(_rev("j1", "base", "a") + _rev("j2", "base", "b"))
-    with pytest.raises(UnsupportedRobot, match="Robot has 2 moving branches"):
+    with pytest.raises(UnsupportedRobot, match="Robot has 2 moving branches") as e:
         parse_chain(urdf)
+    assert "Gripper" not in str(e.value)   # two arms, not fingers: no gripper hint
 
 
 def test_planar_joint_is_declined():
@@ -133,7 +134,7 @@ def _slide(name, parent, child, mimic=None):
 
 def test_two_prismatic_leaves_without_mimic_are_still_branching():
     urdf = _robot(_rev("j1", "base", "a") + _slide("f1", "a", "b") + _slide("f2", "a", "c"), links=("base", "a", "b", "c"))
-    with pytest.raises(UnsupportedRobot, match="Robot has 2 moving branches"):
+    with pytest.raises(UnsupportedRobot, match="Robot has 2 moving branches.*tick both in Build > Connect > Gripper"):
         parse_chain(urdf)
 
 
