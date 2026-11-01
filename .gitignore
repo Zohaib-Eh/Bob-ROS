@@ -11,3 +11,7 @@ venv/
 env/
 /corpus/
 MUJOCO_LOG.TXT
+
+# Local Claude Code worktrees
+.claude/
+CLAUDE.md
